@@ -1,8 +1,12 @@
-
+use std::cell::RefCell;
+use std::rc::Rc;
 use std::collections::BinaryHeap;
 use crate::simMng::event::{Event, Tick};
+
+pub type EventQueueRef = Rc<RefCell<EventQueue>>;
+
 pub struct EventQueue{
-    now  : Tick,
+    pub now  : Tick,
     queue: BinaryHeap<Event>,
 }
 
