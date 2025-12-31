@@ -5,19 +5,20 @@ mod model;
 mod arch;
 
 use simMng::eventQueue::EventQueue;
+use simMng::simMng::SimMng;
 use model::base::cpu::cpu::Cpu;
 use crate::model::base::simObject::SimObject;
 
 fn main() {
 
-    let eq = Rc::new(RefCell::new(EventQueue::new()));
-    let mut cpu = Cpu::new("cpu1");
+    let mut simMng = SimMng::new();
 
 
-    cpu.init(Rc::clone(&eq));
-    eq.borrow_mut().run();
+    let mut cpu = Cpu::new("cpu");
+    cpu.init(&mut simMng.eq);
 
 
+    simMng.run();
     // let mut eq = EventQueue::new();
     //
     // eq.schedule(10, || {

@@ -3,10 +3,11 @@ pub type Tick = u64;
 
 
 use std::cmp::Ordering;
+use crate::simMng::eventQueue::EventQueue;
 
 pub struct Event{
     pub time: Tick,
-    pub callback: Box<dyn FnMut()>,
+    pub callback: Box<dyn FnMut(&mut EventQueue)>,
 }
 
 impl Ord for Event{

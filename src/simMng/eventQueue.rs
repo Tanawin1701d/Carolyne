@@ -2,6 +2,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 use std::collections::BinaryHeap;
 use crate::simMng::event::{Event, Tick};
+use crate::simMng::simMng::SimMng;
 
 pub type EventQueueRef = Rc<RefCell<EventQueue>>;
 
@@ -18,18 +19,35 @@ impl EventQueue{
 
     pub fn schedule<F>(&mut self, time: Tick, callback: F)
     where
-        F: FnMut() + 'static,
+        F: FnMut(&mut EventQueue) + 'static,
     {
         self.queue.push(Event {
             time,
             callback: Box::new(callback),
         });
     }
-
-    pub fn run(&mut self) {
-        while let Some(mut event) = self.queue.pop() {
-            self.now = event.time;
-            (event.callback)();
-        }
+    
+    pub fn is_empty(&self) -> bool{
+        self.queue.is_empty()
     }
+    
+    pub fn peek(&self) -> Option<&Event>{
+        self.queue.peek()
+    }
+    
+    pub fn pop(&mut self) -> Option<Event>{
+        self.queue.pop()
+    }
+    
+    pub fn last_tick(&self) -> Tick{
+        self.now
+    }
+    
+
+    // pub fn run(&mut self) {
+    //     while let Some(mut event) = self.queue.pop() {
+    //         self.now = event.time;
+    //         (event.callback)();
+    //     }
+    // }
 }

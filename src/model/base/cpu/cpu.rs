@@ -1,7 +1,7 @@
 
-use crate::simMng::eventQueue::{EventQueueRef};
+use crate::simMng::eventQueue::{EventQueue, EventQueueRef};
 use crate::model::base::simObject::SimObject;
-
+use crate::simMng::simMng::SimMng;
 
 pub struct Cpu {
     name: String,
@@ -23,12 +23,11 @@ impl SimObject for Cpu{
         &self.name
     }
 
-    fn init(&mut self, eq: EventQueueRef){
+    fn init(&mut self, eq: &mut EventQueue){
         let name = self. name.clone();
-        let eq_clone = eq.clone();
 
-        eq.borrow_mut().schedule(1, move || {
-            println!("{} tick @ {}", name, eq_clone.borrow().now);
+        eq.schedule(1, move |q| {
+            println!("{} tick @ {}", name, q.now);
         })
     }
 
