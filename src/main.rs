@@ -8,7 +8,7 @@ use std::cell::RefCell;
 
 use simMng::simMng::SimMng;
 use model::base::cpu::cpu::Cpu;
-use crate::model::base::simObject::SimObject;
+use crate::model::base::simObject::SimObjectRef;
 
 fn main() {
 
