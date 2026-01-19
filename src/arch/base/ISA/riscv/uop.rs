@@ -1,10 +1,11 @@
-use crate::arch::base::ISA::base::{OperandItf, UopItf};
+use crate::arch::base::ISA::base_opr::{OperandItf};
+use crate::arch::base::ISA::base_uop::{UopItf, NEXT_UOP_ID};
 use crate::arch::base::ISA::riscv::opr::{RiscvOperand, RISCV_MAX_NUM_SRC_OPRS, RISCV_MAX_NUM_DST_OPRS};
 
 pub struct RiscvUop {
+    id          : u64,
     src_oprs    : [RiscvOperand; RISCV_MAX_NUM_SRC_OPRS],
     dst_oprs    : [RiscvOperand; RISCV_MAX_NUM_DST_OPRS],
-    id          : u64,
     opcode      : u32,
     sub_opcode  : u32,
     imm         : u32,
@@ -13,9 +14,43 @@ pub struct RiscvUop {
 }
 
 impl RiscvUop {
+
+    pub fn new() -> Self{
+        let mut new_item = Self::default();
+        new_item.id = NEXT_UOP_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        new_item
+    }
+    pub fn default() -> Self{
+        RiscvUop {
+            id          : 0,
+            src_oprs    : [RiscvOperand::default(); RISCV_MAX_NUM_SRC_OPRS],
+            dst_oprs    : [RiscvOperand::default(); RISCV_MAX_NUM_DST_OPRS],
+            opcode      : 0,
+            sub_opcode  : 0,
+            imm         : 0,
+            src_opr_cnt : 0,
+            dest_opr_cnt: 0,
+        }
+    }
     
-    
-    
+    pub fn add_src_opr(&mut self, opr: RiscvOperand) {
+        assert!(self.src_opr_cnt < RISCV_MAX_NUM_SRC_OPRS,
+                "Source operand count overflow (RiscvUop)");
+        self.src_oprs[self.src_opr_cnt] = opr;
+        self.src_opr_cnt += 1;
+    }
+
+    pub fn add_dst_opr(&mut self, opr: RiscvOperand){
+        assert!(self.dest_opr_cnt < RISCV_MAX_NUM_DST_OPRS,
+                "Destination operand count overflow (RiscvUop)");
+        self.dst_oprs[self.dest_opr_cnt] = opr;
+        self.dest_opr_cnt += 1;
+    }
+
+    pub fn set_opcode    (&mut self, opcode: u32) { self.opcode = opcode; }
+    pub fn set_sub_opcode(&mut self, sub_opcode: u32) { self.sub_opcode = sub_opcode; }
+    pub fn set_imm       (&mut self, imm: u32) { self.imm = imm; }
+
     fn check_ready(oprs: &[RiscvOperand]) -> bool {
         for opr in oprs {
             if !opr.is_valid() {

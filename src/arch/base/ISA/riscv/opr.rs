@@ -1,14 +1,29 @@
 
-use crate::arch::base::ISA::base::{OperandItf, UopItf, MopItf, ISAItf};
+use crate::arch::base::ISA::base_opr::{OperandItf};
 
 
 
+#[derive(Copy, Clone)]
 pub struct RiscvOperand {
     valid          : bool,
     arch_reg_idx   : usize,
     arch_table_idx : usize,
     phy_reg_idx    : usize,
     phy_table_idx  : usize,
+}
+
+impl RiscvOperand {
+
+    pub fn new() -> Self { Self::default() }
+    pub fn default() -> Self {
+        Self {
+            valid: false,
+            arch_reg_idx: 0,
+            arch_table_idx: 0,
+            phy_reg_idx: 0,
+            phy_table_idx: 0,
+        }
+    }
 }
 
 impl OperandItf for RiscvOperand {
