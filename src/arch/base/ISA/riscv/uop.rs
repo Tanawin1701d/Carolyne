@@ -2,6 +2,9 @@ use crate::arch::base::ISA::base_opr::{OperandItf};
 use crate::arch::base::ISA::base_uop::{UopItf, NEXT_UOP_ID};
 use crate::arch::base::ISA::riscv::opr::{RiscvOperand, RISCV_MAX_NUM_SRC_OPRS, RISCV_MAX_NUM_DST_OPRS};
 
+pub const RISCV_MAX_NUM_UOPS: usize = 2;
+
+#[derive(Copy, Clone)]
 pub struct RiscvUop {
     id          : u64,
     src_oprs    : [RiscvOperand; RISCV_MAX_NUM_SRC_OPRS],
@@ -16,8 +19,7 @@ pub struct RiscvUop {
 impl RiscvUop {
 
     pub fn new() -> Self{
-        let mut new_item = Self::default();
-        new_item.id = NEXT_UOP_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let new_item = Self::default();
         new_item
     }
     pub fn default() -> Self{
@@ -51,9 +53,10 @@ impl RiscvUop {
     pub fn set_sub_opcode(&mut self, sub_opcode: u32) { self.sub_opcode = sub_opcode; }
     pub fn set_imm       (&mut self, imm: u32) { self.imm = imm; }
 
-    fn check_ready(oprs: &[RiscvOperand]) -> bool {
-        for opr in oprs {
-            if !opr.is_valid() {
+    fn check_ready(oprs: &[RiscvOperand], amt: usize) -> bool {
+        
+        for opr_idx in 0..amt {
+            if !oprs[opr_idx].is_valid() {
                 return false;
             }
         }
@@ -83,11 +86,14 @@ impl UopItf for RiscvUop {
     fn get_id(&self) -> u64 {
         self.id
     }
+    fn assign_id(&mut self) {
+        self.id = NEXT_UOP_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    }
 
     fn is_ready_to_execute(&self) -> bool {
         let mut ready: bool = true;
-        ready &= Self::check_ready(&self.src_oprs);
-        ready &= Self::check_ready(&self.dst_oprs);
+        ready &= Self::check_ready(&self.src_oprs, self.src_opr_cnt);
+        ready &= Self::check_ready(&self.dst_oprs, self.dest_opr_cnt);
         ready
     }
 

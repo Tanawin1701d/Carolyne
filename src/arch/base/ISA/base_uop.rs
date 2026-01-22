@@ -11,6 +11,7 @@ pub trait UopItf{
     fn get_amt_dst_opr(&self) -> usize;
     fn get_dst_opr_itf(&mut self, index: usize) -> &mut dyn OperandItf;
     fn get_id(&self) -> u64;
+    fn assign_id(&mut self);
     fn is_ready_to_execute(&self) -> bool;
     fn execute(&mut self);
 

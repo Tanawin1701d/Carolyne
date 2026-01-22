@@ -1,6 +1,8 @@
 
 use crate::arch::base::ISA::base_opr::{OperandItf};
 
+pub const RISCV_MAX_NUM_SRC_OPRS: usize = 2;
+pub const RISCV_MAX_NUM_DST_OPRS: usize = 1;
 
 
 #[derive(Copy, Clone)]
@@ -36,6 +38,4 @@ impl OperandItf for RiscvOperand {
 
 }
 
-pub const RISCV_MAX_NUM_SRC_OPRS: usize = 2;
-pub const RISCV_MAX_NUM_DST_OPRS: usize = 1;
 
