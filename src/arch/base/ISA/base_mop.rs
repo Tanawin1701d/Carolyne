@@ -4,7 +4,7 @@ use std::sync::atomic::{AtomicU64};
 pub static NEXT_MOP_ID: AtomicU64 = AtomicU64::new(0);
 
 pub trait MopItf{
-
+    fn get_pc(&self) -> u64;
     fn get_amt_uop(&self) -> usize;
     fn get_uop_itf(&mut self, index: usize) -> &mut dyn UopItf;
     fn get_id(&self) -> u64;

@@ -5,6 +5,7 @@ use crate::arch::base::ISA::riscv::uop::{RiscvUop, RISCV_MAX_NUM_UOPS};
 #[derive(Copy, Clone)]
 pub struct RiscvMop{
     id        : u64,
+    pc        : u64,
     uops      : [RiscvUop; RISCV_MAX_NUM_UOPS],
     uop_cnt   : usize
 }
@@ -17,6 +18,7 @@ impl RiscvMop{
     pub fn default() -> Self{
         RiscvMop {
             id        : 0,
+            pc        : 0,
             uops      : [RiscvUop::default(); RISCV_MAX_NUM_UOPS],
             uop_cnt   : 0,
         }
@@ -32,6 +34,8 @@ impl RiscvMop{
 
 
 impl MopItf for RiscvMop {
+
+    fn get_pc(&self) -> u64 { self.pc }
     fn get_amt_uop(&self) -> usize {
         self.uop_cnt
     }

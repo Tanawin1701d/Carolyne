@@ -3,5 +3,7 @@ use crate::arch::base::ISA::riscv::mop::RiscvMop;
 
 pub struct RiscvISA {
     inflight_mop_queue: VecDeque<RiscvMop>,
-    inflight_mop_q
+    next_fetch_pc     : u64,
+    next_commit_pc    : u64,
+
 }
