@@ -3,17 +3,17 @@
 //// T: Type of the registers (u32, u64, u128, f32)
 
 ////// lock the template type to be only 4 types
-pub trait InstrWidth: Default + Copy{}
-impl InstrWidth for u32{}
-impl InstrWidth for u64{}
-impl InstrWidth for u128{}
-impl InstrWidth for f32{}
+pub trait DataWidth: Default + Copy{}
+impl DataWidth for u32{}
+impl DataWidth for u64{}
+impl DataWidth for u128{}
+impl DataWidth for f32{}
 
 pub struct Arf<const N: usize, T>{
     regs: [T; N],
 }
 
-impl<const N: usize, T: InstrWidth> Arf<N, T>{
+impl<const N: usize, T: DataWidth> Arf<N, T>{
 
     pub fn new() -> Self{
         Self{

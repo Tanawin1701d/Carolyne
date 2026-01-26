@@ -1,6 +1,7 @@
 mod simMng;
 mod model;
 mod arch;
+mod util;
 
 use std::rc::Rc;
 use std::cell::RefCell;
