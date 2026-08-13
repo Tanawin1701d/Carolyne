@@ -90,9 +90,24 @@ contain description data only — no hardware code.
 Immediates are deliberately NOT an `Operand` target — the µop record carries
 `imm` as its own field (contract §2).
 
-Agreed next steps: the µop template type (kind + srcs + dests + imm), then
-the encoding table (binds FieldRefs), then an `IsaDescription` container;
-alternatively first Kathryn RAT/PRF elaboration from a `RegFile` in `uarch`.
+- **`ExecUnit(name, ops)`** — one execution-unit class; `ops` is a frozenset
+  of plain op-name strings (an enum would make custom-FU kinds second-class).
+  The §1.2 standard catalog ships as contract-owned constants
+  (`ALU/MULDIV/MEM/CONTROL/SYSTEM`, tuple `STANDARD_UNITS`); a custom FU is
+  just another `ExecUnit` an ISA declares. Latency/ports deferred until the
+  issue-port design consumes them.
+- **`Uop(unit, op, srcs, dests, imm)`** — one µop template. Decision: the
+  unit rides in the template explicitly (no global kind→unit registry);
+  `op` is validated against `unit.ops` at construction. Operand counts are
+  capped at the record shape (≤3 src, ≤2 dest, contract §2). `imm` is `int`
+  (cracker-baked constant, x86 push→ESP−4) or `FieldRef` (extracted field).
+  No first/last bound on the type — that comes from position in the cracker
+  sequence (later); mem/br sub-fields deferred until FU semantics land.
+
+Agreed next steps: the cracker sequence type (linear 1..N `Uop`s, stamps
+first/last, validates µtemp def-before-use), then the encoding table (binds
+FieldRefs), then an `IsaDescription` container; alternatively first Kathryn
+RAT/PRF elaboration from a `RegFile` in `uarch`.
 
 ## 5. Environment & workflow
 

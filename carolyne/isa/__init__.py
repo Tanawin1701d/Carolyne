@@ -7,5 +7,11 @@ from .reg_file import RegFile
 from .intermediate import Intermediate
 from .field_ref import FieldRef
 from .operand import Operand
+from .exec_unit import ExecUnit, ALU, MULDIV, MEM, CONTROL, SYSTEM, STANDARD_UNITS
+from .uop import Uop
 
-__all__ = ["RegFile", "Intermediate", "FieldRef", "Operand"]
+__all__ = [
+    "RegFile", "Intermediate", "FieldRef", "Operand",
+    "ExecUnit", "ALU", "MULDIV", "MEM", "CONTROL", "SYSTEM", "STANDARD_UNITS",
+    "Uop",
+]
