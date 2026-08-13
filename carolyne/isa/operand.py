@@ -1,0 +1,77 @@
+# Operand — one source or destination slot of a µop template. It links to
+# either an architectural register file or an Intermediate µtemp.
+#
+# The ISA layer is a TEMPLATE: an operand never holds a runtime value, only
+# the rule the generated hardware uses to find the register at runtime.
+# For a RegFile target the index is one of:
+#
+#   FieldRef("rd")  runtime-decoded — elaborates to wiring from the decoder's
+#                   field extractor into the rename port (the normal case)
+#   int             implicit fixed register — part of the ISA itself (x86
+#                   push/pop use ESP, flags writes hit the one flags reg);
+#                   elaborates to a constant wire into the same rename port
+#
+# An Intermediate target needs no index: the instance IS the value node.
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Optional, Union
+
+from .field_ref import FieldRef
+from .intermediate import Intermediate
+from .reg_file import RegFile
+
+IndexRule = Union[int, FieldRef]
+
+
+@dataclass(frozen=True)
+class Operand:
+    target : Union[RegFile, Intermediate]
+    index  : Optional[IndexRule] = None     # RegFile targets only
+
+    def __post_init__(self) -> None:
+        if isinstance(self.target, RegFile):
+            if self.index is None:
+                raise ValueError(
+                    f"Operand on reg file '{self.target.name}' needs an index rule "
+                    f"(FieldRef for a decoded register, int for an implicit one)")
+            if isinstance(self.index, int):
+                if not (0 <= self.index < self.target.amount):
+                    raise ValueError(
+                        f"Operand index {self.index} out of range 0..{self.target.amount - 1} "
+                        f"for reg file '{self.target.name}'")
+            elif not isinstance(self.index, FieldRef):
+                raise TypeError(
+                    f"Operand index must be an int or FieldRef, got {type(self.index).__name__}")
+        elif isinstance(self.target, Intermediate):
+            if self.index is not None:
+                raise ValueError("Operand on an Intermediate carries no index")
+        else:
+            raise TypeError(
+                f"Operand target must be a RegFile or Intermediate, got {type(self.target).__name__}")
+
+    @property
+    def is_arch(self) -> bool:
+        return isinstance(self.target, RegFile)
+
+    @property
+    def is_intermediate(self) -> bool:
+        return isinstance(self.target, Intermediate)
+
+    @property
+    def is_decoded(self) -> bool:
+        # Index arrives at runtime from an encoding field (vs implicit/µtemp).
+        return isinstance(self.index, FieldRef)
+
+    @property
+    def width(self) -> int:
+        # Both target kinds carry their own width — the operand just exposes it.
+        return self.target.width
+
+    @property
+    def is_const(self) -> bool:
+        # Statically-known hardwired reg (implicit int index onto a const reg).
+        # A decoded index can still hit x0 at runtime — that check is rename's
+        # job, elaborated from RegFile.const_regs; it cannot be known here.
+        return self.is_arch and isinstance(self.index, int) and self.target.is_const(self.index)

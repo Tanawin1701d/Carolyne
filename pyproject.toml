@@ -1,0 +1,18 @@
+[build-system]
+requires      = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name            = "carolyne"
+version         = "0.1.0"
+description     = "ISA-agnostic out-of-order CPU generator built on the Kathryn hardware-construction library"
+requires-python = ">=3.9"
+# `kathryn` is not on PyPI — install it from the sibling repo first:
+#   pip install -e ../Kathryn2        (or: cd ../Kathryn2 && maturin develop)
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest"]
+
+[tool.setuptools.packages.find]
+include = ["carolyne*"]

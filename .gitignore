@@ -1,0 +1,13 @@
+# python
+__pycache__/
+*.egg-info/
+.venv/
+build/
+dist/
+.pytest_cache/
+
+# generated hardware output
+generated/
+
+# ide
+.idea/
