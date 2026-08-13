@@ -14,6 +14,16 @@
 #   cannot carry.
 # - `imm` is deliberately NOT an Operand (§2): FieldRef = extracted encoding
 #   field; int = constant the cracker bakes in (x86 push adjusts ESP by -4).
+# - `op` is a SINGLE concrete string, so every Uop is fully resolved. An
+#   instruction family sharing one shape (RISC-V R-type) is a plain factory
+#   function in the per-ISA package; the encoding-table row — which exists
+#   per instruction anyway, for the bit pattern — passes the op in. A
+#   multi-op `ops` field was tried and reverted: the §2 record carries
+#   exactly one `kind`, so a family is an *unbound* template that forces a
+#   resolved/unresolved distinction on every consumer downstream, plus a
+#   marker for which µop varies in a multi-µop crack. Python-level
+#   construction is the templating mechanism here, same as an Intermediate
+#   instance being the link between µops.
 # - No first/last bound here — that is a property of a template's position
 #   in its cracker sequence, stamped by the sequence type (next step).
 # - mem (size/sign) and br (cond-kind) sub-fields are deferred until the FU

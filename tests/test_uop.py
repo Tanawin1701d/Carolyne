@@ -1,7 +1,8 @@
-# ExecUnit catalog + Uop template validation. The last two tests are the
-# usage documentation: a RISC-V addi and the x86 `add [mem], reg` 4-µop
-# crack from the contract doc, now as real Uop templates (the operand-only
-# version of the same shape lives in test_operand.py).
+# ExecUnit catalog + Uop template validation. The later tests are the usage
+# documentation: a RISC-V addi, the family-as-factory-function pattern, and
+# the x86 `add [mem], reg` 4-µop crack from the contract doc, now as real
+# Uop templates (the operand-only version of the same shape lives in
+# test_operand.py).
 
 import pytest
 
@@ -67,6 +68,25 @@ def test_riscv_addi_uses_extracted_imm():
                dests=(Operand(x, FieldRef("rd")),),
                imm=FieldRef("imm12"))
     assert addi.imm == FieldRef("imm12")
+
+
+def test_riscv_rtype_family_is_a_factory_function():
+    # `op` stays a single concrete string (see uop.py header). A family
+    # differing only in the operation is a plain function the per-ISA package
+    # defines; the encoding-table row passes the op, so every Uop reaching
+    # the elaborator is already resolved.
+    x = RegFile("x", 32, 32, const_regs={0: 0})
+
+    def rtype(op):
+        return (Uop(ALU, op,
+                    srcs=(Operand(x, FieldRef("rs1")), Operand(x, FieldRef("rs2"))),
+                    dests=(Operand(x, FieldRef("rd")),)),)
+
+    add, sub = rtype("ADD"), rtype("SUB")
+    assert (add[0].op, sub[0].op) == ("ADD", "SUB")
+    assert add[0].srcs == sub[0].srcs                # one shared shape
+    with pytest.raises(ValueError):
+        rtype("ADQ")                                 # typo still fails at construction
 
 
 def test_x86_push_bakes_constant_imm():
