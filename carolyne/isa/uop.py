@@ -40,7 +40,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Tuple, Union
+from typing import Optional, Tuple, Union
 
 from .mop import InstrFieldMatch
 from .op import Op
@@ -59,7 +59,7 @@ class Uop:
     op      : Op
     srcs    : Tuple[Operand, ...] = ()
     dests   : Tuple[Operand, ...] = ()
-    matcher : Tuple[InstrFieldMatch, ...] = ()
+    matcher : Optional[InstrFieldMatch] = None   # one match rule, not a set of them
 
     def __post_init__(self) -> None:
         if not isinstance(self.op, Op):

@@ -24,8 +24,8 @@ class InstrFieldMatch:
 
 @dataclass(frozen=True)
 class UopSeq:
-    uops : Tuple[Uop, ...] = ()
-    matcher: Tuple[InstrFieldMatch, ...] = ()
+    uops    : Tuple[Uop, ...] = ()
+    matcher : Optional[InstrFieldMatch] = None   # one match rule, not a set of them
 
     def __post_init__(self):
         if len(self.uops) == 0:
@@ -34,13 +34,13 @@ class UopSeq:
 
 @dataclass(frozen=True)
 class Mop:
-    matcher : Tuple[InstrFieldMatch, ...] = () # preliminary matcher
+    matcher : Optional[InstrFieldMatch] = None  # preliminary matcher, one rule
     uop_seq : Tuple[UopSeq, ...] = ()
 
     def __post_init__(self):
         if len(self.uop_seq) == 0:
             raise IndexError("Mop must have at least one uop")
 
-        if len(self.matcher) == 0:
-            raise IndexError("Mop must have at least one matcher")
+        if self.matcher is None:
+            raise IndexError("Mop must have a matcher")
 
