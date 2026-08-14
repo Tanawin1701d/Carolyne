@@ -115,8 +115,8 @@ Immediates are deliberately NOT an `Operand` target — the µop record carries
   configuration question answered by the unit set (`ExecUnit.ops` read the
   other way round), and an op two units both list is a routing choice, not
   an error. Cost of dropping `unit`: a bogus op survives construction — it is
-  `IsaDescription` that refuses it. Operand
-  counts are capped at the record shape (≤3 src, ≤2 dest, §2). `imm` is `int`
+  `IsaBase` that refuses it. Operand counts are capped at the record shape
+  (≤3 src, ≤2 dest, §2). `imm` is `int`
   (cracker-baked constant, x86 push→ESP−4) or `FieldRef` (extracted field).
   No first/last bound on the type — that comes from position in the cracker
   sequence (later); mem/br sub-fields deferred until FU semantics land. An
@@ -131,15 +131,70 @@ Immediates are deliberately NOT an `Operand` target — the µop record carries
   end-exclusive. Every `matcher` field (here, and on `Operand`/`Uop`) holds
   **one** `InstrFieldMatch` or `None`, not a tuple. `Mop` requires its
   matcher; the rest default to `None`.
-- **`IsaDescription(name, ops, exec_units, mops)`** (`isa.py`) — the whole
-  ISA, the object a generator is handed. Decision: `ops` is **declared, not
-  derived** from the mops or units — deriving would make a typo
-  self-consistent. It cross-checks at construction: every op a mop's µops
-  name must be declared, and every declared op must be executable by ≥1 unit;
-  the reverse (a unit listing ops this ISA never uses) is allowed so unit
-  definitions can be shared. Names unique per vocabulary. Lookups: `op(name)`,
-  `unit(name)`, `units_for(op)` (the kind→FU map read out), `used_ops()`.
-  Reg files / ilen / trap policy join it when those types exist.
+- **`IsaBase(name, reg_files, ops, exec_units, mops)`** (`isa.py`) — the
+  whole ISA, the object a generator is handed. Decision: `ops` and
+  `reg_files` are **declared, not derived** from the mops — deriving would
+  make a typo self-consistent. It cross-checks at construction: every op and
+  every reg file a mop's µops use must be declared, and every declared op
+  must be executable by ≥1 unit; the reverse (a unit listing unused ops, a
+  declared-but-unused reg file) is allowed, so unit definitions can be shared
+  and a class can be declared before a crack touches it. Reg files match by
+  **identity** — one PRF per instance, and `RegFile` holds a dict so it is
+  unhashable anyway. Names unique per vocabulary. Lookups: `op(name)`,
+  `unit(name)`, `reg_file(name)`, `units_for(op)` (the kind→FU map read out),
+  `used_ops()`, `used_reg_files()`. Named *Base* because a per-ISA package
+  may subclass it for fields this container doesn't model — subclasses must
+  stay `frozen=True` and stay **data**: overriding `op()`/`units_for()`/
+  `__post_init__` would put ISA-specific behavior on the elaborator's path.
+  `ilen` / trap policy join it when those types exist.
+
+**`carolyne/isa/riscv/`** is the first per-ISA package, deliberately a
+TEMPLATE skeleton: `regs.py` (`x_file()` → x0..x31, x0 via `const_regs`;
+**PC is deliberately not a register class** — it is front-end/ROB state, not
+something the engine renames through a PRF port, so a 1-entry `pc` file was
+drafted and deleted), `ops.py` (its own op vocabulary + `exec_units()` — no
+shipped catalog), `fields.py` (32-bit field positions, `ILEN_BYTES = 4`),
+`rv32i.py` (per-format shape builders, `mop_table(x)` → 11
+opcode-group `Mop`s, `rv32i()` → `IsaBase`). It builds
+and passes every container cross-check.
+The operand rules (`OPR_RD/OPR_RS1/OPR_RS2`, and the six `OPR_IMM_*`) are
+**module constants**, so the register class they target is one too:
+`regs.RegFile` — a shared instance built by `x_file()`, which `rv32i()` also
+declares. `IsaBase` matches reg files by identity, and sharing constants
+makes those the same object by construction. Accepted cost: two `rv32i()`
+builds share it; `x_file()` builds a fresh one for a caller who needs
+independence. An immediate operand targets `regs.ImmTarget` (an
+`Intermediate`, so it allocates no PRF) and carries **no index** — an index
+answers "which register of the class", which an immediate has not got, and
+`Operand.__post_init__` enforces that. Its `matcher` is the whole rule. The
+`OPR_IMM_*` constants are declared but **not yet used by any shape**: `Uop`
+has no `imm` field, so `rv32i.py` marks each site `# imm:` instead. Ops and field positions
+stay constants — value-equal, so sharing couples nothing.
+RV32I declares **no AGU**: its addressing is base+imm only, so the address is
+not a value a second µop consumes and loads/stores are single µops. (x86's
+read-modify-write feeds one address to both a LOAD and a STORE, so it will
+declare AGU — per-ISA vocabularies make that a local choice.) Consequence:
+RV32I uses no `Intermediate` at all. It also declares no `CALL_LINK`: the
+jump µop writes its own link register, so **every RV32I instruction is
+exactly one µop** and this ISA exercises none of the cracking machinery — no
+µtemps, no first/last bounds. x86mini is what will test that side; the µtemp
+mechanism is pinned meanwhile by the x86 shape in `test_uop.py`. Its KNOWN GAPS
+blocks are the real output — bringing up RV32I is what surfaced them, and
+each is contract-side, fixable without touching `uarch`:
+`InstrFieldMatch` carries no field *value* (so nothing is actually
+discriminable), one matcher per level cannot express add-vs-sub
+(funct3+funct7), `Uop` has no `imm`, and — since PC is not a reg file — auipc
+and the jal/jalr link value have **no way to name the instruction's own PC**
+as an input; the contract needs to say it is read from the µop record.
+
+One gap was closed by enumerating instead of extending the record: memory
+width/sign and branch condition are **distinct ops** (`LB/LH/LW/LBU/LHU`,
+`SB/SH/SW`, `BEQ/BNE/BLT/BGE/BLTU/BGEU`, tuples `LOADS`/`STORES`/`BRANCHES`),
+and `AUIPC` is its own op rather than an `ADD` missing its PC source. Generic
+`LOAD`/`STORE`/`BR_COND` kinds would have needed record sub-fields that only
+those kinds read — a second way of saying what `kind` already says. Cost: 32
+ops and more cases per FU; benefit: the §2 record stays as written and the
+decoder never fills a field it doesn't understand.
 
 A first `Layout`/`Mop` pair (encoding metadata + macro-op variants binding an
 encoding to a µop sequence) was written and then removed as sloppy, and the
@@ -149,8 +204,8 @@ contract (§1.3) is still open; don't restore the old one from git.
 Agreed next steps: give `UopSeq` the cracker-sequence duties it still lacks
 (stamp first/last, validate µtemp def-before-use), settle how a matcher binds
 `FieldRef`s to bit segments, and add the remaining §6 deliverables to
-`IsaDescription` (reg files, ilen, trap policy); alternatively first Kathryn
-RAT/PRF elaboration from a `RegFile` in `uarch`.
+`IsaBase` (ilen, trap policy); alternatively first Kathryn RAT/PRF
+elaboration from a `RegFile` in `uarch`.
 
 ## 5. Environment & workflow
 

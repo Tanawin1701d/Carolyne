@@ -10,9 +10,9 @@ from .op import Op
 from .exec_unit import ExecUnit
 from .uop import Uop
 from .mop import InstrFieldMatch, UopSeq, Mop
-from .isa import IsaDescription
+from .isa import IsaBase
 
 __all__ = [
     "RegFile", "Intermediate", "FieldRef", "Operand", "Op",
-    "ExecUnit", "Uop", "InstrFieldMatch", "UopSeq", "Mop", "IsaDescription",
+    "ExecUnit", "Uop", "InstrFieldMatch", "UopSeq", "Mop", "IsaBase",
 ]
