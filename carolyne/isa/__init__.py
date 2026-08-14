@@ -3,13 +3,13 @@
 # register classes, encoding table, length decoder, crackers, trap policy.
 # An ISA package never imports from carolyne.uarch.
 
-from .reg_file import RegFile
-from .intermediate import Intermediate
+from .reg import RegFile, Intermediate
 from .operand import FieldRef, Operand
 from .op import Op
 from .exec_unit import ExecUnit
 from .uop import Uop
-from .mop import InstrFieldMatch, UopSeq, Mop
+from .field_match import InstrFieldMatch
+from .mop import UopSeq, Mop
 from .isa import IsaBase
 
 __all__ = [

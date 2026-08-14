@@ -5,9 +5,9 @@
 #
 # Decisions (2026-08-14):
 # - Module CONSTANTS, shared by every shape. The register ones target
-#   regs.RegFile, the one class instance this description declares — IsaBase
+#   reg.RegFile, the one class instance this description declares — IsaBase
 #   matches reg files by identity, so an operand constant and the declared
-#   class must be the same object (regs.py header). An Operand is frozen and
+#   class must be the same object (reg.py header). An Operand is frozen and
 #   value-only, so sharing one across every instruction costs nothing and
 #   reads better than rebuilding an identical slot per shape.
 # - The FieldRef name of a register operand is taken FROM the field-match
@@ -21,7 +21,7 @@
 #   That is the FieldRef→bits binding the layer above defers to "when a
 #   cracker is bound to an encoding"; nothing checks it yet, but the
 #   description can already state it.
-# - An immediate operand targets `regs.ImmTarget` and carries NO index. An
+# - An immediate operand targets `reg.ImmTarget` and carries NO index. An
 #   index rule answers "which register of the class", which an immediate does
 #   not have — the layer above enforces exactly that (Operand on an
 #   Intermediate carries no index), so the six constants differ only by their
@@ -46,7 +46,7 @@ from __future__ import annotations
 
 from ..operand import FieldRef, Operand
 from . import field_match as FM
-from .regs import ImmTarget, RegFile
+from .reg import ImmTarget, RegFile
 
 # --- register operands ------------------------------------------------------
 OPR_RD  = Operand(RegFile, FieldRef(FM.RD.name),  matcher=FM.RD)    # dest, bits 11..7

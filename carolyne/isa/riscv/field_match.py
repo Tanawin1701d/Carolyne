@@ -23,7 +23,7 @@
 
 from __future__ import annotations
 
-from ..mop import InstrFieldMatch
+from ..field_match import InstrFieldMatch
 
 ILEN_BYTES = 4          # RV32I is fixed-length; no length decoder needed
 

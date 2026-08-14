@@ -5,11 +5,11 @@
 
 import pytest
 
-from carolyne.isa import FieldRef, InstrFieldMatch, IsaBase, Operand
-from carolyne.isa.intermediate import Intermediate
+from carolyne.isa import (
+    FieldRef, Intermediate, InstrFieldMatch, IsaBase, Operand)
 from carolyne.isa.riscv import (
     ILEN_BYTES, ImmTarget, OPR_IMMS, OPR_RD, OPR_RS1, OPR_RS2, RegFile,
-    field_match as FM, ops as O, rv32i, x_file,
+    field_match as FM, op as O, rv32i, x_file,
 )
 
 
@@ -40,7 +40,7 @@ def test_every_declared_op_is_actually_used_by_the_table():
 def test_memory_width_and_branch_condition_are_ops_not_sub_fields():
     # lb/lh/lw/lbu/lhu, sb/sh/sw and the six branches are distinct kinds, so
     # the µop record needs no size/sign field and no cond-kind field
-    # (ops.py header). auipc is likewise its own op, not an ADD.
+    # (op.py header). auipc is likewise its own op, not an ADD.
     isa = rv32i()
     assert {o.name for o in O.LOADS}    == {"LB", "LH", "LW", "LBU", "LHU"}
     assert {o.name for o in O.STORES}   == {"SB", "SH", "SW"}
@@ -69,10 +69,10 @@ def test_x0_is_declared_not_special_cased():
 def test_the_operand_rules_and_the_description_share_one_register_class():
     # IsaBase matches reg files by identity, and the operand rules are module
     # constants — so the class they target must BE the class the description
-    # declares. Sharing regs.RegFile is what makes that true by construction.
+    # declares. Sharing reg.RegFile is what makes that true by construction.
     isa = rv32i()
     assert isa.reg_file("x") is RegFile
-    assert all(operand.target is RegFile
+    assert all(operand.target in (RegFile, ImmTarget)
                for uop in _uops(isa) for operand in uop.srcs + uop.dests)
     # Accepted cost: two builds share the class. x_file() is the way out.
     assert rv32i().reg_file("x") is isa.reg_file("x")
@@ -99,24 +99,32 @@ def test_immediate_operands_carry_a_matcher_and_no_index():
         Operand(ImmTarget, FieldRef("imm"), matcher=FM.IMM_I)
 
 
-def test_immediate_operands_are_declared_but_not_yet_used():
-    # Uop has no `imm` field while the matcher design is in flight, and §2
-    # keeps immediates out of the src slots, so no shape carries one yet —
-    # rv32i.py marks each site `# imm:` with the constant that belongs there.
+def test_immediates_ride_in_srcs_for_now():
+    # Uop has no `imm` field while the matcher design is in flight, so the
+    # immediate occupies a source slot — which contract §2 says it should not
+    # (uop.py header). RV32I still fits the §2 cap: store and branch are the
+    # widest at rs1 + rs2 + imm.
     isa = rv32i()
-    assert not any(operand.target is ImmTarget
-                   for uop in _uops(isa) for operand in uop.srcs + uop.dests)
+    with_imm = [uop for uop in _uops(isa)
+                if any(o.target is ImmTarget for o in uop.srcs)]
+    assert len(with_imm) == 27                  # every instruction but the R-type
+    assert max(len(uop.srcs) for uop in _uops(isa)) == 3
+    sw, = _uops(isa, O.SW)
+    assert [o.matcher.name for o in sw.srcs] == ["rs1", "rs2", "imm_s"]
 
 
 def test_rv32i_needs_no_micro_temps():
     # No AGU µop, and nothing else produces an intra-instruction value, so
-    # RV32I uses no Intermediate at all (rv32i.py header). The µtemp
-    # mechanism stays in the contract for ISAs that need it — the x86
-    # read-modify-write shape in test_uop.py is what pins that.
+    # RV32I has no real µtemp. The only Intermediate in the table is
+    # ImmTarget, which stands for "this value comes from the encoding" — the
+    # two are indistinguishable by type today, which is why this test names
+    # the instance rather than the class. The µtemp mechanism proper is
+    # pinned by the x86 read-modify-write shape in test_uop.py.
     isa = rv32i()
-    targets = [operand.target
-               for uop in _uops(isa) for operand in uop.srcs + uop.dests]
-    assert targets and not any(isinstance(t, Intermediate) for t in targets)
+    temps = [operand.target
+             for uop in _uops(isa) for operand in uop.srcs + uop.dests
+             if isinstance(operand.target, Intermediate)]
+    assert temps and all(t is ImmTarget for t in temps)
 
 
 def test_load_and_store_are_single_uops():
@@ -124,10 +132,12 @@ def test_load_and_store_are_single_uops():
     # µop consumes, so no AGU µop and no address µtemp.
     isa = rv32i()
     lw, = _uops(isa, O.LW)
-    assert lw.srcs[0].index.name == "rs1" and lw.dests[0].index.name == "rd"
+    assert [o.matcher.name for o in lw.srcs] == ["rs1", "imm_i"]
+    assert lw.dests[0].index.name == "rd"
 
     sw, = _uops(isa, O.SW)
-    assert [o.index.name for o in sw.srcs] == ["rs1", "rs2"] and sw.dests == ()
+    assert [o.matcher.name for o in sw.srcs] == ["rs1", "rs2", "imm_s"]
+    assert sw.dests == ()
 
 
 def test_every_rv32i_instruction_is_one_uop():
@@ -145,7 +155,7 @@ def test_every_rv32i_instruction_is_one_uop():
 
 def test_pc_is_not_a_register_class():
     # The program counter is front-end / ROB state, not something the engine
-    # renames through a PRF port (regs.py header). Consequence: the
+    # renames through a PRF port (reg.py header). Consequence: the
     # pc-relative shapes are missing an input this layer cannot name.
     isa = rv32i()
     assert [r.name for r in isa.reg_files] == ["x"]
@@ -153,7 +163,8 @@ def test_pc_is_not_a_register_class():
         isa.reg_file("pc")
     auipc, = _uops(isa, O.AUIPC)
     beq,   = _uops(isa, O.BEQ)
-    assert auipc.srcs == ()                         # pc source absent, see GAPS
+    # auipc is rd = pc + imm, but only the imm is nameable — see GAPS.
+    assert [o.matcher.name for o in auipc.srcs] == ["imm_u"]
     assert beq.dests == ()                          # target is the control FU's
 
 

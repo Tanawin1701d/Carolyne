@@ -22,9 +22,8 @@ from __future__    import annotations
 from dataclasses   import dataclass
 from typing        import Optional, Union
 
-from .intermediate import Intermediate
-from .reg_file     import RegFile
-from .mop          import InstrFieldMatch
+from .reg          import Intermediate, RegFile
+from .field_match  import InstrFieldMatch
 
 
 # A *rule*, not a value: "the register index arrives at runtime from the

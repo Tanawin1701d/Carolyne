@@ -52,7 +52,7 @@ from typing import Tuple
 from .exec_unit import ExecUnit
 from .mop import Mop
 from .op import Op
-from .reg_file import RegFile
+from .reg import RegFile
 
 
 @dataclass(frozen=True)

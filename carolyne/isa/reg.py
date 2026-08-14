@@ -1,7 +1,15 @@
-# Register-file metadata — the elaboration-plane description of one
-# architectural register class (uop_contract.md §1.1). Pure data, no Kathryn
-# imports: the uarch reads these numbers to size its RAT, free list, physical
-# register file, and the src/dest index fields of the µop record.
+# The two things a µop operand can target: an architectural register class
+# (RegFile, uop_contract.md §1.1) and an intra-instruction value
+# (Intermediate, §1.4). Pure data, no Kathryn imports — the uarch reads these
+# numbers to size its RAT, free list, physical register file, and the
+# src/dest index fields of the µop record.
+#
+# Decision (2026-08-14): one module, because the two types are the same kind
+# of thing from the engine's side — both name a value the rename stage
+# allocates a physical register for. What separates them is lifetime
+# (architectural state vs dead at the instruction boundary) and identity
+# semantics, and those read best side by side; every consumer that imports
+# one imports the other.
 
 from __future__ import annotations
 
@@ -43,3 +51,26 @@ class RegFile:
 
     def is_const(self, idx: int) -> bool:
         return idx in self.const_regs
+
+
+# Intermediate value — a µtemp (§1.4): an intra-instruction value produced by
+# one µop of a cracked instruction and consumed by a later µop of the SAME
+# instruction. Dead at the instruction boundary by construction; renamed like
+# any register class at elaboration.
+#
+# Identity semantics (eq=False): every instance is a distinct value node. A
+# cracker links its µops by reusing the same instance — e.g. x86 `add [m], r`:
+#
+#     addr = Intermediate(32, "addr")      # AGU  -> addr
+#     old  = Intermediate(32, "old")       # LOAD addr -> old
+#     new  = Intermediate(32, "new")       # ADD  old, r -> new ; STORE new
+#
+# The elaborator assigns temp indices; the description layer never numbers them.
+@dataclass(frozen=True, eq=False)
+class Intermediate:
+    width : int             # bits
+    name  : str = ""        # optional debug label, no semantic meaning
+
+    def __post_init__(self) -> None:
+        if self.width < 1:
+            raise ValueError(f"Intermediate: width must be >= 1, got {self.width}")

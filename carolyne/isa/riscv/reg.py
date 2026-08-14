@@ -35,8 +35,7 @@
 
 from __future__ import annotations
 
-from ..intermediate import Intermediate
-from ..reg_file import RegFile as _RegFileType
+from ..reg import Intermediate, RegFile as _RegFileType
 
 X_LEN = 32          # register width; RV32I by definition
 

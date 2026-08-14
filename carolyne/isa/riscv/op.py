@@ -27,7 +27,7 @@
 #   that stays exactly as §2 describes it, plus a decoder that never has to
 #   fill a field it does not understand.
 # - AUIPC is its own op rather than an ADD with the PC as a source. Since PC
-#   is not a register class (regs.py), an `ADD` for auipc would be an add with
+#   is not a register class (reg.py), an `ADD` for auipc would be an add with
 #   one operand missing — an op whose meaning depends on knowing which
 #   instruction produced it. AUIPC names the pc-relative add outright.
 

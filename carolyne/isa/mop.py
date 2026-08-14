@@ -1,26 +1,19 @@
+# Mop / UopSeq — the encoding side: a macro-op is one encoding group, and each
+# UopSeq variant binds a finer field match to the µop sequence it decodes to.
+#
+# Decision (2026-08-14): InstrFieldMatch used to live here, which made this
+# module a dependency of Operand and Uop and forced the `Uop` annotation below
+# to be a stringified TYPE_CHECKING import to dodge the cycle. It now lives in
+# field_match.py and the dependency runs one way: field_match → operand/uop →
+# mop, so Uop is a plain import.
+
 from __future__ import annotations
 from dataclasses import dataclass
-from typing import Optional, Tuple, Union, TYPE_CHECKING
+from typing import Optional, Tuple
 
-if TYPE_CHECKING:                   # operand/uop import InstrFieldMatch from here,
-    from .uop import Uop            # so Uop may only be a (stringified) annotation
+from .field_match import InstrFieldMatch
+from .uop import Uop
 
-
-@dataclass(frozen=True)
-class InstrFieldMatch:
-    name      : str
-    match_idx : Tuple[Tuple[int, int], ...]  # ((start_match_idx, end_match_idx), ...), end exclusive
-
-    def __post_init__(self):
-        if len(self.match_idx) == 0:
-            raise IndexError("MopFieldMatch must has at least one (start_match_idx, end_match_idx)")
-        for seg in self.match_idx:  # a bare (start, end) pair trips this, not the unpack below
-            if not isinstance(seg, tuple) or len(seg) != 2:
-                raise IndexError(
-                    f"MopFieldMatch match_idx must be a tuple of (start_match_idx, end_match_idx), got {seg!r}")
-            start_match_idx, end_match_idx = seg
-            if start_match_idx >= end_match_idx:
-                raise IndexError("MopFieldMatch must has start_match_idx < end_match_idx")
 
 @dataclass(frozen=True)
 class UopSeq:

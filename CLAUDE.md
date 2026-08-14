@@ -63,14 +63,14 @@ contain description data only — no hardware code.
 
 ## 4. What exists so far (`carolyne/isa/`)
 
-- **`RegFile(name, width, amount, renamed=True, const_regs={})`** — metadata
+- **`RegFile(name, width, amount, renamed=True, const_regs={})`** (`reg.py`) — metadata
   for one architectural register class. Decision: store `amount` (count),
   *derive* `index_width` (`(amount-1).bit_length()`), so PRF sizing (count)
   and µop index fields (log2) can never disagree; a 1-reg file (x86 FLAGS)
   derives index width 0. `const_regs` maps arch idx → hardwired value
   (RISC-V `{0: 0}`); rename bypasses reads, discards writes. Flags/GPRs/
   anything are all "just register classes" to the engine.
-- **`Intermediate(width, name="")`** — µtemp: intra-instruction value between
+- **`Intermediate(width, name="")`** (`reg.py`, beside `RegFile`) — µtemp: intra-instruction value between
   µops of one cracked instruction, dead at the instruction boundary.
   Decision: `eq=False` — every instance is a distinct value node; a cracker
   links µops by *reusing the instance* (x86 `add [m],r`: AGU→addr,
@@ -125,8 +125,9 @@ Immediates are deliberately NOT an `Operand` target — the µop record carries
   record carries exactly one `kind`, so a family would be an unbound template
   every consumer must handle).
 
-- **`InstrFieldMatch(name, match_idx)` / `UopSeq(uops, matcher)` /
-  `Mop(matcher, uop_seq)`** (`mop.py`) — the encoding side, still
+- **`InstrFieldMatch(name, match_idx)`** (`field_match.py`) **/
+  `UopSeq(uops, matcher)` / `Mop(matcher, uop_seq)`** (`mop.py`) — the
+  encoding side, still
   preliminary: a match rule is a named set of `(start, end)` bit segments,
   end-exclusive. Every `matcher` field (here, and on `Operand`/`Uop`) holds
   **one** `InstrFieldMatch` or `None`, not a tuple. `Mop` requires its
@@ -149,21 +150,21 @@ Immediates are deliberately NOT an `Operand` target — the µop record carries
   `ilen` / trap policy join it when those types exist.
 
 **`carolyne/isa/riscv/`** is the first per-ISA package, deliberately a
-TEMPLATE skeleton: `regs.py` (`x_file()` → x0..x31, x0 via `const_regs`;
+TEMPLATE skeleton: `reg.py` (`x_file()` → x0..x31, x0 via `const_regs`;
 **PC is deliberately not a register class** — it is front-end/ROB state, not
 something the engine renames through a PRF port, so a 1-entry `pc` file was
-drafted and deleted), `ops.py` (its own op vocabulary + `exec_units()` — no
+drafted and deleted), `op.py` (its own op vocabulary + `exec_units()` — no
 shipped catalog), `fields.py` (32-bit field positions, `ILEN_BYTES = 4`),
 `rv32i.py` (per-format shape builders, `mop_table(x)` → 11
 opcode-group `Mop`s, `rv32i()` → `IsaBase`). It builds
 and passes every container cross-check.
 The operand rules (`OPR_RD/OPR_RS1/OPR_RS2`, and the six `OPR_IMM_*`) are
 **module constants**, so the register class they target is one too:
-`regs.RegFile` — a shared instance built by `x_file()`, which `rv32i()` also
+`reg.RegFile` — a shared instance built by `x_file()`, which `rv32i()` also
 declares. `IsaBase` matches reg files by identity, and sharing constants
 makes those the same object by construction. Accepted cost: two `rv32i()`
 builds share it; `x_file()` builds a fresh one for a caller who needs
-independence. An immediate operand targets `regs.ImmTarget` (an
+independence. An immediate operand targets `reg.ImmTarget` (an
 `Intermediate`, so it allocates no PRF) and carries **no index** — an index
 answers "which register of the class", which an immediate has not got, and
 `Operand.__post_init__` enforces that. Its `matcher` is the whole rule. The

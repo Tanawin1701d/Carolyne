@@ -42,7 +42,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Optional, Tuple, Union
 
-from .mop import InstrFieldMatch
+from .field_match import InstrFieldMatch
 from .op import Op
 from .operand import FieldRef, Operand
 

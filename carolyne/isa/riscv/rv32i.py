@@ -8,21 +8,20 @@
 #   instruction out of the group. That is why the group comments below name
 #   the funct values — they are the ISA's real content, even though the type
 #   cannot carry them yet (see GAPS).
-# - The per-format shape builders live HERE, as the `_rtype`/`_load`/... helpers
-#   below; each returns a finished UopSeq built from the operand slots of
-#   operand.py and the field positions of field_match.py. They were a separate
-#   cracks.py for as long as a format could produce several µops; now that RV32I
-#   cracks nothing (no AGU, and the jumps write their own link register), a
-#   whole module of one-line factories was indirection between the table and
-#   the shape it names. If a format ever cracks again, it grows back
-#   into its own file — and then a builder must mint its own Intermediate per
-#   call, never share one, because that instance IS the dataflow link between
-#   the µops of one instruction.
+# - This file is the ENCODING side only. Each variant names a µop template
+#   from uop.py; the dataflow of an instruction is written down there, once.
+#   The split follows the two questions a description answers: "which bits
+#   select this instruction" (here) and "what does it do" (uop.py).
+# - Every variant holds a one-µop sequence, because RV32I cracks nothing (no
+#   AGU, and the jumps write their own link register). If an instruction ever
+#   does crack, its UopSeq lists several templates — and any µtemp linking
+#   them must be minted per instruction, never shared, since that instance IS
+#   the dataflow link.
 # - `rv32i()` is a factory returning IsaBase, not an IsaBase subclass: RV32I
 #   has no description fields the container does not already model, and a
 #   factory keeps every ISA the same type downstream (isa.py header).
 # - The shapes name the shared operand constants of operand.py, which target
-#   the shared register class regs.RegFile — and `rv32i()` declares that same
+#   the shared register class reg.RegFile — and `rv32i()` declares that same
 #   instance.
 #   IsaBase matches reg files by identity, so those two must be one object;
 #   sharing module constants is what makes that true by construction (and is
@@ -35,10 +34,10 @@
 # 2. One matcher per level. add vs sub share funct3=000 and differ only in
 #    funct7, so an R-type variant genuinely needs TWO field matches; today a
 #    UopSeq carries one.
-# 3. No immediates on Uop — the field was removed while the matcher design is
-#    in flight, so every shape is missing one: addi's imm12, the load/store
-#    displacement, the branch/jal targets, lui's constant. Marked `# imm:`.
-# 4. PC is not a register class (regs.py), so the pc-relative shapes — auipc,
+# 3. No `imm` field on Uop, so the immediates ride in `srcs` as operands
+#    (uop.py header) — which contract §2 says they should not. One of the two
+#    has to give before the µop record is generated.
+# 4. PC is not a register class (reg.py), so the pc-relative shapes — auipc,
 #    and the link value the jumps write — have an input this layer cannot
 #    name: the instruction's own PC. Written with that source ABSENT, marked
 #    `# pc:`. The contract needs to say a µop reads its instruction PC from
@@ -48,7 +47,7 @@
 #    here: control-flow effect is the FU's business, not register dataflow.
 # Only the register dataflow and the unit routing are complete and checkable.
 # Two former gaps are closed rather than open: mem width/sign and branch
-# condition are distinct ops rather than record sub-fields (ops.py header),
+# condition are distinct ops rather than record sub-fields (op.py header),
 # and first/last bounds are moot while every instruction is one µop — both
 # return with x86mini.
 
@@ -57,146 +56,85 @@ from __future__ import annotations
 from typing import Tuple
 
 from ..isa import IsaBase
-from ..mop import InstrFieldMatch, Mop, UopSeq
-from ..uop import Uop
+from ..mop import Mop, UopSeq
 from . import field_match as FM
-from . import ops as O
-from .operand import OPR_RD, OPR_RS1, OPR_RS2
-from .ops import OPS, exec_units
-from .regs import RegFile
-
-
-# --- one shape builder per instruction format, each a single µop ------------
-# The `# imm:` comments name the immediate operand each shape will carry once
-# Uop has an `imm` field again (operand.py); the register dataflow is done.
-
-def _rtype(op, matcher: InstrFieldMatch) -> UopSeq:
-    """add/sub/and/or/xor/sll/srl/sra/slt/sltu — rd = rs1 op rs2."""
-    return UopSeq(uops=(Uop(op, srcs=(OPR_RS1, OPR_RS2), dests=(OPR_RD,)),), matcher=matcher)
-
-
-def _itype(op, matcher: InstrFieldMatch) -> UopSeq:
-    """addi/andi/ori/xori/slti/sltiu/slli/srli/srai — rd = rs1 op imm."""
-    return UopSeq(uops=(Uop(op, srcs=(OPR_RS1,), dests=(OPR_RD,)),),     # imm: OPR_IMM_I / OPR_IMM_SHAMT
-                  matcher=matcher)
-
-
-def _load(op, matcher: InstrFieldMatch) -> UopSeq:
-    """lb/lh/lw/lbu/lhu — rd = mem[rs1 + imm]; width and sign ride in `op`."""
-    return UopSeq(uops=(Uop(op, srcs=(OPR_RS1,), dests=(OPR_RD,)),),     # imm: OPR_IMM_I
-                  matcher=matcher)
-
-
-def _store(op, matcher: InstrFieldMatch) -> UopSeq:
-    """sb/sh/sw — mem[rs1 + imm] = rs2."""
-    return UopSeq(uops=(Uop(op, srcs=(OPR_RS1, OPR_RS2)),),              # imm: OPR_IMM_S
-                  matcher=matcher)
-
-
-def _branch(op, matcher: InstrFieldMatch) -> UopSeq:
-    """beq/bne/blt/bge/bltu/bgeu — the test is the op; no destination."""
-    return UopSeq(uops=(Uop(op, srcs=(OPR_RS1, OPR_RS2)),),              # imm: OPR_IMM_B
-                  matcher=matcher)                               # pc: target is relative
-
-
-def _lui(matcher: InstrFieldMatch) -> UopSeq:
-    """lui — rd = imm << 12, no register source."""
-    return UopSeq(uops=(Uop(O.MOV_IMM, dests=(OPR_RD,)),),           # imm: OPR_IMM_U
-                  matcher=matcher)
-
-
-def _auipc(matcher: InstrFieldMatch) -> UopSeq:
-    """auipc — rd = pc + (imm << 12)."""
-    return UopSeq(uops=(Uop(O.AUIPC, dests=(OPR_RD,)),),             # imm: OPR_IMM_U
-                  matcher=matcher)                               # pc: the missing source
-
-
-def _jal(matcher: InstrFieldMatch) -> UopSeq:
-    """jal — rd = pc + ilen and redirect to pc + imm, in one µop."""
-    return UopSeq(uops=(Uop(O.JMP, dests=(OPR_RD,)),),               # imm: OPR_IMM_J
-                  matcher=matcher)                               # pc: link and target
-
-
-def _jalr(matcher: InstrFieldMatch) -> UopSeq:
-    """jalr — rd = pc + ilen and redirect to (rs1 + imm) & ~1, in one µop."""
-    return UopSeq(uops=(Uop(O.JMP_INDIRECT, srcs=(OPR_RS1,), dests=(OPR_RD,)),),  # imm: OPR_IMM_I
-                  matcher=matcher)                                        # pc: link value
-
-
-def _system(op, matcher: InstrFieldMatch) -> UopSeq:
-    """fence / ecall / ebreak — ordering and traps, no register dataflow."""
-    return UopSeq(uops=(Uop(op),), matcher=matcher)
+from . import uop as U
+from .op import OPS, exec_units
+from .reg import RegFile
 
 
 # --- the table --------------------------------------------------------------
 
 def mop_table() -> Tuple[Mop, ...]:
-    """Every RV32I instruction group, as Mops over the shared operand rules."""
+    """Every RV32I instruction group, as Mops over the µop templates of uop.py."""
 
     # opcode 0110011 — OP: rd = rs1 op rs2
     op_group = Mop(matcher=FM.OPCODE, uop_seq=(
-        _rtype(O.ADD,  FM.FUNCT7),    # funct3 000, funct7 0000000
-        _rtype(O.SUB,  FM.FUNCT7),    # funct3 000, funct7 0100000
-        _rtype(O.SLL,  FM.FUNCT3),    # funct3 001
-        _rtype(O.SLT,  FM.FUNCT3),    # funct3 010
-        _rtype(O.SLTU, FM.FUNCT3),    # funct3 011
-        _rtype(O.XOR,  FM.FUNCT3),    # funct3 100
-        _rtype(O.SRL,  FM.FUNCT7),    # funct3 101, funct7 0000000
-        _rtype(O.SRA,  FM.FUNCT7),    # funct3 101, funct7 0100000
-        _rtype(O.OR,   FM.FUNCT3),    # funct3 110
-        _rtype(O.AND,  FM.FUNCT3),    # funct3 111
+        UopSeq(uops=(U.UOP_ADD,),  matcher=FM.FUNCT7),   # funct3 000, funct7 0000000
+        UopSeq(uops=(U.UOP_SUB,),  matcher=FM.FUNCT7),   # funct3 000, funct7 0100000
+        UopSeq(uops=(U.UOP_SLL,),  matcher=FM.FUNCT3),   # funct3 001
+        UopSeq(uops=(U.UOP_SLT,),  matcher=FM.FUNCT3),   # funct3 010
+        UopSeq(uops=(U.UOP_SLTU,), matcher=FM.FUNCT3),   # funct3 011
+        UopSeq(uops=(U.UOP_XOR,),  matcher=FM.FUNCT3),   # funct3 100
+        UopSeq(uops=(U.UOP_SRL,),  matcher=FM.FUNCT7),   # funct3 101, funct7 0000000
+        UopSeq(uops=(U.UOP_SRA,),  matcher=FM.FUNCT7),   # funct3 101, funct7 0100000
+        UopSeq(uops=(U.UOP_OR,),   matcher=FM.FUNCT3),   # funct3 110
+        UopSeq(uops=(U.UOP_AND,),  matcher=FM.FUNCT3),   # funct3 111
     ))
 
     # opcode 0010011 — OP-IMM: rd = rs1 op imm
     op_imm_group = Mop(matcher=FM.OPCODE, uop_seq=(
-        _itype(O.ADD,  FM.FUNCT3),    # addi,  funct3 000
-        _itype(O.SLT,  FM.FUNCT3),    # slti,  funct3 010
-        _itype(O.SLTU, FM.FUNCT3),    # sltiu, funct3 011
-        _itype(O.XOR,  FM.FUNCT3),    # xori,  funct3 100
-        _itype(O.OR,   FM.FUNCT3),    # ori,   funct3 110
-        _itype(O.AND,  FM.FUNCT3),    # andi,  funct3 111
-        _itype(O.SLL,  FM.SHAMT),     # slli,  funct3 001
-        _itype(O.SRL,  FM.SHAMT),     # srli,  funct3 101, funct7 0000000
-        _itype(O.SRA,  FM.SHAMT),     # srai,  funct3 101, funct7 0100000
+        UopSeq(uops=(U.UOP_ADDI,),  matcher=FM.FUNCT3),  # funct3 000
+        UopSeq(uops=(U.UOP_SLTI,),  matcher=FM.FUNCT3),  # funct3 010
+        UopSeq(uops=(U.UOP_SLTIU,), matcher=FM.FUNCT3),  # funct3 011
+        UopSeq(uops=(U.UOP_XORI,),  matcher=FM.FUNCT3),  # funct3 100
+        UopSeq(uops=(U.UOP_ORI,),   matcher=FM.FUNCT3),  # funct3 110
+        UopSeq(uops=(U.UOP_ANDI,),  matcher=FM.FUNCT3),  # funct3 111
+        UopSeq(uops=(U.UOP_SLLI,),  matcher=FM.FUNCT7),  # funct3 001, funct7 0000000
+        UopSeq(uops=(U.UOP_SRLI,),  matcher=FM.FUNCT7),  # funct3 101, funct7 0000000
+        UopSeq(uops=(U.UOP_SRAI,),  matcher=FM.FUNCT7),  # funct3 101, funct7 0100000
     ))
 
     # opcode 0000011 — LOAD: rd = mem[rs1 + imm]; width/sign is the op
     load_group = Mop(matcher=FM.OPCODE, uop_seq=(
-        _load(O.LB,  FM.FUNCT3),      # funct3 000
-        _load(O.LH,  FM.FUNCT3),      # funct3 001
-        _load(O.LW,  FM.FUNCT3),      # funct3 010
-        _load(O.LBU, FM.FUNCT3),      # funct3 100
-        _load(O.LHU, FM.FUNCT3),      # funct3 101
+        UopSeq(uops=(U.UOP_LB,),  matcher=FM.FUNCT3),    # funct3 000
+        UopSeq(uops=(U.UOP_LH,),  matcher=FM.FUNCT3),    # funct3 001
+        UopSeq(uops=(U.UOP_LW,),  matcher=FM.FUNCT3),    # funct3 010
+        UopSeq(uops=(U.UOP_LBU,), matcher=FM.FUNCT3),    # funct3 100
+        UopSeq(uops=(U.UOP_LHU,), matcher=FM.FUNCT3),    # funct3 101
     ))
 
     # opcode 0100011 — STORE: mem[rs1 + imm] = rs2; width is the op
     store_group = Mop(matcher=FM.OPCODE, uop_seq=(
-        _store(O.SB, FM.FUNCT3),      # funct3 000
-        _store(O.SH, FM.FUNCT3),      # funct3 001
-        _store(O.SW, FM.FUNCT3),      # funct3 010
+        UopSeq(uops=(U.UOP_SB,), matcher=FM.FUNCT3),     # funct3 000
+        UopSeq(uops=(U.UOP_SH,), matcher=FM.FUNCT3),     # funct3 001
+        UopSeq(uops=(U.UOP_SW,), matcher=FM.FUNCT3),     # funct3 010
     ))
 
     # opcode 1100011 — BRANCH; the condition is the op
     branch_group = Mop(matcher=FM.OPCODE, uop_seq=(
-        _branch(O.BEQ,  FM.FUNCT3),   # funct3 000
-        _branch(O.BNE,  FM.FUNCT3),   # funct3 001
-        _branch(O.BLT,  FM.FUNCT3),   # funct3 100
-        _branch(O.BGE,  FM.FUNCT3),   # funct3 101
-        _branch(O.BLTU, FM.FUNCT3),   # funct3 110
-        _branch(O.BGEU, FM.FUNCT3),   # funct3 111
+        UopSeq(uops=(U.UOP_BEQ,),  matcher=FM.FUNCT3),   # funct3 000
+        UopSeq(uops=(U.UOP_BNE,),  matcher=FM.FUNCT3),   # funct3 001
+        UopSeq(uops=(U.UOP_BLT,),  matcher=FM.FUNCT3),   # funct3 100
+        UopSeq(uops=(U.UOP_BGE,),  matcher=FM.FUNCT3),   # funct3 101
+        UopSeq(uops=(U.UOP_BLTU,), matcher=FM.FUNCT3),   # funct3 110
+        UopSeq(uops=(U.UOP_BGEU,), matcher=FM.FUNCT3),   # funct3 111
     ))
 
     # opcodes 0110111 / 0010111 — LUI / AUIPC
-    lui   = Mop(matcher=FM.OPCODE, uop_seq=(_lui(FM.IMM_U),))
-    auipc = Mop(matcher=FM.OPCODE, uop_seq=(_auipc(FM.IMM_U),))
+    lui   = Mop(matcher=FM.OPCODE, uop_seq=(UopSeq(uops=(U.UOP_LUI,),   matcher=FM.IMM_U),))
+    auipc = Mop(matcher=FM.OPCODE, uop_seq=(UopSeq(uops=(U.UOP_AUIPC,), matcher=FM.IMM_U),))
 
     # opcodes 1101111 / 1100111 — JAL / JALR
-    jal  = Mop(matcher=FM.OPCODE, uop_seq=(_jal(FM.IMM_J),))
-    jalr = Mop(matcher=FM.OPCODE, uop_seq=(_jalr(FM.FUNCT3),))
+    jal  = Mop(matcher=FM.OPCODE, uop_seq=(UopSeq(uops=(U.UOP_JAL,),  matcher=FM.IMM_J),))
+    jalr = Mop(matcher=FM.OPCODE, uop_seq=(UopSeq(uops=(U.UOP_JALR,), matcher=FM.FUNCT3),))
 
     # opcodes 0001111 / 1110011 — MISC-MEM (fence) / SYSTEM (ecall, ebreak)
-    misc_mem = Mop(matcher=FM.OPCODE, uop_seq=(_system(O.FENCE, FM.FUNCT3),))
-    system   = Mop(matcher=FM.OPCODE, uop_seq=(_system(O.TRAP,  FM.IMM_I),))
+    misc_mem = Mop(matcher=FM.OPCODE, uop_seq=(UopSeq(uops=(U.UOP_FENCE,), matcher=FM.FUNCT3),))
+    system   = Mop(matcher=FM.OPCODE, uop_seq=(
+        UopSeq(uops=(U.UOP_ECALL,),  matcher=FM.IMM_I),  # imm 000000000000
+        UopSeq(uops=(U.UOP_EBREAK,), matcher=FM.IMM_I),  # imm 000000000001
+    ))
 
     return (op_group, op_imm_group, load_group, store_group, branch_group,
             lui, auipc, jal, jalr, misc_mem, system)
