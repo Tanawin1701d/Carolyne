@@ -35,8 +35,8 @@ from dataclasses import dataclass
 from typing import Optional, Tuple, Union
 
 from .exec_unit import ExecUnit
-from .field_ref import FieldRef
-from .operand import Operand
+from .mop import InstrFieldMatch
+from .operand import FieldRef, Operand
 
 ImmRule = Union[int, FieldRef]
 
@@ -47,11 +47,13 @@ MAX_DESTS = 2       # 2nd dest: flags write (x86), link reg
 
 @dataclass(frozen=True)
 class Uop:
-    unit  : ExecUnit
-    op    : str
-    srcs  : Tuple[Operand, ...] = ()
-    dests : Tuple[Operand, ...] = ()
-    imm   : Optional[ImmRule]   = None
+
+    unit    : ExecUnit
+    op      : str
+    srcs    : Tuple[Operand, ...] = ()
+    dests   : Tuple[Operand, ...] = ()
+    imm     : Optional[ImmRule]   = None
+    matcher: Tuple[InstrFieldMatch, ...] = ()
 
     def __post_init__(self) -> None:
         if not isinstance(self.unit, ExecUnit):

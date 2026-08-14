@@ -101,44 +101,22 @@ Immediates are deliberately NOT an `Operand` target — the µop record carries
   `op` is validated against `unit.ops` at construction. Operand counts are
   capped at the record shape (≤3 src, ≤2 dest, contract §2). `imm` is `int`
   (cracker-baked constant, x86 push→ESP−4) or `FieldRef` (extracted field).
-  No first/last bound on the type — that comes from position in the sequence
-  and is derived by `Variant.bounds`; mem/br sub-fields deferred until FU
-  semantics land. An instruction family sharing one shape is a factory
-  function in the per-ISA package, not a multi-op field (a multi-op `ops`
-  was tried and reverted: the record carries exactly one `kind`, so a family
-  would be an unbound template every consumer must handle).
-- **`Field(name, segments, signed=False)` / `Layout(width, match, mask,
-  fields)`** — encoding metadata (contract §1.3). `segments` is a tuple of
-  `(hi, lo)` concatenated **MSB-first** (a bare pair is accepted for the
-  common one-piece field) because RISC-V B/J immediates are scattered and an
-  ISA that could not express that would push the fix-up into `uarch`.
-  `signed` rides on the field: sign-extension is part of the extraction rule.
-  `Layout` rejects two self-contradictions — `match` bits outside `mask`, and
-  a field overlapping `mask` (already pinned by the opcode, so it would
-  decode to a constant). Fields *may* overlap each other (x86 wants the whole
-  ModR/M byte and its sub-fields). `fields` accepts a `{name: (hi, lo)}` dict.
-- **`Mop(name, layout, variants)` / `Variant(when, uops)`** — the macro-op:
-  where §1.3 meets §1.4, and **a list of lists**. Outer = variants,
-  alternatives under ONE shared layout picked by discriminating field values
-  (`when` extends the layout's match/mask); RISC-V R-type declares
-  rd/rs1/rs2 once and lets funct3/funct7 select ADD/SUB/AND. Inner =
-  `uops`, the linear 1..N µop sequence of a single instruction, fired in
-  order (x86 `add [m],r` → AGU/LOAD/ADD/STORE). Validation is the point of
-  this layer: FieldRef existence is checked here (the check `field_ref.py`
-  deferred — a FieldRef is only a name until a cracker meets an encoding),
-  discriminator fields must exist and fit, variants must be pairwise
-  distinguishable (agreeing on every shared key = ambiguous decode), and
-  µtemp discipline is enforced per sequence (read-before-write,
-  written-twice, written-never-read all raise). `Variant.bounds` derives the
-  §2 `bound` bits from position; `Mop.select`/`extract` are elaboration-time
-  reference decode for tests only — the hardware form is the generated
-  decoder tree.
+  No first/last bound on the type — that comes from position in the cracker
+  sequence (later); mem/br sub-fields deferred until FU semantics land. An
+  instruction family sharing one shape is a factory function in the per-ISA
+  package, not a multi-op field (a multi-op `ops` was tried and reverted: the
+  record carries exactly one `kind`, so a family would be an unbound template
+  every consumer must handle).
 
-Agreed next steps: an `IsaDescription` container holding the five §6
-deliverables (reg classes, Mop table, `ilen`, trap sequences, optional custom
-FUs), plus cross-Mop checks (no two Mops matching one word, max imm width for
-the record); alternatively first Kathryn RAT/PRF elaboration from a `RegFile`
-in `uarch`.
+A first `Layout`/`Mop` pair (encoding metadata + macro-op variants binding an
+encoding to a µop sequence) was written and then removed as sloppy — nothing
+downstream depended on it, so the encoding side of the contract (§1.3) is
+open again and should be redesigned from scratch, not restored from git.
+
+Agreed next steps: the cracker sequence type (linear 1..N `Uop`s, stamps
+first/last, validates µtemp def-before-use), then the encoding table (binds
+FieldRefs), then an `IsaDescription` container; alternatively first Kathryn
+RAT/PRF elaboration from a `RegFile` in `uarch`.
 
 ## 5. Environment & workflow
 

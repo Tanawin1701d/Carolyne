@@ -5,15 +5,12 @@
 
 from .reg_file import RegFile
 from .intermediate import Intermediate
-from .field_ref import FieldRef
-from .operand import Operand
+from .operand import FieldRef, Operand
 from .exec_unit import ExecUnit, ALU, MULDIV, MEM, CONTROL, SYSTEM, STANDARD_UNITS
 from .uop import Uop
-from .layout import Field, Layout
-from .mop import Mop, Variant
 
 __all__ = [
     "RegFile", "Intermediate", "FieldRef", "Operand",
     "ExecUnit", "ALU", "MULDIV", "MEM", "CONTROL", "SYSTEM", "STANDARD_UNITS",
-    "Uop", "Field", "Layout", "Mop", "Variant",
+    "Uop",
 ]
