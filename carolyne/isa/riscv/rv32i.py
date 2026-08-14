@@ -8,10 +8,11 @@
 #   instruction out of the group. That is why the group comments below name
 #   the funct values — they are the ISA's real content, even though the type
 #   cannot carry them yet (see GAPS).
-# - This file is the ENCODING side only. Each variant names a µop template
-#   from uop.py; the dataflow of an instruction is written down there, once.
-#   The split follows the two questions a description answers: "which bits
-#   select this instruction" (here) and "what does it do" (uop.py).
+# - This file holds the OPCODE grouping and nothing else. Each Mop matches an
+#   opcode and lists the templates that share it; which funct field picks one
+#   template out of the group is declared on the template itself (uop.py), so
+#   a fact about SRAI lives with SRAI rather than with the sequence wrapping
+#   it. What an instruction does is likewise uop.py's business.
 # - Every variant holds a one-µop sequence, because RV32I cracks nothing (no
 #   AGU, and the jumps write their own link register). If an instruction ever
 #   does crack, its UopSeq lists several templates — and any µtemp linking
@@ -31,9 +32,9 @@
 # 1. No field VALUES. InstrFieldMatch names bit positions only, so "opcode ==
 #    0110011" is unsayable and the variants below are not actually
 #    distinguishable. The funct values live in comments as a placeholder.
-# 2. One matcher per level. add vs sub share funct3=000 and differ only in
-#    funct7, so an R-type variant genuinely needs TWO field matches; today a
-#    UopSeq carries one.
+# 2. One matcher per template. add vs sub share funct3 000 and differ only in
+#    funct7, so those rows genuinely need TWO field matches; the template
+#    names the funct7 half and leaves funct3 in a comment.
 # 3. No `imm` field on Uop, so the immediates ride in `srcs` as operands
 #    (uop.py header) — which contract §2 says they should not. One of the two
 #    has to give before the µop record is generated.
@@ -70,70 +71,70 @@ def mop_table() -> Tuple[Mop, ...]:
 
     # opcode 0110011 — OP: rd = rs1 op rs2
     op_group = Mop(matcher=FM.OPCODE, uop_seq=(
-        UopSeq(uops=(U.UOP_ADD,),  matcher=FM.FUNCT7),   # funct3 000, funct7 0000000
-        UopSeq(uops=(U.UOP_SUB,),  matcher=FM.FUNCT7),   # funct3 000, funct7 0100000
-        UopSeq(uops=(U.UOP_SLL,),  matcher=FM.FUNCT3),   # funct3 001
-        UopSeq(uops=(U.UOP_SLT,),  matcher=FM.FUNCT3),   # funct3 010
-        UopSeq(uops=(U.UOP_SLTU,), matcher=FM.FUNCT3),   # funct3 011
-        UopSeq(uops=(U.UOP_XOR,),  matcher=FM.FUNCT3),   # funct3 100
-        UopSeq(uops=(U.UOP_SRL,),  matcher=FM.FUNCT7),   # funct3 101, funct7 0000000
-        UopSeq(uops=(U.UOP_SRA,),  matcher=FM.FUNCT7),   # funct3 101, funct7 0100000
-        UopSeq(uops=(U.UOP_OR,),   matcher=FM.FUNCT3),   # funct3 110
-        UopSeq(uops=(U.UOP_AND,),  matcher=FM.FUNCT3),   # funct3 111
+        UopSeq(uops=(U.UOP_ADD,)),          # funct3 000, funct7 0000000
+        UopSeq(uops=(U.UOP_SUB,)),          # funct3 000, funct7 0100000
+        UopSeq(uops=(U.UOP_SLL,)),          # funct3 001
+        UopSeq(uops=(U.UOP_SLT,)),          # funct3 010
+        UopSeq(uops=(U.UOP_SLTU,)),         # funct3 011
+        UopSeq(uops=(U.UOP_XOR,)),          # funct3 100
+        UopSeq(uops=(U.UOP_SRL,)),          # funct3 101, funct7 0000000
+        UopSeq(uops=(U.UOP_SRA,)),          # funct3 101, funct7 0100000
+        UopSeq(uops=(U.UOP_OR,)),           # funct3 110
+        UopSeq(uops=(U.UOP_AND,)),          # funct3 111
     ))
 
     # opcode 0010011 — OP-IMM: rd = rs1 op imm
     op_imm_group = Mop(matcher=FM.OPCODE, uop_seq=(
-        UopSeq(uops=(U.UOP_ADDI,),  matcher=FM.FUNCT3),  # funct3 000
-        UopSeq(uops=(U.UOP_SLTI,),  matcher=FM.FUNCT3),  # funct3 010
-        UopSeq(uops=(U.UOP_SLTIU,), matcher=FM.FUNCT3),  # funct3 011
-        UopSeq(uops=(U.UOP_XORI,),  matcher=FM.FUNCT3),  # funct3 100
-        UopSeq(uops=(U.UOP_ORI,),   matcher=FM.FUNCT3),  # funct3 110
-        UopSeq(uops=(U.UOP_ANDI,),  matcher=FM.FUNCT3),  # funct3 111
-        UopSeq(uops=(U.UOP_SLLI,),  matcher=FM.FUNCT7),  # funct3 001, funct7 0000000
-        UopSeq(uops=(U.UOP_SRLI,),  matcher=FM.FUNCT7),  # funct3 101, funct7 0000000
-        UopSeq(uops=(U.UOP_SRAI,),  matcher=FM.FUNCT7),  # funct3 101, funct7 0100000
+        UopSeq(uops=(U.UOP_ADDI,)),         # funct3 000
+        UopSeq(uops=(U.UOP_SLTI,)),         # funct3 010
+        UopSeq(uops=(U.UOP_SLTIU,)),        # funct3 011
+        UopSeq(uops=(U.UOP_XORI,)),         # funct3 100
+        UopSeq(uops=(U.UOP_ORI,)),          # funct3 110
+        UopSeq(uops=(U.UOP_ANDI,)),         # funct3 111
+        UopSeq(uops=(U.UOP_SLLI,)),         # funct3 001, funct7 0000000
+        UopSeq(uops=(U.UOP_SRLI,)),         # funct3 101, funct7 0000000
+        UopSeq(uops=(U.UOP_SRAI,)),         # funct3 101, funct7 0100000
     ))
 
     # opcode 0000011 — LOAD: rd = mem[rs1 + imm]; width/sign is the op
     load_group = Mop(matcher=FM.OPCODE, uop_seq=(
-        UopSeq(uops=(U.UOP_LB,),  matcher=FM.FUNCT3),    # funct3 000
-        UopSeq(uops=(U.UOP_LH,),  matcher=FM.FUNCT3),    # funct3 001
-        UopSeq(uops=(U.UOP_LW,),  matcher=FM.FUNCT3),    # funct3 010
-        UopSeq(uops=(U.UOP_LBU,), matcher=FM.FUNCT3),    # funct3 100
-        UopSeq(uops=(U.UOP_LHU,), matcher=FM.FUNCT3),    # funct3 101
+        UopSeq(uops=(U.UOP_LB,)),           # funct3 000
+        UopSeq(uops=(U.UOP_LH,)),           # funct3 001
+        UopSeq(uops=(U.UOP_LW,)),           # funct3 010
+        UopSeq(uops=(U.UOP_LBU,)),          # funct3 100
+        UopSeq(uops=(U.UOP_LHU,)),          # funct3 101
     ))
 
     # opcode 0100011 — STORE: mem[rs1 + imm] = rs2; width is the op
     store_group = Mop(matcher=FM.OPCODE, uop_seq=(
-        UopSeq(uops=(U.UOP_SB,), matcher=FM.FUNCT3),     # funct3 000
-        UopSeq(uops=(U.UOP_SH,), matcher=FM.FUNCT3),     # funct3 001
-        UopSeq(uops=(U.UOP_SW,), matcher=FM.FUNCT3),     # funct3 010
+        UopSeq(uops=(U.UOP_SB,)),           # funct3 000
+        UopSeq(uops=(U.UOP_SH,)),           # funct3 001
+        UopSeq(uops=(U.UOP_SW,)),           # funct3 010
     ))
 
     # opcode 1100011 — BRANCH; the condition is the op
     branch_group = Mop(matcher=FM.OPCODE, uop_seq=(
-        UopSeq(uops=(U.UOP_BEQ,),  matcher=FM.FUNCT3),   # funct3 000
-        UopSeq(uops=(U.UOP_BNE,),  matcher=FM.FUNCT3),   # funct3 001
-        UopSeq(uops=(U.UOP_BLT,),  matcher=FM.FUNCT3),   # funct3 100
-        UopSeq(uops=(U.UOP_BGE,),  matcher=FM.FUNCT3),   # funct3 101
-        UopSeq(uops=(U.UOP_BLTU,), matcher=FM.FUNCT3),   # funct3 110
-        UopSeq(uops=(U.UOP_BGEU,), matcher=FM.FUNCT3),   # funct3 111
+        UopSeq(uops=(U.UOP_BEQ,)),          # funct3 000
+        UopSeq(uops=(U.UOP_BNE,)),          # funct3 001
+        UopSeq(uops=(U.UOP_BLT,)),          # funct3 100
+        UopSeq(uops=(U.UOP_BGE,)),          # funct3 101
+        UopSeq(uops=(U.UOP_BLTU,)),         # funct3 110
+        UopSeq(uops=(U.UOP_BGEU,)),         # funct3 111
     ))
 
     # opcodes 0110111 / 0010111 — LUI / AUIPC
-    lui   = Mop(matcher=FM.OPCODE, uop_seq=(UopSeq(uops=(U.UOP_LUI,),   matcher=FM.IMM_U),))
-    auipc = Mop(matcher=FM.OPCODE, uop_seq=(UopSeq(uops=(U.UOP_AUIPC,), matcher=FM.IMM_U),))
+    lui   = Mop(matcher=FM.OPCODE, uop_seq=(UopSeq(uops=(U.UOP_LUI,)),))
+    auipc = Mop(matcher=FM.OPCODE, uop_seq=(UopSeq(uops=(U.UOP_AUIPC,)),))
 
     # opcodes 1101111 / 1100111 — JAL / JALR
-    jal  = Mop(matcher=FM.OPCODE, uop_seq=(UopSeq(uops=(U.UOP_JAL,),  matcher=FM.IMM_J),))
-    jalr = Mop(matcher=FM.OPCODE, uop_seq=(UopSeq(uops=(U.UOP_JALR,), matcher=FM.FUNCT3),))
+    jal  = Mop(matcher=FM.OPCODE, uop_seq=(UopSeq(uops=(U.UOP_JAL,)),))
+    jalr = Mop(matcher=FM.OPCODE, uop_seq=(UopSeq(uops=(U.UOP_JALR,)),))
 
     # opcodes 0001111 / 1110011 — MISC-MEM (fence) / SYSTEM (ecall, ebreak)
-    misc_mem = Mop(matcher=FM.OPCODE, uop_seq=(UopSeq(uops=(U.UOP_FENCE,), matcher=FM.FUNCT3),))
+    misc_mem = Mop(matcher=FM.OPCODE, uop_seq=(UopSeq(uops=(U.UOP_FENCE,)),))
     system   = Mop(matcher=FM.OPCODE, uop_seq=(
-        UopSeq(uops=(U.UOP_ECALL,),  matcher=FM.IMM_I),  # imm 000000000000
-        UopSeq(uops=(U.UOP_EBREAK,), matcher=FM.IMM_I),  # imm 000000000001
+        UopSeq(uops=(U.UOP_ECALL,)),        # imm 000000000000
+        UopSeq(uops=(U.UOP_EBREAK,)),       # imm 000000000001
     ))
 
     return (op_group, op_imm_group, load_group, store_group, branch_group,

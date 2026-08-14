@@ -125,8 +125,15 @@ Immediates are deliberately NOT an `Operand` target — the µop record carries
   record carries exactly one `kind`, so a family would be an unbound template
   every consumer must handle).
 
-- **`InstrFieldMatch(name, match_idx)`** (`field_match.py`) **/
-  `UopSeq(uops, matcher)` / `Mop(matcher, uop_seq)`** (`mop.py`) — the
+- **`InstrFieldMatch(name, match_idx)`** (`field_match.py`) — a named field
+  as `(start, end)` bit segments, end-exclusive; a tuple of them because a
+  field need not be contiguous. `union(*others, name=…)` (also `|`) combines
+  fields into ONE rule — how add-vs-sub states funct3 **and** funct7 in a
+  single `matcher` slot. It only **appends**: no sorting, no merging, no
+  overlap check, because segment order and boundaries are the caller's
+  statement about the field and rewriting them would rewrite the rule.
+  `width` sums the bits.
+  **/ `UopSeq(uops, matcher)` / `Mop(matcher, uop_seq)`** (`mop.py`) — the
   encoding side, still
   preliminary: a match rule is a named set of `(start, end)` bit segments,
   end-exclusive. Every `matcher` field (here, and on `Operand`/`Uop`) holds
@@ -184,9 +191,11 @@ blocks are the real output — bringing up RV32I is what surfaced them, and
 each is contract-side, fixable without touching `uarch`:
 `InstrFieldMatch` carries no field *value* (so nothing is actually
 discriminable), one matcher per level cannot express add-vs-sub
-(funct3+funct7), `Uop` has no `imm`, and — since PC is not a reg file — auipc
-and the jal/jalr link value have **no way to name the instruction's own PC**
-as an input; the contract needs to say it is read from the µop record.
+`Uop` has no `imm` (so immediates ride in `srcs`, which contract §2 says they
+should not), and — since PC is not a reg file — auipc and the jal/jalr link
+value have **no way to name the instruction's own PC** as an input; the
+contract needs to say it is read from the µop record. The funct3-vs-funct7
+gap is closed: `FUNCT3_7 = FUNCT3 | FUNCT7` gives one rule spanning both.
 
 One gap was closed by enumerating instead of extending the record: memory
 width/sign and branch condition are **distinct ops** (`LB/LH/LW/LBU/LHU`,

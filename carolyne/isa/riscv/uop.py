@@ -7,9 +7,17 @@
 # Decisions (2026-08-14):
 # - Module CONSTANTS named UOP_<mnemonic>, one per row of the listing, so the
 #   table in rv32i.py reads as encodings → named instructions and this file
-#   is the one place an instruction's dataflow is written down. The comment
-#   on each line carries its encoding (funct7 / funct3 / opcode), which the
-#   types cannot yet hold — InstrFieldMatch has no VALUE field.
+#   is the one place an instruction is written down.
+# - Each template declares its own `matcher`: the funct field that picks it
+#   out of its opcode group. That belongs with the instruction, not with the
+#   sequence wrapping it — "SRAI is the funct7 0100000 one" is a fact about
+#   SRAI. rv32i.py is then purely the opcode grouping. LUI/AUIPC/JAL have
+#   none: their opcode alone identifies them.
+# - Where an instruction needs BOTH funct3 and funct7 (add vs sub, srl vs
+#   sra, the shift-immediates), the template names FM.FUNCT3_7 — one rule
+#   spanning both fields, built with InstrFieldMatch.union. A single
+#   `matcher` slot is enough because a rule may cover several fields; what it
+#   still cannot say is the VALUE each field must equal.
 # - Two mnemonics share one Uop constant only when they are the same
 #   operation on the same operands; they never are here, because width, sign
 #   and branch condition are distinct Ops (op.py), so the file is 1:1 with
@@ -27,8 +35,8 @@
 #   this goes before the record is generated.
 #
 # KNOWN GAPS carried from the layer below:
-# - No encoding VALUES, so nothing here is actually decodable yet; the funct
-#   comments are what the matcher will eventually hold.
+# - A matcher names a field but no VALUE, so "funct3 == 000" is unsayable and
+#   nothing below is actually decodable; the funct values live in comments.
 # - auipc, jal and jalr need the instruction's own PC as an input, which no
 #   operand can name (reg.py: PC is not a register class). Their `srcs` are
 #   the encoding's operands only.
@@ -38,75 +46,77 @@
 from __future__ import annotations
 
 from ..uop import Uop
+from . import field_match as FM
 from . import op as O
 from .operand import (OPR_IMM_B, OPR_IMM_I, OPR_IMM_J, OPR_IMM_S,
                       OPR_IMM_SHAMT, OPR_IMM_U, OPR_RD, OPR_RS1, OPR_RS2)
 
-# --- U-type: rd = imm ---------------------------------------------------------
-#                                                              imm[31:12] rd opcode
-UOP_LUI   = Uop(O.MOV_IMM, srcs=(OPR_IMM_U,), dests=(OPR_RD,))      # 0110111
-UOP_AUIPC = Uop(O.AUIPC,   srcs=(OPR_IMM_U,), dests=(OPR_RD,))      # 0010111
+_RD    = (OPR_RD,)
+_BR    = (OPR_RS1, OPR_RS2, OPR_IMM_B)      # branch: two compares + target
+_ADDR  = (OPR_RS1, OPR_IMM_I)               # load:   base + displacement
+_STORE = (OPR_RS1, OPR_RS2, OPR_IMM_S)      # store:  base + data + displacement
+_IMM   = (OPR_RS1, OPR_IMM_I)               # op-imm: register + 12-bit signed
+_SHIFT = (OPR_RS1, OPR_IMM_SHAMT)           # shift-imm: register + 5-bit count
+_REG   = (OPR_RS1, OPR_RS2)                 # op:     two registers
 
-# --- J-type / I-type jumps: rd = pc + ilen, then redirect ---------------------
-UOP_JAL  = Uop(O.JMP,          srcs=(OPR_IMM_J,), dests=(OPR_RD,))  # 1101111
-UOP_JALR = Uop(O.JMP_INDIRECT, srcs=(OPR_RS1, OPR_IMM_I),           # 1100111, funct3 000
-               dests=(OPR_RD,))
+# --- U-type, opcode 0110111 / 0010111: rd = imm ------------------------------
+UOP_LUI   = Uop(O.MOV_IMM, srcs=(OPR_IMM_U,), dests=_RD)               # no funct
+UOP_AUIPC = Uop(O.AUIPC,   srcs=(OPR_IMM_U,), dests=_RD)               # no funct
 
-# --- B-type: redirect to pc + imm when the test holds; no destination --------
-_BRANCH = (OPR_RS1, OPR_RS2, OPR_IMM_B)                             # opcode 1100011
-UOP_BEQ  = Uop(O.BEQ,  srcs=_BRANCH)                                # funct3 000
-UOP_BNE  = Uop(O.BNE,  srcs=_BRANCH)                                # funct3 001
-UOP_BLT  = Uop(O.BLT,  srcs=_BRANCH)                                # funct3 100
-UOP_BGE  = Uop(O.BGE,  srcs=_BRANCH)                                # funct3 101
-UOP_BLTU = Uop(O.BLTU, srcs=_BRANCH)                                # funct3 110
-UOP_BGEU = Uop(O.BGEU, srcs=_BRANCH)                                # funct3 111
+# --- jumps, opcode 1101111 / 1100111: rd = pc + ilen, then redirect ----------
+UOP_JAL  = Uop(O.JMP,          srcs=(OPR_IMM_J,), dests=_RD)           # no funct
+UOP_JALR = Uop(O.JMP_INDIRECT, srcs=_ADDR, dests=_RD,
+               matcher=FM.FUNCT3)                                      # funct3 000
 
-# --- I-type loads: rd = mem[rs1 + imm] ---------------------------------------
-_ADDR = (OPR_RS1, OPR_IMM_I)                                        # opcode 0000011
-UOP_LB  = Uop(O.LB,  srcs=_ADDR, dests=(OPR_RD,))                   # funct3 000
-UOP_LH  = Uop(O.LH,  srcs=_ADDR, dests=(OPR_RD,))                   # funct3 001
-UOP_LW  = Uop(O.LW,  srcs=_ADDR, dests=(OPR_RD,))                   # funct3 010
-UOP_LBU = Uop(O.LBU, srcs=_ADDR, dests=(OPR_RD,))                   # funct3 100
-UOP_LHU = Uop(O.LHU, srcs=_ADDR, dests=(OPR_RD,))                   # funct3 101
+# --- B-type, opcode 1100011: redirect when the test holds, no destination ----
+UOP_BEQ  = Uop(O.BEQ,  srcs=_BR, matcher=FM.FUNCT3)                    # funct3 000
+UOP_BNE  = Uop(O.BNE,  srcs=_BR, matcher=FM.FUNCT3)                    # funct3 001
+UOP_BLT  = Uop(O.BLT,  srcs=_BR, matcher=FM.FUNCT3)                    # funct3 100
+UOP_BGE  = Uop(O.BGE,  srcs=_BR, matcher=FM.FUNCT3)                    # funct3 101
+UOP_BLTU = Uop(O.BLTU, srcs=_BR, matcher=FM.FUNCT3)                    # funct3 110
+UOP_BGEU = Uop(O.BGEU, srcs=_BR, matcher=FM.FUNCT3)                    # funct3 111
 
-# --- S-type stores: mem[rs1 + imm] = rs2 -------------------------------------
-_STORE = (OPR_RS1, OPR_RS2, OPR_IMM_S)                              # opcode 0100011
-UOP_SB = Uop(O.SB, srcs=_STORE)                                     # funct3 000
-UOP_SH = Uop(O.SH, srcs=_STORE)                                     # funct3 001
-UOP_SW = Uop(O.SW, srcs=_STORE)                                     # funct3 010
+# --- I-type loads, opcode 0000011: rd = mem[rs1 + imm] -----------------------
+UOP_LB  = Uop(O.LB,  srcs=_ADDR, dests=_RD, matcher=FM.FUNCT3)         # funct3 000
+UOP_LH  = Uop(O.LH,  srcs=_ADDR, dests=_RD, matcher=FM.FUNCT3)         # funct3 001
+UOP_LW  = Uop(O.LW,  srcs=_ADDR, dests=_RD, matcher=FM.FUNCT3)         # funct3 010
+UOP_LBU = Uop(O.LBU, srcs=_ADDR, dests=_RD, matcher=FM.FUNCT3)         # funct3 100
+UOP_LHU = Uop(O.LHU, srcs=_ADDR, dests=_RD, matcher=FM.FUNCT3)         # funct3 101
 
-# --- I-type ALU: rd = rs1 op imm ---------------------------------------------
-_IMM_ALU = (OPR_RS1, OPR_IMM_I)                                     # opcode 0010011
-UOP_ADDI  = Uop(O.ADD,  srcs=_IMM_ALU, dests=(OPR_RD,))             # funct3 000
-UOP_SLTI  = Uop(O.SLT,  srcs=_IMM_ALU, dests=(OPR_RD,))             # funct3 010
-UOP_SLTIU = Uop(O.SLTU, srcs=_IMM_ALU, dests=(OPR_RD,))             # funct3 011
-UOP_XORI  = Uop(O.XOR,  srcs=_IMM_ALU, dests=(OPR_RD,))             # funct3 100
-UOP_ORI   = Uop(O.OR,   srcs=_IMM_ALU, dests=(OPR_RD,))             # funct3 110
-UOP_ANDI  = Uop(O.AND,  srcs=_IMM_ALU, dests=(OPR_RD,))             # funct3 111
+# --- S-type stores, opcode 0100011: mem[rs1 + imm] = rs2 ---------------------
+UOP_SB = Uop(O.SB, srcs=_STORE, matcher=FM.FUNCT3)                     # funct3 000
+UOP_SH = Uop(O.SH, srcs=_STORE, matcher=FM.FUNCT3)                     # funct3 001
+UOP_SW = Uop(O.SW, srcs=_STORE, matcher=FM.FUNCT3)                     # funct3 010
 
-# Shift-immediate: the count is 5 bits, and funct7 picks logical vs arithmetic.
-_SHIFT_IMM = (OPR_RS1, OPR_IMM_SHAMT)
-UOP_SLLI = Uop(O.SLL, srcs=_SHIFT_IMM, dests=(OPR_RD,))             # funct3 001, funct7 0000000
-UOP_SRLI = Uop(O.SRL, srcs=_SHIFT_IMM, dests=(OPR_RD,))             # funct3 101, funct7 0000000
-UOP_SRAI = Uop(O.SRA, srcs=_SHIFT_IMM, dests=(OPR_RD,))             # funct3 101, funct7 0100000
+# --- I-type ALU, opcode 0010011: rd = rs1 op imm -----------------------------
+UOP_ADDI  = Uop(O.ADD,  srcs=_IMM, dests=_RD, matcher=FM.FUNCT3)       # funct3 000
+UOP_SLTI  = Uop(O.SLT,  srcs=_IMM, dests=_RD, matcher=FM.FUNCT3)       # funct3 010
+UOP_SLTIU = Uop(O.SLTU, srcs=_IMM, dests=_RD, matcher=FM.FUNCT3)       # funct3 011
+UOP_XORI  = Uop(O.XOR,  srcs=_IMM, dests=_RD, matcher=FM.FUNCT3)       # funct3 100
+UOP_ORI   = Uop(O.OR,   srcs=_IMM, dests=_RD, matcher=FM.FUNCT3)       # funct3 110
+UOP_ANDI  = Uop(O.AND,  srcs=_IMM, dests=_RD, matcher=FM.FUNCT3)       # funct3 111
 
-# --- R-type: rd = rs1 op rs2 --------------------------------------------------
-_REG_ALU = (OPR_RS1, OPR_RS2)                                       # opcode 0110011
-UOP_ADD  = Uop(O.ADD,  srcs=_REG_ALU, dests=(OPR_RD,))              # funct3 000, funct7 0000000
-UOP_SUB  = Uop(O.SUB,  srcs=_REG_ALU, dests=(OPR_RD,))              # funct3 000, funct7 0100000
-UOP_SLL  = Uop(O.SLL,  srcs=_REG_ALU, dests=(OPR_RD,))              # funct3 001
-UOP_SLT  = Uop(O.SLT,  srcs=_REG_ALU, dests=(OPR_RD,))              # funct3 010
-UOP_SLTU = Uop(O.SLTU, srcs=_REG_ALU, dests=(OPR_RD,))              # funct3 011
-UOP_XOR  = Uop(O.XOR,  srcs=_REG_ALU, dests=(OPR_RD,))              # funct3 100
-UOP_SRL  = Uop(O.SRL,  srcs=_REG_ALU, dests=(OPR_RD,))              # funct3 101, funct7 0000000
-UOP_SRA  = Uop(O.SRA,  srcs=_REG_ALU, dests=(OPR_RD,))              # funct3 101, funct7 0100000
-UOP_OR   = Uop(O.OR,   srcs=_REG_ALU, dests=(OPR_RD,))              # funct3 110
-UOP_AND  = Uop(O.AND,  srcs=_REG_ALU, dests=(OPR_RD,))              # funct3 111
+# Shift-immediate: funct3 picks the direction, funct7 logical vs arithmetic.
+UOP_SLLI = Uop(O.SLL, srcs=_SHIFT, dests=_RD, matcher=FM.FUNCT3_7)     # 001 / 0000000
+UOP_SRLI = Uop(O.SRL, srcs=_SHIFT, dests=_RD, matcher=FM.FUNCT3_7)     # 101 / 0000000
+UOP_SRAI = Uop(O.SRA, srcs=_SHIFT, dests=_RD, matcher=FM.FUNCT3_7)     # 101 / 0100000
+
+# --- R-type, opcode 0110011: rd = rs1 op rs2 ---------------------------------
+UOP_ADD  = Uop(O.ADD,  srcs=_REG, dests=_RD, matcher=FM.FUNCT3_7)      # 000 / 0000000
+UOP_SUB  = Uop(O.SUB,  srcs=_REG, dests=_RD, matcher=FM.FUNCT3_7)      # 000 / 0100000
+UOP_SLL  = Uop(O.SLL,  srcs=_REG, dests=_RD, matcher=FM.FUNCT3)        # funct3 001
+UOP_SLT  = Uop(O.SLT,  srcs=_REG, dests=_RD, matcher=FM.FUNCT3)        # funct3 010
+UOP_SLTU = Uop(O.SLTU, srcs=_REG, dests=_RD, matcher=FM.FUNCT3)        # funct3 011
+UOP_XOR  = Uop(O.XOR,  srcs=_REG, dests=_RD, matcher=FM.FUNCT3)        # funct3 100
+UOP_SRL  = Uop(O.SRL,  srcs=_REG, dests=_RD, matcher=FM.FUNCT3_7)      # 101 / 0000000
+UOP_SRA  = Uop(O.SRA,  srcs=_REG, dests=_RD, matcher=FM.FUNCT3_7)      # 101 / 0100000
+UOP_OR   = Uop(O.OR,   srcs=_REG, dests=_RD, matcher=FM.FUNCT3)        # funct3 110
+UOP_AND  = Uop(O.AND,  srcs=_REG, dests=_RD, matcher=FM.FUNCT3)        # funct3 111
 
 # --- outside the base listing above, but part of RV32I -----------------------
-UOP_FENCE  = Uop(O.FENCE)                                           # 0001111, funct3 000
-UOP_ECALL  = Uop(O.TRAP)                                            # 1110011, imm 000000000000
-UOP_EBREAK = Uop(O.TRAP)                                            # 1110011, imm 000000000001
+UOP_FENCE  = Uop(O.FENCE, matcher=FM.FUNCT3)                           # 0001111, funct3 000
+UOP_ECALL  = Uop(O.TRAP,  matcher=FM.IMM_I)                            # 1110011, imm 000000000000
+UOP_EBREAK = Uop(O.TRAP,  matcher=FM.IMM_I)                            # 1110011, imm 000000000001
 
 UOPS = (UOP_LUI, UOP_AUIPC, UOP_JAL, UOP_JALR,
         UOP_BEQ, UOP_BNE, UOP_BLT, UOP_BGE, UOP_BLTU, UOP_BGEU,

@@ -15,7 +15,8 @@
 # missing pieces belong in the contract, not here:
 # - InstrFieldMatch carries no VALUE to match. "opcode == 0b0110011" cannot be
 #   expressed, so nothing below can actually discriminate one instruction from
-#   another yet; the matchers are field *positions* only.
+#   another yet; the matchers are field *positions* only. (Which fields a rule
+#   spans IS expressible — see FUNCT3_7, built with InstrFieldMatch.union.)
 # - Nor does it say where a segment lands inside the assembled field. For
 #   imm_s, (7,12) is imm[4:0] and (25,32) is imm[11:5]; for imm_b and imm_j
 #   the scramble is worse. A segment needs a destination offset (and the
@@ -34,6 +35,10 @@ FUNCT3 = InstrFieldMatch("funct3", ((12, 15),))
 RS1    = InstrFieldMatch("rs1",    ((15, 20),))
 RS2    = InstrFieldMatch("rs2",    ((20, 25),))
 FUNCT7 = InstrFieldMatch("funct7", ((25, 32),))
+
+# add vs sub, srl vs sra and the shift-immediates share a funct3 and differ
+# only in funct7, so selecting one needs both fields at once.
+FUNCT3_7 = FUNCT3 | FUNCT7
 # --- immediates, one per instruction format --------------------------------
 IMM_I = InstrFieldMatch("imm_i", ((20, 32),))                       # imm[11:0]
 IMM_S = InstrFieldMatch("imm_s", ((7, 12), (25, 32)))               # imm[4:0], imm[11:5]
