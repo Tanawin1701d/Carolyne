@@ -6,11 +6,11 @@
 from .reg_file import RegFile
 from .intermediate import Intermediate
 from .operand import FieldRef, Operand
-from .exec_unit import ExecUnit, ALU, MULDIV, MEM, CONTROL, SYSTEM, STANDARD_UNITS
+from .op import Op
+from .exec_unit import ExecUnit
 from .uop import Uop
 
 __all__ = [
-    "RegFile", "Intermediate", "FieldRef", "Operand",
-    "ExecUnit", "ALU", "MULDIV", "MEM", "CONTROL", "SYSTEM", "STANDARD_UNITS",
-    "Uop",
+    "RegFile", "Intermediate", "FieldRef", "Operand", "Op",
+    "ExecUnit", "Uop",
 ]

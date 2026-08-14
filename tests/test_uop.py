@@ -1,101 +1,129 @@
-# ExecUnit catalog + Uop template validation. The later tests are the usage
-# documentation: a RISC-V addi, the family-as-factory-function pattern, and
-# the x86 `add [mem], reg` 4-µop crack from the contract doc, now as real
-# Uop templates (the operand-only version of the same shape lives in
-# test_operand.py).
+# Op / ExecUnit + Uop template validation. The later tests are the usage
+# documentation: the family-as-factory-function pattern and the x86
+# `add [mem], reg` 4-µop crack from the contract doc, as real Uop templates
+# (the operand-only version of the same shape lives in test_operand.py).
+#
+# NOTE: the immediate rule (`Uop.imm`, FieldRef vs cracker-baked int) is not
+# covered here any more — the field is out of Uop while the encoding-side
+# InstrFieldMatch/matcher design is in flight. Restore the imm cases (RISC-V
+# addi's imm12, x86 push's -4) once that lands.
 
 import pytest
 
 from carolyne.isa import (
-    ALU, CONTROL, MEM, SYSTEM, STANDARD_UNITS,
-    ExecUnit, FieldRef, Intermediate, Operand, RegFile, Uop,
+    ExecUnit, FieldRef, Intermediate, Op, Operand, RegFile, Uop,
 )
 
+# No catalog ships with the isa layer (exec_unit.py header): a description
+# declares the ops and units its machine has. This block is what a per-ISA
+# package writes — the uop_contract.md §1.2 names are a convention, not an
+# import.
+ADD   = Op("ADD")
+SUB   = Op("SUB")
+AGU   = Op("AGU")
+LOAD  = Op("LOAD")
+STORE = Op("STORE")
 
-def test_standard_catalog_is_contract_owned():
-    # Mirrors uop_contract.md §1.2 — spot checks, not a copy of the table.
-    assert ALU.has("ADD") and ALU.has("MOV_IMM")
-    assert MEM.ops == {"AGU", "LOAD", "STORE"}
-    assert CONTROL.has("BR_COND") and SYSTEM.has("TRAP")
-    assert len({u.name for u in STANDARD_UNITS}) == 5
+ALU = ExecUnit("alu", {ADD, SUB})
+MEM = ExecUnit("mem", {AGU, LOAD, STORE})
+
+
+def test_op_is_an_object_with_value_equality():
+    # Re-spelling an op yields the SAME op — otherwise two description files
+    # naming ADD would build µops no unit recognizes as each other's.
+    assert Op("ADD") == ADD and hash(Op("ADD")) == hash(ADD)
+    assert ADD != SUB and str(ADD) == "ADD"
+    with pytest.raises(ValueError):
+        Op("")                                  # nameless op
 
 
 def test_exec_unit_validation():
-    # A custom FU is just another ExecUnit instance an ISA declares.
-    crypto = ExecUnit("crypto", {"AES_ROUND"})
-    assert crypto.has("AES_ROUND")
+    # A custom FU is just another ExecUnit instance an ISA declares, and its
+    # ops are as first-class as an ADD.
+    aes_round = Op("AES_ROUND")
+    crypto = ExecUnit("crypto", {aes_round})
+    assert crypto.has(aes_round) and crypto.op("AES_ROUND") is aes_round
     with pytest.raises(ValueError):
-        ExecUnit("", {"X"})                     # unnamed unit
+        crypto.op("AES_KEY")                    # unknown name, loud lookup
+    with pytest.raises(ValueError):
+        ExecUnit("", {ADD})                     # unnamed unit
     with pytest.raises(ValueError):
         ExecUnit("empty", set())                # unit with nothing to do
-    with pytest.raises(ValueError):
-        ExecUnit("bad", {""})                   # empty op name
+    with pytest.raises(TypeError):
+        ExecUnit("bad", {"ADD"})                # a string is not an Op
 
 
-def test_uop_validates_op_against_unit():
+def test_op_routing_lives_in_the_unit_set_not_the_uop():
+    # A Uop names only what it does. WHICH unit executes it is a machine
+    # configuration question the unit set answers (ExecUnit.ops read the
+    # other way round), so two units may both claim the same ADD.
+    vec   = ExecUnit("vec", {ADD, SUB})
+    units = (ALU, MEM, vec)
+    x     = RegFile("x", 32, 32)
+
+    add = Uop(ADD, srcs=(Operand(x, FieldRef("rs1")),))
+    assert add.op is ADD
+    assert [u.name for u in units if u.has(add.op)] == ["alu", "vec"]
+
+
+def test_uop_requires_an_op_object():
     x = RegFile("x", 32, 32, const_regs={0: 0})
     rd, rs1, rs2 = (Operand(x, FieldRef(f)) for f in ("rd", "rs1", "rs2"))
-    add = Uop(ALU, "ADD", srcs=(rs1, rs2), dests=(rd,))
-    assert add.unit is ALU and add.imm is None
-    with pytest.raises(ValueError):
-        Uop(ALU, "ADQ", srcs=(rs1, rs2), dests=(rd,))   # typo fails at construction
-    with pytest.raises(ValueError):
-        Uop(MEM, "ADD", srcs=(rs1, rs2), dests=(rd,))   # right op, wrong unit
+    add = Uop(ADD, srcs=(rs1, rs2), dests=(rd,))
+    assert add.op is ADD
     with pytest.raises(TypeError):
-        Uop("alu", "ADD")                               # unit must be the object
+        Uop("ADD", srcs=(rs1, rs2), dests=(rd,))   # op must be the object
+    # A made-up op is NOT caught here (no unit to check against); it is
+    # caught when no unit of the machine claims it.
+    assert not any(u.has(Op("ADQ")) for u in (ALU, MEM))
 
 
 def test_uop_capped_at_record_shape():
     # The template may not describe what the §2 record cannot carry.
     x  = RegFile("x", 32, 32)
     op = Operand(x, FieldRef("rs1"))
-    assert Uop(ALU, "ADD", srcs=[op]).srcs == (op,)     # lists are normalized
+    assert Uop(ADD, srcs=[op]).srcs == (op,)       # lists are normalized
     with pytest.raises(ValueError):
-        Uop(ALU, "ADD", srcs=(op, op, op, op))          # > 3 sources
+        Uop(ADD, srcs=(op, op, op, op))            # > 3 sources
     with pytest.raises(ValueError):
-        Uop(ALU, "ADD", dests=(op, op, op))             # > 2 dests
+        Uop(ADD, dests=(op, op, op))               # > 2 dests
     with pytest.raises(TypeError):
-        Uop(ALU, "ADD", srcs=(op, "rs2"))               # not an Operand
-    with pytest.raises(TypeError):
-        Uop(ALU, "ADD", imm="imm")                      # bare string is not a rule
+        Uop(ADD, srcs=(op, "rs2"))                 # not an Operand
 
 
-def test_riscv_addi_uses_extracted_imm():
-    # imm as a FieldRef: the value arrives from the decoder's field extractor.
+def test_encoding_text_becomes_an_op_through_the_unit():
+    # An encoding table row names its op as text; unit.op() is the sanctioned
+    # (and loudly failing) way in, so no string ever reaches a Uop.
     x = RegFile("x", 32, 32, const_regs={0: 0})
-    addi = Uop(ALU, "ADD",
-               srcs=(Operand(x, FieldRef("rs1")),),
-               dests=(Operand(x, FieldRef("rd")),),
-               imm=FieldRef("imm12"))
-    assert addi.imm == FieldRef("imm12")
+    row_op = ALU.op("SUB")
+    assert row_op is SUB
+    assert Uop(row_op, srcs=(Operand(x, FieldRef("rs1")),)).op is SUB
 
 
 def test_riscv_rtype_family_is_a_factory_function():
-    # `op` stays a single concrete string (see uop.py header). A family
-    # differing only in the operation is a plain function the per-ISA package
-    # defines; the encoding-table row passes the op, so every Uop reaching
-    # the elaborator is already resolved.
+    # `op` stays a single concrete Op (see uop.py header). A family differing
+    # only in the operation is a plain function the per-ISA package defines;
+    # the encoding-table row passes the op, so every Uop reaching the
+    # elaborator is already resolved.
     x = RegFile("x", 32, 32, const_regs={0: 0})
 
     def rtype(op):
-        return (Uop(ALU, op,
+        return (Uop(op,
                     srcs=(Operand(x, FieldRef("rs1")), Operand(x, FieldRef("rs2"))),
                     dests=(Operand(x, FieldRef("rd")),)),)
 
-    add, sub = rtype("ADD"), rtype("SUB")
-    assert (add[0].op, sub[0].op) == ("ADD", "SUB")
+    add, sub = rtype(ADD), rtype(SUB)
+    assert (add[0].op, sub[0].op) == (ADD, SUB)
     assert add[0].srcs == sub[0].srcs                # one shared shape
-    with pytest.raises(ValueError):
-        rtype("ADQ")                                 # typo still fails at construction
 
 
-def test_x86_push_bakes_constant_imm():
-    # push reg: the -4 ESP adjustment is the cracker's constant (never in the
-    # encoding), and ESP itself (index 4) is the ISA's implicit register.
+def test_x86_implicit_register_operand():
+    # push reg: ESP (index 4) is the ISA's implicit register, never decoded.
+    # (The -4 adjustment rides in the imm rule — see the NOTE at the top.)
     gpr     = RegFile("gpr", 32, 8)
     esp_new = Intermediate(32, "esp_new")
-    dec = Uop(ALU, "ADD", srcs=(Operand(gpr, 4),), dests=(Operand(esp_new),), imm=-4)
-    assert dec.imm == -4 and not dec.srcs[0].is_decoded
+    dec = Uop(ADD, srcs=(Operand(gpr, 4),), dests=(Operand(esp_new),))
+    assert not dec.srcs[0].is_decoded       # literal index, not is_const: ESP isn't hardwired
 
 
 def test_x86_mem_add_cracks_to_four_uops():
@@ -107,16 +135,17 @@ def test_x86_mem_add_cracks_to_four_uops():
     addr, old, new = Intermediate(32, "addr"), Intermediate(32, "old"), Intermediate(32, "new")
 
     crack = (
-        Uop(MEM, "AGU",   srcs=(Operand(gpr, FieldRef("modrm_rm")),),
-                          dests=(Operand(addr),), imm=FieldRef("disp")),
-        Uop(MEM, "LOAD",  srcs=(Operand(addr),), dests=(Operand(old),)),
-        Uop(ALU, "ADD",   srcs=(Operand(old), Operand(gpr, FieldRef("modrm_reg"))),
-                          dests=(Operand(new), Operand(flags, 0))),
-        Uop(MEM, "STORE", srcs=(Operand(addr), Operand(new))),
+        Uop(AGU,   srcs=(Operand(gpr, FieldRef("modrm_rm")),),
+                   dests=(Operand(addr),)),
+        Uop(LOAD,  srcs=(Operand(addr),), dests=(Operand(old),)),
+        Uop(ADD,   srcs=(Operand(old), Operand(gpr, FieldRef("modrm_reg"))),
+                   dests=(Operand(new), Operand(flags, 0))),
+        Uop(STORE, srcs=(Operand(addr), Operand(new))),
     )
 
     # The shared µtemp instance IS the dataflow link between the µops.
     assert crack[0].dests[0].target is crack[1].srcs[0].target is crack[3].srcs[0].target
     assert crack[1].dests[0].target is crack[2].srcs[0].target
     assert crack[2].dests[1].target is flags        # implicit 2nd dest: flags write
-    assert all(u.unit in (MEM, ALU) for u in crack)
+    # Routing is read off the unit set, not off the templates.
+    assert all(MEM.has(u.op) or ALU.has(u.op) for u in crack)

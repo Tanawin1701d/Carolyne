@@ -25,6 +25,7 @@ class InstrFieldMatch:
 @dataclass(frozen=True)
 class UopSeq:
     uops : Tuple[Uop, ...] = ()
+    matcher: Tuple[InstrFieldMatch, ...] = ()
 
     def __post_init__(self):
         if len(self.uops) == 0:

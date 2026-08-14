@@ -90,16 +90,33 @@ contain description data only — no hardware code.
 Immediates are deliberately NOT an `Operand` target — the µop record carries
 `imm` as its own field (contract §2).
 
+- **`Op(name)`** — one operation kind, a first-class object rather than a
+  bare string (still not an enum: a custom-FU op must be as first-class as
+  `ADD`). Decision: **standalone**, not owned by a unit — the same `Op` may
+  sit in several `ExecUnit`s. Value equality on the name (`Op("ADD") ==
+  Op("ADD")`), so two description files naming the same op build µops that
+  match; identity semantics stay with `Intermediate`. v0.1 carries the name
+  only — the object exists so latency/arity/FU hooks have a home when a
+  consumer needs them.
 - **`ExecUnit(name, ops)`** — one execution-unit class; `ops` is a frozenset
-  of plain op-name strings (an enum would make custom-FU kinds second-class).
-  The §1.2 standard catalog ships as contract-owned constants
-  (`ALU/MULDIV/MEM/CONTROL/SYSTEM`, tuple `STANDARD_UNITS`); a custom FU is
-  just another `ExecUnit` an ISA declares. Latency/ports deferred until the
-  issue-port design consumes them.
-- **`Uop(unit, op, srcs, dests, imm)`** — one µop template. Decision: the
-  unit rides in the template explicitly (no global kind→unit registry);
-  `op` is validated against `unit.ops` at construction. Operand counts are
-  capped at the record shape (≤3 src, ≤2 dest, contract §2). `imm` is `int`
+  of `Op`s (non-`Op` members raise, never promoted from strings — a stray
+  `"ADD"` would compare unequal to everyone else's `Op("ADD")`).
+  `unit.op("ADD")` is the one sanctioned text→`Op` door, for encoding-table
+  rows. Latency/ports deferred until the issue-port design consumes them.
+- **No catalog ships in code.** The §1.2 op/unit table is spec text; every
+  ISA/machine declares its own `Op`s and `ExecUnit`s (see the header block
+  of `tests/test_uop.py`). Reason: importable `ALU`/`ADD` constants would
+  make the natives privileged over an op a custom FU declares — the exact
+  distinction this layer refuses to make — and nothing consumes such a list
+  yet. `STANDARD_UNITS`/`STANDARD_OPS` existed briefly on 2026-08-14 and
+  were deleted; don't restore them from git.
+- **`Uop(op, srcs, dests, imm)`** — one µop template. Decision: the template
+  names **only its `Op`**, no unit — which FU executes a kind is a machine
+  configuration question answered by the unit set (`ExecUnit.ops` read the
+  other way round), and an op two units both list is a routing choice, not
+  an error. Cost of dropping `unit`: a bogus op survives construction and is
+  only caught when no unit claims it. Operand
+  counts are capped at the record shape (≤3 src, ≤2 dest, §2). `imm` is `int`
   (cracker-baked constant, x86 push→ESP−4) or `FieldRef` (extracted field).
   No first/last bound on the type — that comes from position in the cracker
   sequence (later); mem/br sub-fields deferred until FU semantics land. An
