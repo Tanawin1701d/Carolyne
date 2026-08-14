@@ -114,8 +114,8 @@ Immediates are deliberately NOT an `Operand` target — the µop record carries
   names **only its `Op`**, no unit — which FU executes a kind is a machine
   configuration question answered by the unit set (`ExecUnit.ops` read the
   other way round), and an op two units both list is a routing choice, not
-  an error. Cost of dropping `unit`: a bogus op survives construction and is
-  only caught when no unit claims it. Operand
+  an error. Cost of dropping `unit`: a bogus op survives construction — it is
+  `IsaDescription` that refuses it. Operand
   counts are capped at the record shape (≤3 src, ≤2 dest, §2). `imm` is `int`
   (cracker-baked constant, x86 push→ESP−4) or `FieldRef` (extracted field).
   No first/last bound on the type — that comes from position in the cracker
@@ -125,14 +125,31 @@ Immediates are deliberately NOT an `Operand` target — the µop record carries
   record carries exactly one `kind`, so a family would be an unbound template
   every consumer must handle).
 
-A first `Layout`/`Mop` pair (encoding metadata + macro-op variants binding an
-encoding to a µop sequence) was written and then removed as sloppy — nothing
-downstream depended on it, so the encoding side of the contract (§1.3) is
-open again and should be redesigned from scratch, not restored from git.
+- **`InstrFieldMatch(name, match_idx)` / `UopSeq(uops, matcher)` /
+  `Mop(matcher, uop_seq)`** (`mop.py`) — the encoding side, still
+  preliminary: a match rule is a named set of `(start, end)` bit segments,
+  end-exclusive. Every `matcher` field (here, and on `Operand`/`Uop`) holds
+  **one** `InstrFieldMatch` or `None`, not a tuple. `Mop` requires its
+  matcher; the rest default to `None`.
+- **`IsaDescription(name, ops, exec_units, mops)`** (`isa.py`) — the whole
+  ISA, the object a generator is handed. Decision: `ops` is **declared, not
+  derived** from the mops or units — deriving would make a typo
+  self-consistent. It cross-checks at construction: every op a mop's µops
+  name must be declared, and every declared op must be executable by ≥1 unit;
+  the reverse (a unit listing ops this ISA never uses) is allowed so unit
+  definitions can be shared. Names unique per vocabulary. Lookups: `op(name)`,
+  `unit(name)`, `units_for(op)` (the kind→FU map read out), `used_ops()`.
+  Reg files / ilen / trap policy join it when those types exist.
 
-Agreed next steps: the cracker sequence type (linear 1..N `Uop`s, stamps
-first/last, validates µtemp def-before-use), then the encoding table (binds
-FieldRefs), then an `IsaDescription` container; alternatively first Kathryn
+A first `Layout`/`Mop` pair (encoding metadata + macro-op variants binding an
+encoding to a µop sequence) was written and then removed as sloppy, and the
+current `mop.py` is the from-scratch redesign — the encoding side of the
+contract (§1.3) is still open; don't restore the old one from git.
+
+Agreed next steps: give `UopSeq` the cracker-sequence duties it still lacks
+(stamp first/last, validate µtemp def-before-use), settle how a matcher binds
+`FieldRef`s to bit segments, and add the remaining §6 deliverables to
+`IsaDescription` (reg files, ilen, trap policy); alternatively first Kathryn
 RAT/PRF elaboration from a `RegFile` in `uarch`.
 
 ## 5. Environment & workflow
