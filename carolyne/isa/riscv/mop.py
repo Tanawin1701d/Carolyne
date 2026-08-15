@@ -71,7 +71,7 @@ from . import field_match as FM
 from . import uop as U
 
 # opcode 0110011 — OP, R-type: rd = rs1 op rs2
-MOP_OP = Mop(matcher=FM.OPCODE, uop_seq=(
+MOP_OP = Mop(matcher_field=FM.OPCODE, uop_seq=(
     UopSeq(uops=(U.UOP_ADD,)),          # funct3 000, funct7 0000000
     UopSeq(uops=(U.UOP_SUB,)),          # funct3 000, funct7 0100000
     UopSeq(uops=(U.UOP_SLL,)),          # funct3 001
@@ -86,7 +86,7 @@ MOP_OP = Mop(matcher=FM.OPCODE, uop_seq=(
 
 # opcode 0010011 — OP-IMM, I-type: rd = rs1 op imm. The three shifts are
 # I-type too, with imm[11:0] read as funct7|shamt.
-MOP_OP_IMM = Mop(matcher=FM.OPCODE, uop_seq=(
+MOP_OP_IMM = Mop(matcher_field=FM.OPCODE, uop_seq=(
     UopSeq(uops=(U.UOP_ADDI,)),         # funct3 000
     UopSeq(uops=(U.UOP_SLTI,)),         # funct3 010
     UopSeq(uops=(U.UOP_SLTIU,)),        # funct3 011
@@ -99,7 +99,7 @@ MOP_OP_IMM = Mop(matcher=FM.OPCODE, uop_seq=(
 ))
 
 # opcode 0000011 — LOAD, I-type: rd = mem[rs1 + imm]; width/sign is the op
-MOP_LOAD = Mop(matcher=FM.OPCODE, uop_seq=(
+MOP_LOAD = Mop(matcher_field=FM.OPCODE, uop_seq=(
     UopSeq(uops=(U.UOP_LB,)),           # funct3 000
     UopSeq(uops=(U.UOP_LH,)),           # funct3 001
     UopSeq(uops=(U.UOP_LW,)),           # funct3 010
@@ -108,14 +108,14 @@ MOP_LOAD = Mop(matcher=FM.OPCODE, uop_seq=(
 ))
 
 # opcode 0100011 — STORE, S-type: mem[rs1 + imm] = rs2; width is the op
-MOP_STORE = Mop(matcher=FM.OPCODE, uop_seq=(
+MOP_STORE = Mop(matcher_field=FM.OPCODE, uop_seq=(
     UopSeq(uops=(U.UOP_SB,)),           # funct3 000
     UopSeq(uops=(U.UOP_SH,)),           # funct3 001
     UopSeq(uops=(U.UOP_SW,)),           # funct3 010
 ))
 
 # opcode 1100011 — BRANCH, B-type; the condition is the op
-MOP_BRANCH = Mop(matcher=FM.OPCODE, uop_seq=(
+MOP_BRANCH = Mop(matcher_field=FM.OPCODE, uop_seq=(
     UopSeq(uops=(U.UOP_BEQ,)),          # funct3 000
     UopSeq(uops=(U.UOP_BNE,)),          # funct3 001
     UopSeq(uops=(U.UOP_BLT,)),          # funct3 100
@@ -125,18 +125,18 @@ MOP_BRANCH = Mop(matcher=FM.OPCODE, uop_seq=(
 ))
 
 # opcodes 0110111 / 0010111 — LUI / AUIPC, both U-type; opcode alone decides
-MOP_LUI   = Mop(matcher=FM.OPCODE, uop_seq=(UopSeq(uops=(U.UOP_LUI,)),))
-MOP_AUIPC = Mop(matcher=FM.OPCODE, uop_seq=(UopSeq(uops=(U.UOP_AUIPC,)),))
+MOP_LUI   = Mop(matcher_field=FM.OPCODE, uop_seq=(UopSeq(uops=(U.UOP_LUI,)),))
+MOP_AUIPC = Mop(matcher_field=FM.OPCODE, uop_seq=(UopSeq(uops=(U.UOP_AUIPC,)),))
 
 # opcodes 1101111 / 1100111 — JAL (J-type) / JALR (I-type)
-MOP_JAL  = Mop(matcher=FM.OPCODE, uop_seq=(UopSeq(uops=(U.UOP_JAL,)),))
-MOP_JALR = Mop(matcher=FM.OPCODE, uop_seq=(UopSeq(uops=(U.UOP_JALR,)),))
+MOP_JAL  = Mop(matcher_field=FM.OPCODE, uop_seq=(UopSeq(uops=(U.UOP_JAL,)),))
+MOP_JALR = Mop(matcher_field=FM.OPCODE, uop_seq=(UopSeq(uops=(U.UOP_JALR,)),))
 
 # opcodes 0001111 / 1110011 — MISC-MEM (fence) / SYSTEM (ecall, ebreak),
 # both I-type: fence's operands sit in imm[11:0], ecall/ebreak's imm IS the
 # selector, which is why UOP_ECALL/UOP_EBREAK match on IMM_I.
-MOP_MISC_MEM = Mop(matcher=FM.OPCODE, uop_seq=(UopSeq(uops=(U.UOP_FENCE,)),))
-MOP_SYSTEM   = Mop(matcher=FM.OPCODE, uop_seq=(
+MOP_MISC_MEM = Mop(matcher_field=FM.OPCODE, uop_seq=(UopSeq(uops=(U.UOP_FENCE,)),))
+MOP_SYSTEM   = Mop(matcher_field=FM.OPCODE, uop_seq=(
     UopSeq(uops=(U.UOP_ECALL,)),        # imm 000000000000
     UopSeq(uops=(U.UOP_EBREAK,)),       # imm 000000000001
 ))

@@ -133,12 +133,35 @@ Immediates are deliberately NOT an `Operand` target — the µop record carries
   overlap check, because segment order and boundaries are the caller's
   statement about the field and rewriting them would rewrite the rule.
   `width` sums the bits.
-  **/ `UopSeq(uops, matcher)` / `Mop(matcher, uop_seq)`** (`mop.py`) — the
-  encoding side, still
-  preliminary: a match rule is a named set of `(start, end)` bit segments,
-  end-exclusive. Every `matcher` field (here, and on `Operand`/`Uop`) holds
-  **one** `InstrFieldMatch` or `None`, not a tuple. `Mop` requires its
-  matcher; the rest default to `None`.
+- **`InstrValueMatch(match_value)`** (`field_match.py`) — the value half: what
+  the bits must EQUAL, which is what makes an encoding discriminable.
+  Decision: **values only, no field**. The two halves stay separate types the
+  way "where a field is" and "which index reads it" already are, so a value
+  rule is a bare bit pattern and whatever pairs the two states which bits it
+  tests. Decision: **one value per segment** of that field, same order — not
+  one assembled integer, because the type still cannot say where a scrambled
+  field's segments land, so there is no layout to assemble INTO; add-vs-sub is
+  then `(0b000, 0b0000000)` vs `(0b000, 0b0100000)`, reading like the spec
+  table. `union`/`|` appends values and is meant to be called in step with the
+  field union, in the same order, so segments and values stay index-aligned.
+  Its own validation is therefore only what a bare pattern allows — non-empty,
+  ints, non-negative. No `matches(word)` method — evaluating a rule is
+  runtime, this layer holds rules only.
+- **`check_matcher_pair(matcher_field, matcher_value, where)`**
+  (`field_match.py`) — holds the two halves to each other, which neither can
+  do alone: one value per segment, each narrow enough for the segment it
+  tests. A field alone is legal (positions stated, nothing tested — the state
+  RV32I is in); a value alone is not. Called by `Uop`, `UopSeq` and `Mop`.
+  **/ `UopSeq(uops, matcher_field, matcher_value)` /
+  `Mop(matcher_field, matcher_value, uop_seq)`** (`mop.py`) — the encoding
+  side, still preliminary. Decision: the matcher is **TWO SLOTS**, not one
+  slot typed as either — two slots is what makes the pair checkable, and
+  "positions only" is then just `matcher_value=None`. `Mop` requires its
+  `matcher_field`; every value slot defaults to `None`, so nothing yet
+  *requires* a value and the place to demand one for a decodable ISA is
+  `IsaBase`, which sees the whole table. `Operand` keeps a single `matcher`
+  (`InstrFieldMatch` only): it says where an index or immediate is READ from
+  and tests nothing.
 - **`IsaBase(name, reg_files, ops, exec_units, mops)`** (`isa.py`) — the
   whole ISA, the object a generator is handed. Decision: `ops` and
   `reg_files` are **declared, not derived** from the mops — deriving would
@@ -196,13 +219,15 @@ exactly one µop** and this ISA exercises none of the cracking machinery — no
 mechanism is pinned meanwhile by the x86 shape in `test_uop.py`. Its KNOWN GAPS
 blocks are the real output — bringing up RV32I is what surfaced them, and
 each is contract-side, fixable without touching `uarch`:
-`InstrFieldMatch` carries no field *value* (so nothing is actually
-discriminable), one matcher per level cannot express add-vs-sub
 `Uop` has no `imm` (so immediates ride in `srcs`, which contract §2 says they
 should not), and — since PC is not a reg file — auipc and the jal/jalr link
 value have **no way to name the instruction's own PC** as an input; the
-contract needs to say it is read from the µop record. The funct3-vs-funct7
-gap is closed: `FUNCT3_7 = FUNCT3 | FUNCT7` gives one rule spanning both.
+contract needs to say it is read from the µop record. Two gaps are closed at
+the type level but **not yet used by the RV32I package**: the funct3-vs-funct7
+one (`FUNCT3_7 = FUNCT3 | FUNCT7` spans both fields), and the missing field
+*value* (`InstrValueMatch`) — every RV32I matcher is still a bare
+`InstrFieldMatch`, so the funct/opcode values live in comments and the table
+is still not actually decodable. Wiring them in is the next step.
 
 One gap was closed by enumerating instead of extending the record: memory
 width/sign and branch condition are **distinct ops** (`LB/LH/LW/LBU/LHU`,

@@ -42,7 +42,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Optional, Tuple, Union
 
-from .field_match import InstrFieldMatch
+from .field_match import InstrFieldMatch, InstrValueMatch, check_matcher_pair
 from .op import Op
 from .operand import FieldRef, Operand
 
@@ -59,7 +59,8 @@ class Uop:
     op      : Op
     srcs    : Tuple[Operand, ...] = ()
     dests   : Tuple[Operand, ...] = ()
-    matcher : Optional[InstrFieldMatch] = None   # one match rule, not a set of them
+    matcher_field : Optional[InstrFieldMatch] = None  # which bits pick this template
+    matcher_value : Optional[InstrValueMatch] = None  # what they must equal, per segment
 
     def __post_init__(self) -> None:
         if not isinstance(self.op, Op):
@@ -79,3 +80,5 @@ class Uop:
                     raise TypeError(
                         f"Uop '{self.op}': {role} operands must be Operand, "
                         f"got {type(operand).__name__}")
+        check_matcher_pair(self.matcher_field, self.matcher_value,
+                           where=f"Uop '{self.op}'")

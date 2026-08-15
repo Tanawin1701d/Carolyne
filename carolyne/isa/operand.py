@@ -51,7 +51,7 @@ IndexRule = Union[int, FieldRef]
 class Operand:
     target : Union[RegFile, Intermediate]
     index  : Optional[IndexRule] = None     # RegFile targets only
-    matcher: Optional[InstrFieldMatch] = None
+    matcher: Optional[InstrFieldMatch] = None   # position only; an operand tests nothing
 
     def __post_init__(self) -> None:
         if isinstance(self.target, RegFile):

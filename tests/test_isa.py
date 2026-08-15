@@ -28,8 +28,8 @@ def _mop(op, opcode, reg_file=X):
     uop = Uop(op,
               srcs=(Operand(reg_file, FieldRef("rs1")),),
               dests=(Operand(reg_file, FieldRef("rd")),))
-    return Mop(matcher=InstrFieldMatch("opcode", ((0, 7),)),
-               uop_seq=(UopSeq(uops=(uop,), matcher=InstrFieldMatch(opcode, ((0, 7),))),))
+    return Mop(matcher_field=InstrFieldMatch("opcode", ((0, 7),)),
+               uop_seq=(UopSeq(uops=(uop,), matcher_field=InstrFieldMatch(opcode, ((0, 7),))),))
 
 
 def _isa(**overrides):

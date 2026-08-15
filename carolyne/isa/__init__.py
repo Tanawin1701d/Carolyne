@@ -8,11 +8,12 @@ from .operand import FieldRef, Operand
 from .op import Op
 from .exec_unit import ExecUnit
 from .uop import Uop
-from .field_match import InstrFieldMatch
+from .field_match import InstrFieldMatch, InstrValueMatch, check_matcher_pair
 from .mop import UopSeq, Mop
 from .isa import IsaBase
 
 __all__ = [
     "RegFile", "Intermediate", "FieldRef", "Operand", "Op",
-    "ExecUnit", "Uop", "InstrFieldMatch", "UopSeq", "Mop", "IsaBase",
+    "ExecUnit", "Uop", "InstrFieldMatch", "InstrValueMatch",
+    "check_matcher_pair", "UopSeq", "Mop", "IsaBase",
 ]
