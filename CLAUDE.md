@@ -210,7 +210,8 @@ Immediates are deliberately NOT an `Operand` target — the µop record carries
   `IsaBase`, which sees the whole table. `Operand` keeps a single `matcher`
   (`InstrFieldMatch` only): it says where an index or immediate is READ from
   and tests nothing.
-- **`IsaBase(name, reg_files, ops, exec_units, mops)`** (`isa.py`) — the
+- **`IsaBase(name, reg_files, atomic_operands, operands, ops, exec_units,
+  uops, mops)`** (`isa.py`) — the
   whole ISA, the object a generator is handed. Decision: `ops` and
   `reg_files` are **declared, not derived** from the mops — deriving would
   make a typo self-consistent. It cross-checks at construction: every op and
@@ -221,7 +222,24 @@ Immediates are deliberately NOT an `Operand` target — the µop record carries
   **identity** — one PRF per instance, and `RegFile` holds a dict so it is
   unhashable anyway. Names unique per vocabulary. Lookups: `op(name)`,
   `unit(name)`, `reg_file(name)`, `units_for(op)` (the kind→FU map read out),
-  `used_ops()`, `used_reg_files()`. Named *Base* because a per-ISA package
+  `used_ops()`, `used_reg_files()`, `used_uops()`, `used_operands()`,
+  `used_atomic_operands()`. Decision (2026-08-15): `atomic_operands`,
+  `operands` and `uops` are declared on the same terms — the ISA writes its
+  whole vocabulary down and the container checks the chain **one link at a
+  time**: a mop's µops must be declared, their operands must be declared, and
+  those operands' cores must be declared, so a rule nobody wrote down cannot
+  reach elaboration by riding inside a mop. All three match by **identity**
+  like reg files (they are unhashable anyway — an `Operand` reaches a
+  `RegFile`, which holds a dict — and identity is the discipline the layer
+  already runs on: a package shares operand constants so every template naming
+  rs1 names ONE object). Duplicates are rejected by instance, since none of the
+  three has a name to key on; value-equal twins are fine (`AOPR_SRC_1/2` are
+  two slots that agree). Cost: an ISA whose operands cannot be shared
+  constants must still list them — x86 µtemp operands are built per crack and
+  never shared, so mini-x86 will declare a long `operands` tuple, likely
+  assembled by its crackers. Limit: the reg-file check still walks what
+  operands *select*, not what their cores *offer*. Named *Base* because a
+  per-ISA package
   may subclass it for fields this container doesn't model — subclasses must
   stay `frozen=True` and stay **data**: overriding `op()`/`units_for()`/
   `__post_init__` would put ISA-specific behavior on the elaborator's path.

@@ -35,9 +35,25 @@ def _mop(op, opcode, reg_file=X):
                uop_seq=(UopSeq(uops=(uop,), matcher_field=InstrFieldMatch(opcode, ((0, 7),))),))
 
 
+def _walk(mops):
+    """The uops/operands/cores a set of mops actually uses, in order.
+
+    A real package declares these from its own module constants (see
+    riscv/rv32i.py); this toy builds its shapes inside _mop, so the default
+    declaration is read back off the mops. Tests that pin the cross-checks
+    override one vocabulary with something the mops do not use.
+    """
+    uops     = tuple(u for mop in mops for seq in mop.uop_seq for u in seq.uops)
+    operands = tuple(o for u in uops for o in u.srcs + u.dests)
+    return uops, operands, tuple(o.atomic for o in operands)
+
+
 def _isa(**overrides):
-    kwargs = dict(name="toy", reg_files=(X,), ops=(ADD, LOAD),
-                  exec_units=(ALU, MEM), mops=(_mop(ADD, "add"), _mop(LOAD, "lw")))
+    mops = overrides.pop("mops", (_mop(ADD, "add"), _mop(LOAD, "lw")))
+    uops, operands, cores = _walk(mops)
+    kwargs = dict(name="toy", reg_files=(X,), atomic_operands=cores,
+                  operands=operands, ops=(ADD, LOAD), exec_units=(ALU, MEM),
+                  uops=uops, mops=mops)
     kwargs.update(overrides)
     return IsaBase(**kwargs)
 
@@ -48,6 +64,9 @@ def test_isa_holds_the_vocabularies():
     assert isa.reg_file("x") is X
     assert isa.used_ops() == {ADD, LOAD}
     assert isa.used_reg_files() == (X,)
+    # Two mops, one µop each, two operands per µop, one core per operand.
+    assert len(isa.used_uops()) == 2
+    assert len(isa.used_operands()) == 4 and len(isa.used_atomic_operands()) == 4
     # Routing is read out of the unit set, not stamped into the µops.
     assert isa.units_for(ADD) == (ALU,)
     with pytest.raises(ValueError):
@@ -80,6 +99,47 @@ def test_a_mop_may_not_target_an_undeclared_reg_file():
         _isa(mops=(_mop(ADD, "add", reg_file=FLAGS),))
 
 
+def test_a_mop_may_not_use_an_undeclared_uop():
+    # The chain is checked one link at a time: a µop riding inside a mop is
+    # not thereby part of the ISA.
+    other = Uop(ADD)
+    with pytest.raises(ValueError, match="does not declare in uops"):
+        _isa(uops=(other,))
+
+
+def test_a_mop_may_not_use_an_undeclared_operand_or_core():
+    core  = AtomicOperand(SRC, reg_file=X)
+    spare = Operand(core, ARCH, FieldRef("rs1"))
+    with pytest.raises(ValueError, match="does not declare in operands"):
+        _isa(operands=(spare,))
+    with pytest.raises(ValueError, match="does not declare in atomic_operands"):
+        _isa(atomic_operands=(core,))
+
+
+def test_operands_are_matched_by_identity_not_equality():
+    # An equal-but-separate rule is what the identity match exists to catch:
+    # a package shares operand constants so every template naming rs1 names
+    # ONE object, and a crack that quietly rebuilt it has drifted.
+    mops = (_mop(ADD, "add"),)
+    _, operands, _ = _walk(mops)
+    twin = Operand(operands[0].atomic, operands[0].target_kind,
+                   operands[0].index, operands[0].matcher)
+
+    assert twin == operands[0] and twin is not operands[0]
+    with pytest.raises(ValueError, match="does not declare in operands"):
+        _isa(mops=mops, operands=(twin,) + operands[1:])
+
+
+def test_a_vocabulary_may_not_list_one_instance_twice():
+    # No names to key on, so a duplicate is the same object listed twice.
+    mops = (_mop(ADD, "add"),)
+    uops, operands, cores = _walk(mops)
+    with pytest.raises(ValueError, match="same object twice"):
+        _isa(mops=mops, uops=uops + uops)
+    # ...while value-equal twins are two legitimate slots.
+    assert _isa(mops=mops, atomic_operands=cores + (AtomicOperand(SRC, reg_file=X),))
+
+
 def test_reg_files_are_matched_by_identity():
     # An equal-but-different RegFile is a *second* class to the elaborator,
     # so declaring a twin does not satisfy the check.
@@ -109,6 +169,20 @@ def test_declared_but_unused_reg_file_is_fine():
     assert isa.reg_file("flags") is FLAGS and isa.used_reg_files() == (X,)
 
 
+def test_declared_but_unused_operands_and_uops_are_fine_too():
+    # Same direction as the reg-file rule: a package may write a rule down
+    # before a crack uses it.
+    mops = (_mop(ADD, "add"),)
+    uops, operands, cores = _walk(mops)
+    spare_core = AtomicOperand(DEST, reg_file=FLAGS)
+    isa = _isa(mops=mops,
+               atomic_operands=cores + (spare_core,),
+               operands=operands + (Operand(spare_core, ARCH),),
+               uops=uops + (Uop(LOAD),))
+    assert len(isa.uops) == len(isa.used_uops()) + 1
+    assert len(isa.operands) == len(isa.used_operands()) + 1
+
+
 def test_isa_validation():
     with pytest.raises(ValueError):
         _isa(name="")                       # unnamed ISA
@@ -136,10 +210,12 @@ def test_a_per_isa_package_may_subclass_it():
     class ToyIsa(IsaBase):
         prefixes : tuple = ()
 
-    isa = ToyIsa(name="toy", reg_files=(X,), ops=(ADD, LOAD),
-                 exec_units=(ALU, MEM), mops=(_mop(ADD, "add"), _mop(LOAD, "lw")),
-                 prefixes=("0x66",))
+    mops = (_mop(ADD, "add"), _mop(LOAD, "lw"))
+    uops, operands, cores = _walk(mops)
+    isa = ToyIsa(name="toy", reg_files=(X,), atomic_operands=cores,
+                 operands=operands, ops=(ADD, LOAD), exec_units=(ALU, MEM),
+                 uops=uops, mops=mops, prefixes=("0x66",))
     assert isa.prefixes == ("0x66",) and isa.op("ADD") is ADD
     with pytest.raises(ValueError):         # inherited checks still run
-        ToyIsa(name="", reg_files=(X,), ops=(ADD,), exec_units=(ALU,),
-               mops=(_mop(ADD, "add"),))
+        ToyIsa(name="", reg_files=(X,), atomic_operands=cores, operands=operands,
+               ops=(ADD,), exec_units=(ALU,), uops=uops, mops=mops)
