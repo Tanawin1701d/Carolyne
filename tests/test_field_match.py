@@ -141,6 +141,9 @@ def test_rv32i_uses_a_union_where_one_field_cannot_select():
     assert len(both) == 7
     assert U.UOP_ADD.matcher_field is FM.FUNCT3_7
     assert U.UOP_SLT.matcher_field is FM.FUNCT3
-    # Positions only so far: no template states a value yet, so add and sub are
-    # still indistinguishable — the value slot is what closes that.
-    assert all(u.matcher_value is None for u in U.UOPS)
+    # And the values make them actually distinguishable: same field, same
+    # funct3, different funct7 — the pair the union exists for.
+    assert U.UOP_ADD.matcher_value.match_value == (0b000, 0b0000000)
+    assert U.UOP_SUB.matcher_value.match_value == (0b000, 0b0100000)
+    assert U.UOP_ADD.matcher_field is U.UOP_SUB.matcher_field
+    assert U.UOP_ADD != U.UOP_SUB

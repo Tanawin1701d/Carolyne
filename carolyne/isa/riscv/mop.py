@@ -41,28 +41,31 @@
 #   assembly alone. Named mop.py after the type it builds; `from ..mop import`
 #   still reaches the isa-layer types, since the relative form is explicit.
 #
+# Decision (2026-08-15): every group states its opcode as a matcher_value
+# beside FM.OPCODE, so "opcode == 0110011" is code rather than a comment and
+# the eleven groups are actually distinguishable from each other. The funct
+# values that pick one variant out of a group live on the templates (uop.py),
+# which is where the field they test is named.
+#
 # KNOWN GAPS — what this table cannot say yet, all of them contract-side:
-# 1. No field VALUES. InstrFieldMatch names bit positions only, so "opcode ==
-#    0110011" is unsayable and the variants below are not actually
-#    distinguishable. The funct values live in comments as a placeholder.
-# 2. One matcher per template. add vs sub share funct3 000 and differ only in
-#    funct7, so those rows genuinely need TWO field matches — which FUNCT3_7
-#    now gives (field_match.py); what is still missing is the VALUE.
-# 3. No `imm` field on Uop, so the immediates ride in `srcs` as operands
+# 1. No `imm` field on Uop, so the immediates ride in `srcs` as operands
 #    (uop.py header) — which contract §2 says they should not. One of the two
 #    has to give before the µop record is generated.
-# 4. PC is not a register class (reg.py), so the pc-relative shapes — auipc,
+# 2. PC is not a register class (reg.py), so the pc-relative shapes — auipc,
 #    and the link value the jumps write — have an input this layer cannot
 #    name: the instruction's own PC. The contract needs to say a µop reads its
 #    instruction PC from the record; until then these shapes are incomplete in
 #    a way the container's cross-checks cannot catch.
-# 5. The branch µops name no destination and the jumps' redirect is invisible
+# 3. The branch µops name no destination and the jumps' redirect is invisible
 #    here: control-flow effect is the FU's business, not register dataflow.
-# Only the register dataflow and the unit routing are complete and checkable.
-# Two former gaps are closed rather than open: mem width/sign and branch
-# condition are distinct ops rather than record sub-fields (op.py header),
-# and first/last bounds are moot while every instruction is one µop — both
-# return with x86mini.
+# 4. A matcher discriminates but does not EXTRACT: nothing says where each
+#    segment of a scrambled immediate lands in the assembled value, so a
+#    decoder can pick the instruction and still not build its immediate
+#    (field_match.py).
+# Three former gaps are closed rather than open: field values (both levels
+# state them now), mem width/sign and branch condition being distinct ops
+# rather than record sub-fields (op.py header), and first/last bounds, moot
+# while every instruction is one µop — the last returns with x86mini.
 
 from __future__ import annotations
 
@@ -71,7 +74,7 @@ from . import field_match as FM
 from . import uop as U
 
 # opcode 0110011 — OP, R-type: rd = rs1 op rs2
-MOP_OP = Mop(matcher_field=FM.OPCODE, uop_seq=(
+MOP_OP = Mop(matcher_field=FM.OPCODE, matcher_value=FM.val(0b0110011), uop_seq=(
     UopSeq(uops=(U.UOP_ADD,)),          # funct3 000, funct7 0000000
     UopSeq(uops=(U.UOP_SUB,)),          # funct3 000, funct7 0100000
     UopSeq(uops=(U.UOP_SLL,)),          # funct3 001
@@ -86,7 +89,7 @@ MOP_OP = Mop(matcher_field=FM.OPCODE, uop_seq=(
 
 # opcode 0010011 — OP-IMM, I-type: rd = rs1 op imm. The three shifts are
 # I-type too, with imm[11:0] read as funct7|shamt.
-MOP_OP_IMM = Mop(matcher_field=FM.OPCODE, uop_seq=(
+MOP_OP_IMM = Mop(matcher_field=FM.OPCODE, matcher_value=FM.val(0b0010011), uop_seq=(
     UopSeq(uops=(U.UOP_ADDI,)),         # funct3 000
     UopSeq(uops=(U.UOP_SLTI,)),         # funct3 010
     UopSeq(uops=(U.UOP_SLTIU,)),        # funct3 011
@@ -99,7 +102,7 @@ MOP_OP_IMM = Mop(matcher_field=FM.OPCODE, uop_seq=(
 ))
 
 # opcode 0000011 — LOAD, I-type: rd = mem[rs1 + imm]; width/sign is the op
-MOP_LOAD = Mop(matcher_field=FM.OPCODE, uop_seq=(
+MOP_LOAD = Mop(matcher_field=FM.OPCODE, matcher_value=FM.val(0b0000011), uop_seq=(
     UopSeq(uops=(U.UOP_LB,)),           # funct3 000
     UopSeq(uops=(U.UOP_LH,)),           # funct3 001
     UopSeq(uops=(U.UOP_LW,)),           # funct3 010
@@ -108,14 +111,14 @@ MOP_LOAD = Mop(matcher_field=FM.OPCODE, uop_seq=(
 ))
 
 # opcode 0100011 — STORE, S-type: mem[rs1 + imm] = rs2; width is the op
-MOP_STORE = Mop(matcher_field=FM.OPCODE, uop_seq=(
+MOP_STORE = Mop(matcher_field=FM.OPCODE, matcher_value=FM.val(0b0100011), uop_seq=(
     UopSeq(uops=(U.UOP_SB,)),           # funct3 000
     UopSeq(uops=(U.UOP_SH,)),           # funct3 001
     UopSeq(uops=(U.UOP_SW,)),           # funct3 010
 ))
 
 # opcode 1100011 — BRANCH, B-type; the condition is the op
-MOP_BRANCH = Mop(matcher_field=FM.OPCODE, uop_seq=(
+MOP_BRANCH = Mop(matcher_field=FM.OPCODE, matcher_value=FM.val(0b1100011), uop_seq=(
     UopSeq(uops=(U.UOP_BEQ,)),          # funct3 000
     UopSeq(uops=(U.UOP_BNE,)),          # funct3 001
     UopSeq(uops=(U.UOP_BLT,)),          # funct3 100
@@ -125,18 +128,18 @@ MOP_BRANCH = Mop(matcher_field=FM.OPCODE, uop_seq=(
 ))
 
 # opcodes 0110111 / 0010111 — LUI / AUIPC, both U-type; opcode alone decides
-MOP_LUI   = Mop(matcher_field=FM.OPCODE, uop_seq=(UopSeq(uops=(U.UOP_LUI,)),))
-MOP_AUIPC = Mop(matcher_field=FM.OPCODE, uop_seq=(UopSeq(uops=(U.UOP_AUIPC,)),))
+MOP_LUI   = Mop(matcher_field=FM.OPCODE, matcher_value=FM.val(0b0110111), uop_seq=(UopSeq(uops=(U.UOP_LUI,)),))
+MOP_AUIPC = Mop(matcher_field=FM.OPCODE, matcher_value=FM.val(0b0010111), uop_seq=(UopSeq(uops=(U.UOP_AUIPC,)),))
 
 # opcodes 1101111 / 1100111 — JAL (J-type) / JALR (I-type)
-MOP_JAL  = Mop(matcher_field=FM.OPCODE, uop_seq=(UopSeq(uops=(U.UOP_JAL,)),))
-MOP_JALR = Mop(matcher_field=FM.OPCODE, uop_seq=(UopSeq(uops=(U.UOP_JALR,)),))
+MOP_JAL  = Mop(matcher_field=FM.OPCODE, matcher_value=FM.val(0b1101111), uop_seq=(UopSeq(uops=(U.UOP_JAL,)),))
+MOP_JALR = Mop(matcher_field=FM.OPCODE, matcher_value=FM.val(0b1100111), uop_seq=(UopSeq(uops=(U.UOP_JALR,)),))
 
 # opcodes 0001111 / 1110011 — MISC-MEM (fence) / SYSTEM (ecall, ebreak),
 # both I-type: fence's operands sit in imm[11:0], ecall/ebreak's imm IS the
 # selector, which is why UOP_ECALL/UOP_EBREAK match on IMM_I.
-MOP_MISC_MEM = Mop(matcher_field=FM.OPCODE, uop_seq=(UopSeq(uops=(U.UOP_FENCE,)),))
-MOP_SYSTEM   = Mop(matcher_field=FM.OPCODE, uop_seq=(
+MOP_MISC_MEM = Mop(matcher_field=FM.OPCODE, matcher_value=FM.val(0b0001111), uop_seq=(UopSeq(uops=(U.UOP_FENCE,)),))
+MOP_SYSTEM   = Mop(matcher_field=FM.OPCODE, matcher_value=FM.val(0b1110011), uop_seq=(
     UopSeq(uops=(U.UOP_ECALL,)),        # imm 000000000000
     UopSeq(uops=(U.UOP_EBREAK,)),       # imm 000000000001
 ))

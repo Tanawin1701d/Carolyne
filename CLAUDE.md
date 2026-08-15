@@ -220,14 +220,18 @@ mechanism is pinned meanwhile by the x86 shape in `test_uop.py`. Its KNOWN GAPS
 blocks are the real output — bringing up RV32I is what surfaced them, and
 each is contract-side, fixable without touching `uarch`:
 `Uop` has no `imm` (so immediates ride in `srcs`, which contract §2 says they
-should not), and — since PC is not a reg file — auipc and the jal/jalr link
-value have **no way to name the instruction's own PC** as an input; the
-contract needs to say it is read from the µop record. Two gaps are closed at
-the type level but **not yet used by the RV32I package**: the funct3-vs-funct7
-one (`FUNCT3_7 = FUNCT3 | FUNCT7` spans both fields), and the missing field
-*value* (`InstrValueMatch`) — every RV32I matcher is still a bare
-`InstrFieldMatch`, so the funct/opcode values live in comments and the table
-is still not actually decodable. Wiring them in is the next step.
+should not); since PC is not a reg file, auipc and the jal/jalr link value have
+**no way to name the instruction's own PC** as an input, and the contract needs
+to say it is read from the µop record; and a matcher **discriminates but does
+not extract** — nothing says where each segment of a scrambled immediate lands
+in the assembled value, so a decoder can now pick the instruction and still not
+build its immediate. Two former gaps are closed and *used*: `FUNCT3_7 = FUNCT3
+| FUNCT7` spans both fields, and **every matcher in the package now states its
+value** — `FM.val(...)` beside the field, opcode values on the eleven `Mop`
+groups and funct values on the 37 templates that name a field (LUI/AUIPC/JAL
+name none: their opcode alone identifies them, and that is the Mop's rule). So
+add-vs-sub and ecall-vs-ebreak are genuinely distinguishable, and
+`check_matcher_pair` catches a mis-sized value at import.
 
 One gap was closed by enumerating instead of extending the record: memory
 width/sign and branch condition are **distinct ops** (`LB/LH/LW/LBU/LHU`,

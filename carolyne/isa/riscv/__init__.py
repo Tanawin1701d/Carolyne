@@ -23,11 +23,11 @@
 # Nothing mutates any of it.
 #
 # Every file carries a KNOWN GAPS block naming what it cannot express. The
-# short version: field matchers have no values, Uop has no immediate, and PC
-# is not nameable as a µop input — so this package proves the SHAPES fit the
-# contract and the container's cross-checks pass, not that RV32I can be
-# decoded. Those gaps are
-# contract-side; fixing them must not touch uarch.
+# short version: Uop has no immediate, PC is not nameable as a µop input, and
+# a matcher discriminates but does not extract — so this package proves the
+# SHAPES fit the contract and the container's cross-checks pass, and the table
+# now tells its instructions apart, but an immediate still cannot be built
+# from it. Those gaps are contract-side; fixing them must not touch uarch.
 #
 # Rules this package obeys (CLAUDE.md §3): description data only, no hardware
 # code, no Kathryn import, and no import from carolyne.uarch.

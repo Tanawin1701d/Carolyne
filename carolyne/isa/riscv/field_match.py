@@ -21,21 +21,35 @@
 #   instead of by opcode was considered and rejected — one I-type Mop would
 #   have to cover four different opcodes (LOAD, OP-IMM, JALR, SYSTEM), and a
 #   matcher naming one opcode field cannot say four values.
+# - `val(...)` is the package's shorthand for an InstrValueMatch, and it lives
+#   here beside the fields those values are compared against — the two halves
+#   are separate types, so the one place that reads as a pair is this file.
 #
 # KNOWN GAPS — this file is where the encoding side runs out of road, and the
 # missing pieces belong in the contract, not here:
-# - InstrFieldMatch carries no VALUE to match. "opcode == 0b0110011" cannot be
-#   expressed, so nothing below can actually discriminate one instruction from
-#   another yet; the matchers are field *positions* only. (Which fields a rule
-#   spans IS expressible — see FUNCT3_7, built with InstrFieldMatch.union.)
-# - Nor does it say where a segment lands inside the assembled field. For
-#   imm_s, (7,12) is imm[4:0] and (25,32) is imm[11:5]; for imm_b and imm_j
-#   the scramble is worse. A segment needs a destination offset (and the
-#   immediates need a sign-extension rule) before a decoder can be generated.
+# - A rule can DISCRIMINATE but not EXTRACT. Nothing says where a segment lands
+#   inside the assembled field: for imm_s, (7,12) is imm[4:0] and (25,32) is
+#   imm[11:5]; for imm_b and imm_j the scramble is worse. A segment needs a
+#   destination offset (and the immediates a sign-extension rule) before an
+#   immediate can be built — picking the instruction now works, reading its
+#   operand value does not.
 
 from __future__ import annotations
 
-from ..field_match import InstrFieldMatch
+from ..field_match import InstrFieldMatch, InstrValueMatch
+
+
+def val(*values: int) -> InstrValueMatch:
+    """One match value per segment of the field this will be paired with.
+
+    Shorthand only, and it exists for readability at the call site: the
+    one-segment case spelled out is `InstrValueMatch((0b000,))`, whose lone
+    trailing comma is exactly the kind of thing that gets dropped. `val(0b000)`
+    cannot lose it. Segment order is the field's — `val(0b000, 0b0100000)`
+    beside FUNCT3_7 is funct3 then funct7, because that is how FUNCT3_7 was
+    unioned.
+    """
+    return InstrValueMatch(values)
 
 ILEN_BYTES = 4          # RV32I is fixed-length; no length decoder needed
 

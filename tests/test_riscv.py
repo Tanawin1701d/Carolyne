@@ -9,7 +9,7 @@ from carolyne.isa import (
     FieldRef, Intermediate, InstrFieldMatch, IsaBase, Operand)
 from carolyne.isa.riscv import (
     ILEN_BYTES, ImmTarget, MOP_TABLE, OPR_IMMS, OPR_RD, OPR_RS1, OPR_RS2,
-    RegFile, UOPS, field_match as FM, op as O, rv32i, x_file,
+    RegFile, UOPS, field_match as FM, op as O, rv32i, uop as U, x_file,
 )
 
 
@@ -180,13 +180,43 @@ def test_the_mop_table_wraps_every_uop_template_exactly_once():
     table = _uops(isa)
     assert len(table) == len(UOPS) == 40
 
-    # Identity, not equality: ecall and ebreak are value-identical templates
-    # (both TRAP matching on imm_i, differing only in the value the type
-    # cannot carry yet), so `==` would conflate them.
+    # Identity, not equality — belt and braces. ecall and ebreak differ only
+    # in their match value (both are TRAP on imm_i), so they were literally
+    # equal templates until values landed; `is` did not depend on that.
     for template in UOPS:
         assert sum(u is template for u in table) == 1, template.op.name
     for uop in table:
         assert any(uop is template for template in UOPS), uop.op.name
+
+
+def test_every_matcher_in_the_table_states_a_value():
+    # The table is discriminable: wherever a rule names bits, it also says what
+    # those bits must equal. Only LUI/AUIPC/JAL name no field at all — their
+    # opcode alone identifies them, and that opcode is the Mop's rule.
+    isa = rv32i()
+    for mop in isa.mops:
+        assert mop.matcher_field is FM.OPCODE and mop.matcher_value is not None
+        for seq in mop.uop_seq:
+            for uop in seq.uops:
+                if uop.matcher_field is None:
+                    assert uop.matcher_value is None, uop.op.name
+                else:
+                    assert uop.matcher_value is not None, uop.op.name
+
+    no_funct = [u.op.name for u in UOPS if u.matcher_field is None]
+    assert no_funct == ["MOV_IMM", "AUIPC", "JMP"]          # lui, auipc, jal
+
+    # Every opcode in the table is distinct — 11 groups, 11 patterns.
+    opcodes = [m.matcher_value.match_value for m in isa.mops]
+    assert len(set(opcodes)) == len(opcodes) == 11
+    assert (0b0110011,) in opcodes and (0b1110011,) in opcodes
+
+    # ecall vs ebreak: identical but for the imm value, which now separates them.
+    ecall, ebreak = U.UOP_ECALL, U.UOP_EBREAK
+    assert ecall.op is ebreak.op and ecall.matcher_field is ebreak.matcher_field
+    assert ecall.matcher_value.match_value == (0b000000000000,)
+    assert ebreak.matcher_value.match_value == (0b000000000001,)
+    assert ecall != ebreak
 
 
 def test_the_six_instruction_formats_tile_the_word():
