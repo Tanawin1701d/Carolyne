@@ -12,10 +12,11 @@ import pytest
 
 from carolyne.isa import (
     AtomicOperand, ExecUnit, FieldRef, Intermediate, Op, Operand, OperandRole,
-    RegFile, Uop,
+    RegFile, TargetKind, Uop,
 )
 
-SRC, DEST = OperandRole.SRC, OperandRole.DEST
+SRC, DEST  = OperandRole.SRC, OperandRole.DEST
+ARCH, TEMP = TargetKind.ARCH, TargetKind.TEMP
 
 # No catalog ships with the isa layer (exec_unit.py header): a description
 # declares the ops and units its machine has. This block is what a per-ISA
@@ -64,15 +65,15 @@ def test_op_routing_lives_in_the_unit_set_not_the_uop():
     units = (ALU, MEM, vec)
     x     = RegFile("x", 32, 32)
 
-    add = Uop(ADD, srcs=(Operand(AtomicOperand(x, SRC), FieldRef("rs1")),))
+    add = Uop(ADD, srcs=(Operand(AtomicOperand(SRC, reg_file=x), ARCH, FieldRef("rs1")),))
     assert add.op is ADD
     assert [u.name for u in units if u.has(add.op)] == ["alu", "vec"]
 
 
 def test_uop_requires_an_op_object():
     x = RegFile("x", 32, 32, const_regs={0: 0})
-    rd = Operand(AtomicOperand(x, DEST), FieldRef("rd"))
-    rs1, rs2 = (Operand(AtomicOperand(x, SRC), FieldRef(f)) for f in ("rs1", "rs2"))
+    rd = Operand(AtomicOperand(DEST, reg_file=x), ARCH, FieldRef("rd"))
+    rs1, rs2 = (Operand(AtomicOperand(SRC, reg_file=x), ARCH, FieldRef(f)) for f in ("rs1", "rs2"))
     add = Uop(ADD, srcs=(rs1, rs2), dests=(rd,))
     assert add.op is ADD
     with pytest.raises(TypeError):
@@ -85,12 +86,12 @@ def test_uop_requires_an_op_object():
 def test_uop_capped_at_record_shape():
     # The template may not describe what the §2 record cannot carry.
     x  = RegFile("x", 32, 32)
-    op = Operand(AtomicOperand(x, SRC), FieldRef("rs1"))
+    op = Operand(AtomicOperand(SRC, reg_file=x), ARCH, FieldRef("rs1"))
     assert Uop(ADD, srcs=[op]).srcs == (op,)       # lists are normalized
     with pytest.raises(ValueError):
         Uop(ADD, srcs=(op, op, op, op))            # > 3 sources
     with pytest.raises(ValueError):
-        Uop(ADD, dests=(Operand(AtomicOperand(x, DEST), FieldRef("rd")),) * 3)   # > 2 dests
+        Uop(ADD, dests=(Operand(AtomicOperand(DEST, reg_file=x), ARCH, FieldRef("rd")),) * 3)   # > 2 dests
     with pytest.raises(TypeError):
         Uop(ADD, srcs=(op, "rs2"))                 # not an Operand
 
@@ -100,8 +101,8 @@ def test_uop_holds_operand_role_to_its_position():
     # itself; Uop is the one place that sees both, so it is where they are
     # held to each other. Without this the redundancy would be a bug source.
     x   = RegFile("x", 32, 32)
-    src = Operand(AtomicOperand(x, SRC),  FieldRef("rs1"))
-    dst = Operand(AtomicOperand(x, DEST), FieldRef("rd"))
+    src = Operand(AtomicOperand(SRC, reg_file=x), ARCH,  FieldRef("rs1"))
+    dst = Operand(AtomicOperand(DEST, reg_file=x), ARCH, FieldRef("rd"))
     assert Uop(ADD, srcs=(src,), dests=(dst,)).dests[0].is_dest
     with pytest.raises(ValueError):
         Uop(ADD, srcs=(dst,))               # a dest operand in the src list
@@ -127,7 +128,7 @@ def test_encoding_text_becomes_an_op_through_the_unit():
     x = RegFile("x", 32, 32, const_regs={0: 0})
     row_op = ALU.op("SUB")
     assert row_op is SUB
-    assert Uop(row_op, srcs=(Operand(AtomicOperand(x, SRC), FieldRef("rs1")),)).op is SUB
+    assert Uop(row_op, srcs=(Operand(AtomicOperand(SRC, reg_file=x), ARCH, FieldRef("rs1")),)).op is SUB
 
 
 def test_riscv_rtype_family_is_a_factory_function():
@@ -139,8 +140,8 @@ def test_riscv_rtype_family_is_a_factory_function():
 
     def rtype(op):
         return (Uop(op,
-                    srcs=(Operand(AtomicOperand(x, SRC), FieldRef("rs1")), Operand(AtomicOperand(x, SRC), FieldRef("rs2"))),
-                    dests=(Operand(AtomicOperand(x, DEST), FieldRef("rd")),)),)
+                    srcs=(Operand(AtomicOperand(SRC, reg_file=x), ARCH, FieldRef("rs1")), Operand(AtomicOperand(SRC, reg_file=x), ARCH, FieldRef("rs2"))),
+                    dests=(Operand(AtomicOperand(DEST, reg_file=x), ARCH, FieldRef("rd")),)),)
 
     add, sub = rtype(ADD), rtype(SUB)
     assert (add[0].op, sub[0].op) == (ADD, SUB)
@@ -152,7 +153,7 @@ def test_x86_implicit_register_operand():
     # (The -4 adjustment rides in the imm rule — see the NOTE at the top.)
     gpr     = RegFile("gpr", 32, 8)
     esp_new = Intermediate(32, "esp_new")
-    dec = Uop(ADD, srcs=(Operand(AtomicOperand(gpr, SRC), 4),), dests=(Operand(AtomicOperand(esp_new, DEST)),))
+    dec = Uop(ADD, srcs=(Operand(AtomicOperand(SRC, reg_file=gpr), ARCH, 4),), dests=(Operand(AtomicOperand(DEST, intermediate=esp_new), TEMP),))
     assert not dec.srcs[0].is_decoded       # literal index, not is_const: ESP isn't hardwired
 
 
@@ -165,12 +166,12 @@ def test_x86_mem_add_cracks_to_four_uops():
     addr, old, new = Intermediate(32, "addr"), Intermediate(32, "old"), Intermediate(32, "new")
 
     crack = (
-        Uop(AGU,   srcs=(Operand(AtomicOperand(gpr, SRC), FieldRef("modrm_rm")),),
-                   dests=(Operand(AtomicOperand(addr, DEST)),)),
-        Uop(LOAD,  srcs=(Operand(AtomicOperand(addr, SRC)),), dests=(Operand(AtomicOperand(old, DEST)),)),
-        Uop(ADD,   srcs=(Operand(AtomicOperand(old, SRC)), Operand(AtomicOperand(gpr, SRC), FieldRef("modrm_reg"))),
-                   dests=(Operand(AtomicOperand(new, DEST)), Operand(AtomicOperand(flags, DEST), 0))),
-        Uop(STORE, srcs=(Operand(AtomicOperand(addr, SRC)), Operand(AtomicOperand(new, SRC)))),
+        Uop(AGU,   srcs=(Operand(AtomicOperand(SRC, reg_file=gpr), ARCH, FieldRef("modrm_rm")),),
+                   dests=(Operand(AtomicOperand(DEST, intermediate=addr), TEMP),)),
+        Uop(LOAD,  srcs=(Operand(AtomicOperand(SRC, intermediate=addr), TEMP),), dests=(Operand(AtomicOperand(DEST, intermediate=old), TEMP),)),
+        Uop(ADD,   srcs=(Operand(AtomicOperand(SRC, intermediate=old), TEMP), Operand(AtomicOperand(SRC, reg_file=gpr), ARCH, FieldRef("modrm_reg"))),
+                   dests=(Operand(AtomicOperand(DEST, intermediate=new), TEMP), Operand(AtomicOperand(DEST, reg_file=flags), ARCH, 0))),
+        Uop(STORE, srcs=(Operand(AtomicOperand(SRC, intermediate=addr), TEMP), Operand(AtomicOperand(SRC, intermediate=new), TEMP))),
     )
 
     # The shared µtemp instance IS the dataflow link between the µops.

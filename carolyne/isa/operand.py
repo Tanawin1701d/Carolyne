@@ -1,7 +1,8 @@
 # Operand — one source or destination slot of a µop template: an AtomicOperand
-# (which value, which direction) plus the ENCODING SIDE around it — the index
-# rule by which the generated hardware finds the register, and the matcher
-# saying where in the instruction word that index is read from.
+# (the values on offer and the direction) plus the ENCODING SIDE around it —
+# WHICH of the core's targets this slot names, the index rule by which the
+# generated hardware finds the register, and the matcher saying where in the
+# instruction word that index is read from.
 #
 # The ISA layer is a TEMPLATE: an operand never holds a runtime value, only
 # the rule the generated hardware uses to find the register at runtime.
@@ -23,16 +24,25 @@
 # a one-field dataclass is not worth a file.
 #
 # Decisions (2026-08-15):
-# - The (target, role) pair is NOT repeated here: Operand HOLDS an
-#   AtomicOperand (atomic_operand.py) and forwards `target`/`role` as
-#   properties, so there is one definition of what a value-and-direction is
-#   and code that needs only that much can take the core alone. Composition,
-#   not inheritance — Operand is not substitutable for its core, since it
-#   demands an index rule the core knows nothing about.
-# - Consequence, accepted: every construction site names the core —
-#   `Operand(AtomicOperand(x, DEST), FieldRef("rd"))`. Per-ISA packages keep
-#   the noise down by sharing core constants (riscv/operand.py), which is free
-#   because an AtomicOperand is frozen and value-equal.
+# - The role and the candidate targets are NOT repeated here: Operand HOLDS an
+#   AtomicOperand (atomic_operand.py). Composition, not inheritance — Operand
+#   is not substitutable for its core, since it demands an index rule the core
+#   knows nothing about.
+# - `target_kind` is the SELECTOR, and it is required. A core may offer both a
+#   reg_file and an intermediate; this slot says which of them it names, and
+#   __post_init__ resolves it immediately, so a rule selecting a target its
+#   core does not carry fails at construction rather than at elaboration. It is
+#   never inferred from "the core only has one" — an inferred selector would
+#   silently change meaning the day that core grows its second target.
+# - Because the selection lives here, so do `target`, `width`, `is_arch` and
+#   `is_intermediate`: the core cannot answer any of them, since two candidate
+#   targets may differ in kind and in width. Only `role`/`is_src`/`is_dest`
+#   forward from the core.
+# - Consequence, accepted: every construction site names the core AND the
+#   selection — `Operand(AtomicOperand(DEST, reg_file=x), ARCH,
+#   FieldRef("rd"))`. Per-ISA packages keep the noise down by sharing core
+#   constants (riscv/operand.py), which is free because an AtomicOperand is
+#   frozen and value-equal.
 # - The role lives in the core, so an operand still states its own direction
 #   and Uop still cross-checks it against srcs/dests position (uop.py). A
 #   shared constant self-documents: OPR_RD *is* a destination, in every
@@ -56,7 +66,7 @@ from __future__    import annotations
 from dataclasses     import dataclass
 from typing          import Optional, Union
 
-from .atomic_operand import AtomicOperand, OperandRole
+from .atomic_operand import AtomicOperand, OperandRole, TargetKind
 from .reg            import Intermediate, RegFile
 from .field_match    import InstrFieldMatch
 
@@ -84,16 +94,19 @@ IndexRule = Union[int, FieldRef]
 
 @dataclass(frozen=True)
 class Operand:
-    atomic : AtomicOperand                  # which value, which direction
-    index  : Optional[IndexRule] = None     # RegFile targets; omitted on a 1-reg class
-    matcher: Optional[InstrFieldMatch] = None   # position only; an operand tests nothing
+    atomic     : AtomicOperand                  # which values are on offer, which direction
+    target_kind: TargetKind                     # WHICH of the core's targets this slot names
+    index      : Optional[IndexRule] = None     # RegFile targets; omitted on a 1-reg class
+    matcher    : Optional[InstrFieldMatch] = None   # position only; an operand tests nothing
 
     def __post_init__(self) -> None:
         if not isinstance(self.atomic, AtomicOperand):
             raise TypeError(
                 f"Operand needs an AtomicOperand core, got {type(self.atomic).__name__} "
-                f"(AtomicOperand(target, role))")
-        target = self.atomic.target
+                f"(AtomicOperand(role, reg_file=..., intermediate=...))")
+        # Raises if the core does not offer this kind — the selection is the
+        # first thing that has to hold, before any index rule means anything.
+        target = self.atomic.target_for(self.target_kind)
         if isinstance(target, RegFile):
             if self.index is None:
                 # Legal only where there is nothing to choose: one register,
@@ -115,11 +128,26 @@ class Operand:
         elif self.index is not None:
             raise ValueError("Operand on an Intermediate carries no index")
 
-    # --- forwarded from the core ----------------------------------------------
+    # --- the selection: which of the core's targets this slot names -----------
     @property
     def target(self) -> Union[RegFile, Intermediate]:
-        return self.atomic.target
+        return self.atomic.target_for(self.target_kind)
 
+    @property
+    def is_arch(self) -> bool:
+        return self.target_kind is TargetKind.ARCH
+
+    @property
+    def is_intermediate(self) -> bool:
+        return self.target_kind is TargetKind.TEMP
+
+    @property
+    def width(self) -> int:
+        # The SELECTED target's width — the core cannot answer this, since it
+        # may offer two targets of different widths.
+        return self.target.width
+
+    # --- forwarded from the core ----------------------------------------------
     @property
     def role(self) -> OperandRole:
         return self.atomic.role
@@ -131,18 +159,6 @@ class Operand:
     @property
     def is_dest(self) -> bool:
         return self.atomic.is_dest
-
-    @property
-    def is_arch(self) -> bool:
-        return self.atomic.is_arch
-
-    @property
-    def is_intermediate(self) -> bool:
-        return self.atomic.is_intermediate
-
-    @property
-    def width(self) -> int:
-        return self.atomic.width
 
     # --- the encoding side, which only this type has ---------------------------
     @property

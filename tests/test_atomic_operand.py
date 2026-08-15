@@ -1,78 +1,100 @@
-# AtomicOperand — the irreducible core of an operand: which value, which
-# direction, nothing else. These tests are the usage documentation for what
-# the core does and does not know, and for the composition that makes every
-# Operand hold one.
+# AtomicOperand — the core of an operand: the value(s) a slot may name and the
+# direction it flows. These tests are the usage documentation for the two-target
+# form and for the selection that resolves it, which lives on Operand.
 
 import pytest
 
 from carolyne.isa import (
-    AtomicOperand, FieldRef, Intermediate, Operand, OperandRole, RegFile)
+    AtomicOperand, FieldRef, Intermediate, Operand, OperandRole, RegFile,
+    TargetKind)
 
-SRC, DEST = OperandRole.SRC, OperandRole.DEST
+SRC, DEST  = OperandRole.SRC, OperandRole.DEST
+ARCH, TEMP = TargetKind.ARCH, TargetKind.TEMP
 
 
-def test_atomic_operand_is_the_pair_alone():
-    x    = RegFile("x", 32, 32, const_regs={0: 0})
+def test_a_core_may_carry_one_target_or_both():
+    x    = RegFile("x", 32, 32)
     addr = Intermediate(32, "addr")
 
-    rd = AtomicOperand(x, DEST)
-    assert rd.is_arch and rd.is_dest and not rd.is_src and rd.width == 32
+    reg_only  = AtomicOperand(SRC, reg_file=x)
+    temp_only = AtomicOperand(SRC, intermediate=addr)
+    either    = AtomicOperand(SRC, reg_file=x, intermediate=addr)
 
-    tmp = AtomicOperand(addr, SRC)
-    assert tmp.is_intermediate and tmp.is_src and tmp.width == 32
-    assert str(SRC) == "src" and str(DEST) == "dest"
-
-
-def test_the_core_knows_nothing_about_an_index():
-    # No is_const and no is_decoded here, though Operand has both: each is a
-    # fact about the INDEX. Whether a slot is hardwired depends on WHICH
-    # register of the class it names; whether it is decoded depends on where
-    # that index comes from. The core has neither, so it answers neither.
-    x    = RegFile("x", 32, 32, const_regs={0: 0})
-    core = AtomicOperand(x, SRC)
-
-    assert not hasattr(core, "index")
-    assert not hasattr(core, "is_const")
-    assert not hasattr(core, "is_decoded")
-    # The same core serves x0 and x5 — it cannot tell them apart, and the
-    # Operand built on it is what does.
-    assert Operand(core, 0).is_const and not Operand(core, 5).is_const
+    assert reg_only.has_arch and not reg_only.has_temp
+    assert temp_only.has_temp and not temp_only.has_arch
+    assert either.has_arch and either.has_temp
+    assert either.target_for(ARCH) is x and either.target_for(TEMP) is addr
 
 
-def test_atomic_operand_validation():
-    x = RegFile("x", 32, 32)
+def test_a_core_must_name_at_least_one_value():
+    with pytest.raises(ValueError, match="names no value"):
+        AtomicOperand(SRC)
     with pytest.raises(TypeError):
-        AtomicOperand(x, "src")             # the word is not the role
+        AtomicOperand("src", reg_file=RegFile("x", 32, 32))   # the word is not the role
     with pytest.raises(TypeError):
-        AtomicOperand("x", SRC)             # not a RegFile/Intermediate
-    # A multi-register class is FINE here — the core says nothing about
-    # indexing, and 30 of RV32I's 37 operands target exactly this file. An
-    # earlier version refused it; see the atomic_operand.py header.
-    assert AtomicOperand(x, SRC).is_arch
+        AtomicOperand(SRC, reg_file=Intermediate(32))         # fields are not interchangeable
+    with pytest.raises(TypeError):
+        AtomicOperand(SRC, intermediate=RegFile("x", 32, 32))
 
 
-def test_every_operand_is_built_on_one():
-    # Composition, not inheritance: Operand is not substitutable for its core
-    # (it demands an index rule the core knows nothing about), so it holds one
-    # and forwards target/role rather than inheriting them.
+def test_selecting_a_target_the_core_does_not_carry_is_refused():
+    # A rule that selects what is not on offer is broken, not empty — and it
+    # fails when the Operand is built, not later in a generator.
     x    = RegFile("x", 32, 32)
-    core = AtomicOperand(x, DEST)
-    op   = Operand(core, FieldRef("rd"))
+    core = AtomicOperand(SRC, reg_file=x)
 
-    assert op.atomic is core
-    assert not isinstance(op, AtomicOperand)
-    assert (op.target, op.role) == (core.target, core.role)
-    assert op.is_dest and op.is_arch and op.width == core.width
-    # Value equality, so one core is shared across every rule that needs it.
-    assert AtomicOperand(x, DEST) == core
+    assert core.target_for(ARCH) is x
+    with pytest.raises(ValueError, match="offers no temp"):
+        core.target_for(TEMP)
+    with pytest.raises(ValueError, match="offers no temp"):
+        Operand(core, TEMP)
+    with pytest.raises(TypeError):
+        core.target_for("arch")                 # the word is not the kind
+
+
+def test_one_core_can_serve_rules_that_resolve_differently():
+    # The point of two targets: a single encoding slot that is a register in
+    # one form and a loaded value in another (x86 ModRM r/m). One core, two
+    # rules, each naming what IT selects.
+    gpr  = RegFile("gpr", 32, 8)
+    load = Intermediate(32, "loaded")
+    core = AtomicOperand(SRC, reg_file=gpr, intermediate=load)
+
+    as_reg = Operand(core, ARCH, FieldRef("modrm_rm"))
+    as_mem = Operand(core, TEMP)
+
+    assert as_reg.atomic is as_mem.atomic        # ...the same core
+    assert as_reg.target is gpr and as_mem.target is load
+    assert as_reg.is_arch and as_mem.is_intermediate
+    assert as_reg.role is as_mem.role is SRC
+
+
+def test_the_core_knows_nothing_about_an_index_or_a_width():
+    # No is_const, no is_decoded, no width, no target: the first two are facts
+    # about the INDEX, which the core has not got; the last two need the
+    # SELECTION, since two candidates may differ in kind and in width.
+    x    = RegFile("x", 32, 32, const_regs={0: 0})
+    core = AtomicOperand(SRC, reg_file=x)
+
+    for absent in ("index", "is_const", "is_decoded", "width", "target"):
+        assert not hasattr(core, absent), absent
+    # The same core serves x0 and x5 — the Operand built on it tells them apart.
+    assert Operand(core, ARCH, 0).is_const and not Operand(core, ARCH, 5).is_const
 
 
 def test_cores_are_shared_across_the_rv32i_table():
-    # riscv/operand.py builds three cores and hangs nine rules off them; the
-    # rules differ where they actually differ — the field, and its bits.
-    from carolyne.isa.riscv import OPR_IMMS, OPR_RD, OPR_RS1, OPR_RS2
+    # riscv/operand.py names one core per SLOT and hangs its rules off them.
+    # Src slot 2 carries BOTH targets, so the register rule and four immediate
+    # rules share one core and resolve it differently — the two-target form
+    # exercised by a real ISA package, not just by the x86 shape above.
+    from carolyne.isa.riscv import OPR_IMMS, OPR_IMM_I, OPR_RD, OPR_RS1, OPR_RS2
 
-    assert OPR_RS1.atomic is OPR_RS2.atomic          # same (x, SRC) core
-    assert OPR_RD.atomic is not OPR_RS1.atomic       # different direction
-    assert len({id(i.atomic) for i in OPR_IMMS}) == 1
-    assert OPR_RS1.index != OPR_RS2.index            # ...and differ by field
+    shared = OPR_RS2.atomic
+    assert OPR_IMM_I.atomic is shared and shared.has_arch and shared.has_temp
+    assert OPR_RS2.target_kind is ARCH and OPR_IMM_I.target_kind is TEMP
+    assert OPR_RS2.target is not OPR_IMM_I.target        # one core, two answers
+
+    assert all(i.target_kind is TEMP for i in OPR_IMMS)
+    assert OPR_RD.atomic is not OPR_RS1.atomic           # different direction
+    assert OPR_RS1.atomic != OPR_RS2.atomic              # rs2's core offers more
+    assert OPR_RS1.index != OPR_RS2.index                # ...and they read different fields

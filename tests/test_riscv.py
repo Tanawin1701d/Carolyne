@@ -7,7 +7,7 @@ import pytest
 
 from carolyne.isa import (
     AtomicOperand, FieldRef, Intermediate, InstrFieldMatch, IsaBase, Operand,
-    OperandRole)
+    OperandRole, TargetKind)
 from carolyne.isa.riscv import (
     ILEN_BYTES, ImmTarget, MOP_TABLE, OPR_IMMS, OPR_RD, OPR_RS1, OPR_RS2,
     RegFile, UOPS, field_match as FM, op as O, rv32i, uop as U, x_file,
@@ -104,8 +104,8 @@ def test_immediate_operands_carry_a_matcher_and_no_index():
     assert [i.matcher.name for i in OPR_IMMS] == [
         "imm_i", "imm_s", "imm_b", "imm_u", "imm_j", "shamt"]
     with pytest.raises(ValueError):                 # an index on one is refused
-        Operand(AtomicOperand(ImmTarget, OperandRole.SRC), FieldRef("imm"),
-                matcher=FM.IMM_I)
+        Operand(AtomicOperand(OperandRole.SRC, intermediate=ImmTarget),
+                TargetKind.TEMP, FieldRef("imm"), matcher=FM.IMM_I)
 
 
 def test_immediates_ride_in_srcs_for_now():
