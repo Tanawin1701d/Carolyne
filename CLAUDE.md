@@ -79,24 +79,48 @@ contain description data only — no hardware code.
 - **`FieldRef(name)`** — index *rule*: "register number comes from this
   encoding field at runtime". Name-only for now; bit positions and existence
   are validated when crackers get bound to the encoding table (not built yet).
-- **`Operand(target, index=None)`** — one src/dest slot of a µop template.
-  Target is a `RegFile` (index rule required: `FieldRef` = decoded register,
-  literal `int` = implicit register — x86 push/pop→ESP, flags writes; both
-  elaborate to the same rename port, constant vs extractor wiring) or an
-  `Intermediate` (index forbidden — the instance is the link). `is_const` is
-  true only for a literal index onto a hardwired reg; a decoded index hitting
-  x0 is rename's runtime job. `role` (`OperandRole.SRC`/`DEST`, required, no
-  default) is the direction, which `Uop.srcs`/`dests` also state positionally
-  — `Uop` is the one place that sees both and cross-checks them, so the
-  redundancy is a convenience rather than a bug source. Decision: `OperandRole`
-  **is** an enum where `Op` deliberately is not — an ISA may declare an
-  unanticipated op, but §2 gives the record exactly src/dest slots, so no ISA
-  invents a third role. Decision: **no `SRC_DEST`** — an arch slot read *and*
-  written through one field (x86 `add eax, ebx`) is two constants, because
-  rename does a RAT read *and* a write+alloc there, filling one src slot and
-  one dest slot; one object claiming both would hide two slots behind one
-  entry. RV32I pays nothing for this: rd/rs1/rs2 are three different fields,
-  so no slot is ever both and the shared constants survive.
+- **`AtomicOperand(target, role)`** (`atomic_operand.py`) — the irreducible
+  core of an operand: WHICH value (a `RegFile` or an `Intermediate`) and in
+  WHICH direction, nothing else. Decision: every `Operand` **holds** one, so
+  there is a single definition of what a value-and-direction is, and code
+  needing only that much takes the core without an index rule it has no use
+  for. It owns `OperandRole` (`SRC`/`DEST`), so the import runs
+  `operand` → `atomic_operand` one-way. Decision: `OperandRole` **is** an enum
+  where `Op` deliberately is not — an ISA may declare an unanticipated op, but
+  §2 gives the record exactly src/dest slots, so no ISA invents a third role.
+  Decision: **no `SRC_DEST`** — an arch slot read *and* written through one
+  field (x86 `add eax, ebx`) is two operands, because rename does a RAT read
+  *and* a write+alloc there, filling one src slot and one dest slot; one
+  object claiming both would hide two slots behind one entry. Decision: it
+  carries **no `is_const` and no `is_decoded`**, though `Operand` has both —
+  each is a fact about the *index*, which the core has not got, so answering
+  either would be guessing. An earlier version refused a multi-register target
+  (meaning "a slot the ISA never has to index"); that could not survive
+  `Operand` holding one — 30 of RV32I's 37 operands target a 32-register file
+  — so it was removed the same day. Don't restore it from git; its useful half
+  lives on in `Operand`'s index-omission rule.
+- **`Operand(atomic, index=None, matcher=None)`** — one src/dest slot of a µop
+  template: an `AtomicOperand` plus the ENCODING SIDE. `target` and `role` are
+  forwarded properties, not fields. For a `RegFile` target the index rule is
+  required (`FieldRef` = decoded register, literal `int` = implicit register —
+  x86 push/pop→ESP; both elaborate to the same rename port, constant vs
+  extractor wiring) **except on a one-register class**, where `index_width` is
+  0, there is nothing to choose, and the elaborator wires the single register
+  (x86 FLAGS). An `Intermediate` target forbids an index — the instance is the
+  link. `is_const` is true for a literal index onto a hardwired reg, or for an
+  omitted index on a one-register class (that register is 0); a *decoded*
+  index hitting x0 is rename's runtime job. The role living in the core is
+  what `Uop.srcs`/`dests` cross-check against position, so a `DEST` in `srcs`
+  raises. Decision: **composition, not inheritance** — `Operand` is not
+  substitutable for its core, since it demands an index rule the core knows
+  nothing about. Cost, accepted: every construction site names the core, which
+  per-ISA packages tame by sharing core constants (`riscv/operand.py` builds
+  three and hangs nine rules off them — free, since an `AtomicOperand` is
+  frozen and value-equal). Decision: a `Uop` slot is an `Operand`, **never** a
+  bare `AtomicOperand` and never a union of the two — a µop template always
+  states its index rule, and a union would make every consumer downstream ask
+  which kind it got first. A `UopOperand = Union[...]` alias existed briefly
+  on 2026-08-15 and was removed; don't restore it.
 
 Immediates are deliberately NOT an `Operand` target — the µop record carries
 `imm` as its own field (contract §2).

@@ -43,15 +43,20 @@
 #   this is where they are held to each other: a DEST operand sitting in
 #   `srcs` is a construction error, not a silently-wrong template. Without the
 #   check the redundancy would be a bug source rather than a convenience.
+# - A slot holds an Operand and nothing else. AtomicOperand (atomic_operand.py)
+#   is a sibling type, not an alternative here: a µop template always states
+#   its index rule, so admitting a union would make every consumer downstream
+#   ask which kind it got before it could read one.
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Optional, Tuple, Union
 
+from .atomic_operand import OperandRole
 from .field_match import InstrFieldMatch, InstrValueMatch, check_matcher_pair
 from .op import Op
-from .operand import FieldRef, Operand, OperandRole
+from .operand import FieldRef, Operand
 
 ImmRule = Union[int, FieldRef]
 

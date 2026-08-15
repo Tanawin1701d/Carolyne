@@ -1,5 +1,7 @@
-# Operand — one source or destination slot of a µop template. It links to
-# either an architectural register file or an Intermediate µtemp.
+# Operand — one source or destination slot of a µop template: an AtomicOperand
+# (which value, which direction) plus the ENCODING SIDE around it — the index
+# rule by which the generated hardware finds the register, and the matcher
+# saying where in the instruction word that index is read from.
 #
 # The ISA layer is a TEMPLATE: an operand never holds a runtime value, only
 # the rule the generated hardware uses to find the register at runtime.
@@ -10,46 +12,53 @@
 #   int             implicit fixed register — part of the ISA itself (x86
 #                   push/pop use ESP, flags writes hit the one flags reg);
 #                   elaborates to a constant wire into the same rename port
+#   omitted         only when the class holds ONE register: index_width is 0,
+#                   so there is nothing to choose and the elaborator wires the
+#                   single register (x86 FLAGS)
 #
-# An Intermediate target needs no index: the instance IS the value node.
+# An Intermediate target needs no index either: the instance IS the value node.
 #
 # FieldRef lives here rather than in its own module: it is the index rule of
 # an Operand (and the same rule for a Uop's imm), meaningless on its own, and
 # a one-field dataclass is not worth a file.
 #
 # Decisions (2026-08-15):
-# - An operand states its own ROLE (src or dest). The information also exists
-#   positionally, in Uop.srcs vs Uop.dests, so the two could disagree; Uop
-#   cross-checks them (uop.py) and that is the price of letting an operand
-#   handed around on its own — to a rename-port list, to whatever builds the
-#   hardware-plane record slot — still say which direction it is. A shared
-#   constant then self-documents: OPR_RD *is* a destination, in every template
-#   that uses it.
-# - OperandRole IS an enum, unlike Op (op.py deliberately is not). The two
-#   are different kinds of set: an ISA may declare an op nobody anticipated,
-#   but contract §2 gives the record exactly src[0..2] and dest[0..1] slots,
-#   so no ISA can invent a third role. A closed set is an enum.
-# - No SRC_DEST member. An arch slot both read and written through one
-#   encoding field (x86 `add eax, ebx`) becomes TWO Operand constants, because
-#   rename genuinely does a RAT read and a RAT write + free-list alloc there,
-#   filling one src slot AND one dest slot of the record. One object claiming
-#   both roles would hide two slots behind one entry and force every consumer
-#   downstream to expand it.
+# - The (target, role) pair is NOT repeated here: Operand HOLDS an
+#   AtomicOperand (atomic_operand.py) and forwards `target`/`role` as
+#   properties, so there is one definition of what a value-and-direction is
+#   and code that needs only that much can take the core alone. Composition,
+#   not inheritance — Operand is not substitutable for its core, since it
+#   demands an index rule the core knows nothing about.
+# - Consequence, accepted: every construction site names the core —
+#   `Operand(AtomicOperand(x, DEST), FieldRef("rd"))`. Per-ISA packages keep
+#   the noise down by sharing core constants (riscv/operand.py), which is free
+#   because an AtomicOperand is frozen and value-equal.
+# - The role lives in the core, so an operand still states its own direction
+#   and Uop still cross-checks it against srcs/dests position (uop.py). A
+#   shared constant self-documents: OPR_RD *is* a destination, in every
+#   template that uses it.
+# - `index` may now be OMITTED on a one-register class. This is the surviving
+#   half of a rule that briefly lived in AtomicOperand ("a target the ISA
+#   never has to index"); it belongs here, because it is a statement about the
+#   index, and only this type has one. is_const then reads register 0, the
+#   only register there is.
 # - An Operand will NOT point at its post-rename counterpart when the
 #   hardware-plane record type lands. Two reasons, either sufficient: a
 #   physical index is a run-time value, which the elaboration plane may not
 #   hold; and an Operand is a frozen, value-equal, SHARED constant — OPR_RS1
 #   is one object across 37 templates — so there is no per-use slot on it to
 #   point from. That map has to run one-way, reading an Operand.
+# - A Uop slot is an Operand, full stop — never a bare AtomicOperand and never
+#   a union of the two (uop.py). A µop template always states its index rule.
 
 from __future__    import annotations
 
-from dataclasses   import dataclass
-from enum          import Enum
-from typing        import Optional, Union
+from dataclasses     import dataclass
+from typing          import Optional, Union
 
-from .reg          import Intermediate, RegFile
-from .field_match  import InstrFieldMatch
+from .atomic_operand import AtomicOperand, OperandRole
+from .reg            import Intermediate, RegFile
+from .field_match    import InstrFieldMatch
 
 
 # A *rule*, not a value: "the register index arrives at runtime from the
@@ -73,79 +82,81 @@ class FieldRef:
 IndexRule = Union[int, FieldRef]
 
 
-# Which direction the slot flows, and therefore which rename port it becomes:
-# SRC -> a RAT read, DEST -> a RAT write plus a free-list allocation. Values
-# are the words the Uop error messages already used, so `f"{role}"` reads the
-# same as before.
-class OperandRole(Enum):
-    SRC  = "src"
-    DEST = "dest"
-
-    def __str__(self) -> str:
-        return self.value
-
-
 @dataclass(frozen=True)
 class Operand:
-    target : Union[RegFile, Intermediate]
-    role   : OperandRole                    # src or dest; Uop checks it against position
-    index  : Optional[IndexRule] = None     # RegFile targets only
+    atomic : AtomicOperand                  # which value, which direction
+    index  : Optional[IndexRule] = None     # RegFile targets; omitted on a 1-reg class
     matcher: Optional[InstrFieldMatch] = None   # position only; an operand tests nothing
 
     def __post_init__(self) -> None:
-        if not isinstance(self.role, OperandRole):
+        if not isinstance(self.atomic, AtomicOperand):
             raise TypeError(
-                f"Operand role must be an OperandRole, got {type(self.role).__name__} "
-                f"(OperandRole.SRC or OperandRole.DEST)")
-        if isinstance(self.target, RegFile):
+                f"Operand needs an AtomicOperand core, got {type(self.atomic).__name__} "
+                f"(AtomicOperand(target, role))")
+        target = self.atomic.target
+        if isinstance(target, RegFile):
             if self.index is None:
-                raise ValueError(
-                    f"Operand on reg file '{self.target.name}' needs an index rule "
-                    f"(FieldRef for a decoded register, int for an implicit one)")
-            if isinstance(self.index, int):
-                if not (0 <= self.index < self.target.amount):
+                # Legal only where there is nothing to choose: one register,
+                # index_width 0, and the elaborator wires it.
+                if target.amount != 1:
                     raise ValueError(
-                        f"Operand index {self.index} out of range 0..{self.target.amount - 1} "
-                        f"for reg file '{self.target.name}'")
+                        f"Operand on reg file '{target.name}' needs an index rule "
+                        f"(FieldRef for a decoded register, int for an implicit one); "
+                        f"it may be omitted only on a one-register class, and this one "
+                        f"holds {target.amount}")
+            elif isinstance(self.index, int):
+                if not (0 <= self.index < target.amount):
+                    raise ValueError(
+                        f"Operand index {self.index} out of range 0..{target.amount - 1} "
+                        f"for reg file '{target.name}'")
             elif not isinstance(self.index, FieldRef):
                 raise TypeError(
                     f"Operand index must be an int or FieldRef, got {type(self.index).__name__}")
-        elif isinstance(self.target, Intermediate):
-            if self.index is not None:
-                raise ValueError("Operand on an Intermediate carries no index")
-        else:
-            raise TypeError(
-                f"Operand target must be a RegFile or Intermediate, got {type(self.target).__name__}")
+        elif self.index is not None:
+            raise ValueError("Operand on an Intermediate carries no index")
+
+    # --- forwarded from the core ----------------------------------------------
+    @property
+    def target(self) -> Union[RegFile, Intermediate]:
+        return self.atomic.target
+
+    @property
+    def role(self) -> OperandRole:
+        return self.atomic.role
 
     @property
     def is_src(self) -> bool:
-        return self.role is OperandRole.SRC
+        return self.atomic.is_src
 
     @property
     def is_dest(self) -> bool:
-        return self.role is OperandRole.DEST
+        return self.atomic.is_dest
 
     @property
     def is_arch(self) -> bool:
-        return isinstance(self.target, RegFile)
+        return self.atomic.is_arch
 
     @property
     def is_intermediate(self) -> bool:
-        return isinstance(self.target, Intermediate)
+        return self.atomic.is_intermediate
 
+    @property
+    def width(self) -> int:
+        return self.atomic.width
+
+    # --- the encoding side, which only this type has ---------------------------
     @property
     def is_decoded(self) -> bool:
         # Index arrives at runtime from an encoding field (vs implicit/µtemp).
         return isinstance(self.index, FieldRef)
 
     @property
-    def width(self) -> int:
-        # Both target kinds carry their own width — the operand just exposes it.
-        return self.target.width
-
-    @property
     def is_const(self) -> bool:
         # Statically-known hardwired reg (implicit int index onto a const reg).
         # A decoded index can still hit x0 at runtime — that check is rename's
         # job, elaborated from RegFile.const_regs; it cannot be known here.
-        return self.is_arch and isinstance(self.index, int) and self.target.is_const(self.index)
+        if not self.is_arch:
+            return False
+        # An omitted index means the class holds one register, which is 0.
+        idx = 0 if self.index is None else self.index
+        return isinstance(idx, int) and self.target.is_const(idx)
