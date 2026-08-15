@@ -11,3 +11,6 @@ generated/
 
 # ide
 .idea/
+
+# vendored isa reference manuals (fetch locally, don't track)
+docs/isa/**/*.pdf
