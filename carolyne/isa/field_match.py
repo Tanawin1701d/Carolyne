@@ -48,17 +48,7 @@ class InstrFieldMatch:
                 raise IndexError("InstrFieldMatch must has start_match_idx < end_match_idx")
 
     def union(self, *others: "InstrFieldMatch", name: str = "") -> "InstrFieldMatch":
-        """One match rule covering this field's bits and the others'.
 
-        For the cases a single field cannot select on its own — RISC-V's
-        add vs sub need funct3 AND funct7 — so a template can name one
-        matcher without giving up half its rule.
-
-        Segments are APPENDED in the order given: not sorted, not merged, not
-        checked for overlap. Segment order and boundaries are the caller's
-        statement about the field (imm_b's (7,8) is imm[11] and (8,12) is
-        imm[4:1]), and rewriting them here would silently rewrite the rule.
-        """
         fields = (self,) + others
         for other in others:
             if not isinstance(other, InstrFieldMatch):
@@ -79,3 +69,5 @@ class InstrFieldMatch:
     def width(self) -> int:
         """Total bits this rule matches."""
         return sum(end - start for start, end in self.match_idx)
+
+

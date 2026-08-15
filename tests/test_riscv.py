@@ -8,8 +8,8 @@ import pytest
 from carolyne.isa import (
     FieldRef, Intermediate, InstrFieldMatch, IsaBase, Operand)
 from carolyne.isa.riscv import (
-    ILEN_BYTES, ImmTarget, OPR_IMMS, OPR_RD, OPR_RS1, OPR_RS2, RegFile,
-    field_match as FM, op as O, rv32i, x_file,
+    ILEN_BYTES, ImmTarget, MOP_TABLE, OPR_IMMS, OPR_RD, OPR_RS1, OPR_RS2,
+    RegFile, UOPS, field_match as FM, op as O, rv32i, x_file,
 )
 
 
@@ -77,6 +77,9 @@ def test_the_operand_rules_and_the_description_share_one_register_class():
     # Accepted cost: two builds share the class. x_file() is the way out.
     assert rv32i().reg_file("x") is isa.reg_file("x")
     assert x_file() is not RegFile and x_file() == RegFile
+    # MOP_TABLE is shared on the same terms — frozen data all the way down, so
+    # handing every build the same tuple changes nothing observable.
+    assert isa.mops is MOP_TABLE and rv32i().mops is MOP_TABLE
 
 
 def test_operand_rules_agree_with_the_field_match_table():
@@ -166,6 +169,42 @@ def test_pc_is_not_a_register_class():
     # auipc is rd = pc + imm, but only the imm is nameable — see GAPS.
     assert [o.matcher.name for o in auipc.srcs] == ["imm_u"]
     assert beq.dests == ()                          # target is the control FU's
+
+
+def test_the_mop_table_wraps_every_uop_template_exactly_once():
+    # uop.py is the instruction listing; the table is what binds it to
+    # encodings. A template written but never wrapped in a UopSeq is an
+    # instruction no decoder will ever see, and no container check catches it
+    # — IsaBase validates what the table USES, not what the package declares.
+    isa = rv32i()
+    table = _uops(isa)
+    assert len(table) == len(UOPS) == 40
+
+    # Identity, not equality: ecall and ebreak are value-identical templates
+    # (both TRAP matching on imm_i, differing only in the value the type
+    # cannot carry yet), so `==` would conflate them.
+    for template in UOPS:
+        assert sum(u is template for u in table) == 1, template.op.name
+    for uop in table:
+        assert any(uop is template for template in UOPS), uop.op.name
+
+
+def test_the_six_instruction_formats_tile_the_word():
+    # A format is an InstrFieldMatch union of the fields it is built from, so
+    # its segments must cover bits 0..31 exactly once — a field left out of a
+    # format, or counted twice, surfaces right here.
+    assert [f.name for f in FM.FORMATS] == [
+        "r_type", "i_type", "s_type", "b_type", "u_type", "j_type"]
+    for fmt in FM.FORMATS:
+        assert fmt.width == 32, fmt.name
+        covered = [bit for start, end in fmt.match_idx for bit in range(start, end)]
+        assert sorted(covered) == list(range(32)), fmt.name
+
+    # Fields are unioned in ascending first-bit order, so opcode leads every
+    # format — but a field keeps its OWN segment order, which is why s_type's
+    # third segment is imm_s's high half, above funct3 rather than after it.
+    assert all(fmt.match_idx[0] == (0, 7) for fmt in FM.FORMATS)
+    assert FM.S_TYPE.match_idx[:3] == ((0, 7), (7, 12), (25, 32))
 
 
 def test_field_positions_are_32_bit_and_segmented():

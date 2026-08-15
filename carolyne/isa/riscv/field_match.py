@@ -11,6 +11,17 @@
 #   ranges even where two are adjacent — (7,8) is imm[11] and (8,12) is
 #   imm[4:1], and merging them would erase that they land in different places.
 #
+# Decision (2026-08-15):
+# - The six base FORMATS are InstrFieldMatch unions of the fields they contain,
+#   not a new type. A format IS "one rule spanning several fields", which is
+#   exactly what union() gives, and keeping formats in the same type means a
+#   consumer that can read a field rule can read a format for free. They are
+#   DECLARED, NOT CONSUMED: Mop has no format slot, so rv32i.py names the
+#   format of each opcode group in a comment. Grouping the mop table by format
+#   instead of by opcode was considered and rejected — one I-type Mop would
+#   have to cover four different opcodes (LOAD, OP-IMM, JALR, SYSTEM), and a
+#   matcher naming one opcode field cannot say four values.
+#
 # KNOWN GAPS — this file is where the encoding side runs out of road, and the
 # missing pieces belong in the contract, not here:
 # - InstrFieldMatch carries no VALUE to match. "opcode == 0b0110011" cannot be
@@ -48,3 +59,24 @@ IMM_U = InstrFieldMatch("imm_u", ((12, 32),))                       # imm[31:12]
 IMM_J = InstrFieldMatch("imm_j", ((12, 20), (20, 21),               # imm[19:12], imm[11]
                                   (21, 31), (31, 32)))              # imm[10:1], imm[20]
 SHAMT = InstrFieldMatch("shamt", ((20, 25),))                       # slli/srli/srai
+
+# --- the six base instruction formats ---------------------------------------
+# One rule per row of the format figure (spec ch. 2.2): the union of the fields
+# that format is built from, so a format is stated in the same type as a field.
+# Fields are unioned in ASCENDING first-bit order — opcode leads, reading the
+# figure right to left — which makes each format's segments tile the 32-bit word
+# exactly once (pinned in test_riscv.py). A field's OWN segment order is its own
+# statement and is left alone: imm_s contributes (7,12) then (25,32), so S_TYPE's
+# segment list is not globally ascending, and must not be sorted into being.
+R_TYPE = OPCODE.union(RD, FUNCT3, RS1, RS2, FUNCT7, name="r_type")  # funct7 rs2 rs1 funct3 rd opcode
+I_TYPE = OPCODE.union(RD, FUNCT3, RS1, IMM_I,       name="i_type")  # imm[11:0] rs1 funct3 rd opcode
+S_TYPE = OPCODE.union(IMM_S, FUNCT3, RS1, RS2,      name="s_type")  # imm[11:5] rs2 rs1 funct3 imm[4:0] opcode
+B_TYPE = OPCODE.union(IMM_B, FUNCT3, RS1, RS2,      name="b_type")  # imm[12|10:5] rs2 rs1 funct3 imm[4:1|11] opcode
+U_TYPE = OPCODE.union(RD, IMM_U,                    name="u_type")  # imm[31:12] rd opcode
+J_TYPE = OPCODE.union(RD, IMM_J,                    name="j_type")  # imm[20|10:1|11|19:12] rd opcode
+
+FORMATS = (R_TYPE, I_TYPE, S_TYPE, B_TYPE, U_TYPE, J_TYPE)
+
+# slli/srli/srai are NOT a seventh format: they are I-type encodings whose
+# imm[11:0] is read as funct7|shamt, which is why their templates match on
+# FUNCT3_7 and take SHAMT rather than IMM_I (uop.py).

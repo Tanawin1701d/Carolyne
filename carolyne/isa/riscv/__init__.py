@@ -4,12 +4,13 @@
 #   reg.py     — architectural register classes (§6.1); x only, PC is not one
 #   op.py      — op vocabulary + the machine's execution units (§1.2)
 #   field_match.py — where each encoding field lives in the 32-bit word
-#                (§6.2), and ILEN_BYTES, standing in for the length decoder (§6.3)
+#                (§6.2), the six base formats as unions of those fields, and
+#                ILEN_BYTES, standing in for the length decoder (§6.3)
 #   operand.py — the rd/rs1/rs2 index rules and the six immediate rules,
 #                bound to those field positions (OPR_* constants)
 #   uop.py     — one µop template per instruction of the RV32I listing (§6.4)
-#   rv32i.py   — the Mop table binding encodings to those templates, and the
-#                IsaBase assembly
+#   mop.py     — MOP_TABLE, the Mop groups binding encodings to those templates
+#   rv32i.py   — the IsaBase assembly
 # Not supplied: the trap policy (§6.5), which has no type yet.
 #
 # The operand rules are module constants, so the register class they target
@@ -17,8 +18,9 @@
 # and by the `reg_files=(RegFile,)` the description declares. IsaBase matches reg files by
 # IDENTITY, and sharing constants is what makes those the same object.
 # Consequence: two rv32i() builds share it — call `x_file()` and build your own
-# operands if you need genuinely independent descriptions. `exec_units()` and
-# `mop_table()` stay functions; nothing mutates any of it.
+# operands if you need genuinely independent descriptions. MOP_TABLE is shared
+# on the same terms and for the same reason; `exec_units()` stays a function.
+# Nothing mutates any of it.
 #
 # Every file carries a KNOWN GAPS block naming what it cannot express. The
 # short version: field matchers have no values, Uop has no immediate, and PC
@@ -36,13 +38,14 @@ from .field_match import ILEN_BYTES
 from .operand import (OPR_IMM_B, OPR_IMM_I, OPR_IMM_J, OPR_IMM_S, OPR_IMM_U,
                       OPR_IMM_SHAMT, OPR_IMMS, OPR_RD, OPR_REGS, OPR_RS1,
                       OPR_RS2)
+from .mop import MOP_TABLE
 from .op import OPS, exec_units
 from .reg import ImmTarget, RegFile, X_LEN, x_file
-from .rv32i import mop_table, rv32i
+from .rv32i import rv32i
 from .uop import UOPS
 
 __all__ = [
-    "rv32i", "mop_table", "OPS", "exec_units", "ILEN_BYTES",
+    "rv32i", "MOP_TABLE", "OPS", "exec_units", "ILEN_BYTES",
     "RegFile", "ImmTarget", "X_LEN", "x_file",
     "OPR_RD", "OPR_RS1", "OPR_RS2", "OPR_REGS",
     "OPR_IMM_I", "OPR_IMM_S", "OPR_IMM_B", "OPR_IMM_U", "OPR_IMM_J",

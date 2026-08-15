@@ -161,10 +161,17 @@ TEMPLATE skeleton: `reg.py` (`x_file()` → x0..x31, x0 via `const_regs`;
 **PC is deliberately not a register class** — it is front-end/ROB state, not
 something the engine renames through a PRF port, so a 1-entry `pc` file was
 drafted and deleted), `op.py` (its own op vocabulary + `exec_units()` — no
-shipped catalog), `fields.py` (32-bit field positions, `ILEN_BYTES = 4`),
-`rv32i.py` (per-format shape builders, `mop_table(x)` → 11
-opcode-group `Mop`s, `rv32i()` → `IsaBase`). It builds
-and passes every container cross-check.
+shipped catalog), `field_match.py` (32-bit field positions, `ILEN_BYTES = 4`,
+and `FORMATS` = the six base formats R/I/S/B/U/J as `union`s of those fields,
+each tiling the word exactly once — declared but not yet consumed, since a
+`Mop` has no format slot), `uop.py` (`UOP_*` + `UOPS`), `mop.py` (`MOP_*` +
+`MOP_TABLE` → 11 opcode-group `Mop`s, exhaustive over `UOPS`), `rv32i.py`
+(`rv32i()` → `IsaBase`, nothing else). The table is grouped by OPCODE, not by
+format: the two are different partitions — I-type spans LOAD, OP-IMM, JALR and
+SYSTEM — so a format-grouped table would need one `Mop` matching four opcode
+values, which one matcher cannot say. `MOP_TABLE` is a module constant rather
+than a builder function, on the same frozen-data / shared-instance terms as
+the operand constants below. It builds and passes every container cross-check.
 The operand rules (`OPR_RD/OPR_RS1/OPR_RS2`, and the six `OPR_IMM_*`) are
 **module constants**, so the register class they target is one too:
 `reg.RegFile` — a shared instance built by `x_file()`, which `rv32i()` also
