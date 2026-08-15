@@ -36,6 +36,13 @@
 #   ExecUnit.ops is the kind→FU map, read the other way round. Consequence:
 #   a wrong (unit, op) pairing can no longer be caught here, and an op listed
 #   by several units is a routing choice the elaborator makes, not an error.
+#
+# Decision (2026-08-15):
+# - An operand now states its own role (operand.py), which the srcs/dests
+#   tuples also state positionally. This is the one place that sees both, so
+#   this is where they are held to each other: a DEST operand sitting in
+#   `srcs` is a construction error, not a silently-wrong template. Without the
+#   check the redundancy would be a bug source rather than a convenience.
 
 from __future__ import annotations
 
@@ -44,7 +51,7 @@ from typing import Optional, Tuple, Union
 
 from .field_match import InstrFieldMatch, InstrValueMatch, check_matcher_pair
 from .op import Op
-from .operand import FieldRef, Operand
+from .operand import FieldRef, Operand, OperandRole
 
 ImmRule = Union[int, FieldRef]
 
@@ -69,16 +76,21 @@ class Uop:
                 f"(name it from the catalog, or <unit>.op(<name>))")
         object.__setattr__(self, "srcs",  tuple(self.srcs))    # accept any sequence
         object.__setattr__(self, "dests", tuple(self.dests))
-        for role, operands, limit in (("src",  self.srcs,  MAX_SRCS),
-                                      ("dest", self.dests, MAX_DESTS)):
+        for role, operands, limit in ((OperandRole.SRC,  self.srcs,  MAX_SRCS),
+                                      (OperandRole.DEST, self.dests, MAX_DESTS)):
             if len(operands) > limit:
                 raise ValueError(
                     f"Uop '{self.op}': {len(operands)} {role} operands, "
                     f"record carries at most {limit} (uop_contract.md §2)")
-            for operand in operands:
+            for slot, operand in enumerate(operands):
                 if not isinstance(operand, Operand):
                     raise TypeError(
                         f"Uop '{self.op}': {role} operands must be Operand, "
                         f"got {type(operand).__name__}")
+                if operand.role is not role:
+                    raise ValueError(
+                        f"Uop '{self.op}': {role} slot {slot} holds an operand "
+                        f"declared {operand.role} — an operand's role must match "
+                        f"the list it sits in")
         check_matcher_pair(self.matcher_field, self.matcher_value,
                            where=f"Uop '{self.op}'")

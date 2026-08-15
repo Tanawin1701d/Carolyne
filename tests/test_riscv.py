@@ -6,7 +6,7 @@
 import pytest
 
 from carolyne.isa import (
-    FieldRef, Intermediate, InstrFieldMatch, IsaBase, Operand)
+    FieldRef, Intermediate, InstrFieldMatch, IsaBase, Operand, OperandRole)
 from carolyne.isa.riscv import (
     ILEN_BYTES, ImmTarget, MOP_TABLE, OPR_IMMS, OPR_RD, OPR_RS1, OPR_RS2,
     RegFile, UOPS, field_match as FM, op as O, rv32i, uop as U, x_file,
@@ -88,6 +88,9 @@ def test_operand_rules_agree_with_the_field_match_table():
     for operand, field in ((OPR_RD, FM.RD), (OPR_RS1, FM.RS1), (OPR_RS2, FM.RS2)):
         assert operand.index.name == field.name and operand.matcher is field
         assert operand.target is RegFile
+    # Three different encoding fields, so no slot is ever both read and
+    # written — which is what lets these stay shared constants (operand.py).
+    assert OPR_RD.is_dest and OPR_RS1.is_src and OPR_RS2.is_src
 
 
 def test_immediate_operands_carry_a_matcher_and_no_index():
@@ -96,10 +99,11 @@ def test_immediate_operands_carry_a_matcher_and_no_index():
     # whole rule: which bits of the word carry the value.
     for imm in OPR_IMMS:
         assert imm.target is ImmTarget and imm.index is None and imm.matcher
+        assert imm.is_src                           # a value flowing in, never written
     assert [i.matcher.name for i in OPR_IMMS] == [
         "imm_i", "imm_s", "imm_b", "imm_u", "imm_j", "shamt"]
     with pytest.raises(ValueError):                 # an index on one is refused
-        Operand(ImmTarget, FieldRef("imm"), matcher=FM.IMM_I)
+        Operand(ImmTarget, OperandRole.SRC, FieldRef("imm"), matcher=FM.IMM_I)
 
 
 def test_immediates_ride_in_srcs_for_now():

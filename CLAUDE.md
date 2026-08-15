@@ -85,7 +85,18 @@ contain description data only — no hardware code.
   elaborate to the same rename port, constant vs extractor wiring) or an
   `Intermediate` (index forbidden — the instance is the link). `is_const` is
   true only for a literal index onto a hardwired reg; a decoded index hitting
-  x0 is rename's runtime job.
+  x0 is rename's runtime job. `role` (`OperandRole.SRC`/`DEST`, required, no
+  default) is the direction, which `Uop.srcs`/`dests` also state positionally
+  — `Uop` is the one place that sees both and cross-checks them, so the
+  redundancy is a convenience rather than a bug source. Decision: `OperandRole`
+  **is** an enum where `Op` deliberately is not — an ISA may declare an
+  unanticipated op, but §2 gives the record exactly src/dest slots, so no ISA
+  invents a third role. Decision: **no `SRC_DEST`** — an arch slot read *and*
+  written through one field (x86 `add eax, ebx`) is two constants, because
+  rename does a RAT read *and* a write+alloc there, filling one src slot and
+  one dest slot; one object claiming both would hide two slots behind one
+  entry. RV32I pays nothing for this: rd/rs1/rs2 are three different fields,
+  so no slot is ever both and the shared constants survive.
 
 Immediates are deliberately NOT an `Operand` target — the µop record carries
 `imm` as its own field (contract §2).
@@ -246,6 +257,15 @@ A first `Layout`/`Mop` pair (encoding metadata + macro-op variants binding an
 encoding to a µop sequence) was written and then removed as sloppy, and the
 current `mop.py` is the from-scratch redesign — the encoding side of the
 contract (§1.3) is still open; don't restore the old one from git.
+
+A `PhyOperand` (the post-rename record slot: role, slot, class, physical index
+width, const-bypass value) was built in `carolyne/contract/` on 2026-08-15 and
+removed the same day — the hardware-plane side stays empty until the elaborator
+that consumes it exists. Don't restore it from git. What it surfaced is worth
+keeping: a physical index is a run-time value, so the map across the boundary
+runs **one-way**, reading an `Operand`; and it could not tell RV32I's
+`ImmTarget` from a real µtemp, which is the same open gap as `Uop` having no
+`imm`.
 
 Agreed next steps: give `UopSeq` the cracker-sequence duties it still lacks
 (stamp first/last, validate µtemp def-before-use), settle how a matcher binds

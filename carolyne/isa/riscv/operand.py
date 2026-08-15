@@ -30,6 +30,14 @@
 #   (rv32i.py header). A real µtemp must be built where its instruction is
 #   and never shared, so it could not be a constant here.
 #
+# Decision (2026-08-15):
+# - Each constant states its ROLE, which is what lets these stay constants:
+#   RV32I reads rs1/rs2 and writes rd through three DIFFERENT encoding fields,
+#   so no slot is ever both, and one OPR_RD serves all 30 instructions that
+#   write a register. (An ISA whose one field is read and written — x86's
+#   modrm_reg — needs a src constant and a dest constant; see operand.py.)
+#   The immediates are SRC: a value flowing in, never written back.
+#
 # KNOWN GAPS
 # - An immediate operand cannot say how its bits become a value: sign
 #   extension (imm_i/s/b/j are signed, shamt is not), the implicit low zero
@@ -44,25 +52,27 @@
 
 from __future__ import annotations
 
-from ..operand import FieldRef, Operand
+from ..operand import FieldRef, Operand, OperandRole
 from . import field_match as FM
 from .reg import ImmTarget, RegFile
 
+SRC, DEST = OperandRole.SRC, OperandRole.DEST
+
 # --- register operands ------------------------------------------------------
-OPR_RD  = Operand(RegFile, FieldRef(FM.RD.name),  matcher=FM.RD)    # dest, bits 11..7
-OPR_RS1 = Operand(RegFile, FieldRef(FM.RS1.name), matcher=FM.RS1)   # src 1, address base
-OPR_RS2 = Operand(RegFile, FieldRef(FM.RS2.name), matcher=FM.RS2)   # src 2, store data
+OPR_RD  = Operand(RegFile, DEST, FieldRef(FM.RD.name),  matcher=FM.RD)   # bits 11..7
+OPR_RS1 = Operand(RegFile, SRC,  FieldRef(FM.RS1.name), matcher=FM.RS1)  # src 1, address base
+OPR_RS2 = Operand(RegFile, SRC,  FieldRef(FM.RS2.name), matcher=FM.RS2)  # src 2, store data
 
 OPR_REGS = (OPR_RD, OPR_RS1, OPR_RS2)
 
 # --- immediate operands -----------------------------------------------------
 # No index: an immediate is not a register of a class. The matcher is the
 # whole rule — which bits of the instruction word carry the value.
-OPR_IMM_I     = Operand(ImmTarget, matcher=FM.IMM_I)    # addi/loads/jalr: 12-bit
-OPR_IMM_S     = Operand(ImmTarget, matcher=FM.IMM_S)    # stores: 12-bit, split field
-OPR_IMM_B     = Operand(ImmTarget, matcher=FM.IMM_B)    # branches: low bit implicit 0
-OPR_IMM_U     = Operand(ImmTarget, matcher=FM.IMM_U)    # lui/auipc: bits 31..12
-OPR_IMM_J     = Operand(ImmTarget, matcher=FM.IMM_J)    # jal: low bit implicit 0
-OPR_IMM_SHAMT = Operand(ImmTarget, matcher=FM.SHAMT)    # slli/srli/srai: 5-bit count
+OPR_IMM_I     = Operand(ImmTarget, SRC, matcher=FM.IMM_I)   # addi/loads/jalr: 12-bit
+OPR_IMM_S     = Operand(ImmTarget, SRC, matcher=FM.IMM_S)   # stores: 12-bit, split field
+OPR_IMM_B     = Operand(ImmTarget, SRC, matcher=FM.IMM_B)   # branches: low bit implicit 0
+OPR_IMM_U     = Operand(ImmTarget, SRC, matcher=FM.IMM_U)   # lui/auipc: bits 31..12
+OPR_IMM_J     = Operand(ImmTarget, SRC, matcher=FM.IMM_J)   # jal: low bit implicit 0
+OPR_IMM_SHAMT = Operand(ImmTarget, SRC, matcher=FM.SHAMT)   # slli/srli/srai: 5-bit count
 
 OPR_IMMS = (OPR_IMM_I, OPR_IMM_S, OPR_IMM_B, OPR_IMM_U, OPR_IMM_J, OPR_IMM_SHAMT)

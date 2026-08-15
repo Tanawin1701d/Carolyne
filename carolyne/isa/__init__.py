@@ -4,7 +4,7 @@
 # An ISA package never imports from carolyne.uarch.
 
 from .reg import RegFile, Intermediate
-from .operand import FieldRef, Operand
+from .operand import FieldRef, Operand, OperandRole
 from .op import Op
 from .exec_unit import ExecUnit
 from .uop import Uop
@@ -13,7 +13,7 @@ from .mop import UopSeq, Mop
 from .isa import IsaBase
 
 __all__ = [
-    "RegFile", "Intermediate", "FieldRef", "Operand", "Op",
+    "RegFile", "Intermediate", "FieldRef", "Operand", "OperandRole", "Op",
     "ExecUnit", "Uop", "InstrFieldMatch", "InstrValueMatch",
     "check_matcher_pair", "UopSeq", "Mop", "IsaBase",
 ]

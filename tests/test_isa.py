@@ -9,8 +9,10 @@ import pytest
 
 from carolyne.isa import (
     ExecUnit, FieldRef, InstrFieldMatch, IsaBase, Mop, Op, Operand,
-    RegFile, Uop, UopSeq,
+    OperandRole, RegFile, Uop, UopSeq,
 )
+
+SRC, DEST = OperandRole.SRC, OperandRole.DEST
 
 ADD  = Op("ADD")
 LOAD = Op("LOAD")
@@ -26,8 +28,8 @@ def _mop(op, opcode, reg_file=X):
     # One encoding → one µop sequence. (Field binding is still preliminary:
     # the matcher is a single InstrFieldMatch on the opcode bits.)
     uop = Uop(op,
-              srcs=(Operand(reg_file, FieldRef("rs1")),),
-              dests=(Operand(reg_file, FieldRef("rd")),))
+              srcs=(Operand(reg_file, SRC, FieldRef("rs1")),),
+              dests=(Operand(reg_file, DEST, FieldRef("rd")),))
     return Mop(matcher_field=InstrFieldMatch("opcode", ((0, 7),)),
                uop_seq=(UopSeq(uops=(uop,), matcher_field=InstrFieldMatch(opcode, ((0, 7),))),))
 
