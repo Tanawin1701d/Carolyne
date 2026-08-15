@@ -17,7 +17,7 @@
 # is one too: `reg.RegFile`, built by `x_file()` and shared by every shape
 # and by the `reg_files=(RegFile,)` the description declares. IsaBase matches reg files by
 # IDENTITY, and sharing constants is what makes those the same object.
-# Consequence: two rv32i() builds share it — call `x_file()` and build your own
+# Consequence: two Rv32i() builds share it — call `x_file()` and build your own
 # operands if you need genuinely independent descriptions. MOP_TABLE is shared
 # on the same terms and for the same reason; `exec_units()` stays a function.
 # Nothing mutates any of it.
@@ -41,11 +41,11 @@ from .operand import (OPR_IMM_B, OPR_IMM_I, OPR_IMM_J, OPR_IMM_S, OPR_IMM_U,
 from .mop import MOP_TABLE
 from .op import OPS, exec_units
 from .reg import ImmTarget, RegFile, X_LEN, x_file
-from .rv32i import rv32i
+from .rv32i import Rv32i
 from .uop import UOPS
 
 __all__ = [
-    "rv32i", "MOP_TABLE", "OPS", "exec_units", "ILEN_BYTES",
+    "Rv32i", "MOP_TABLE", "OPS", "exec_units", "ILEN_BYTES",
     "RegFile", "ImmTarget", "X_LEN", "x_file",
     "OPR_RD", "OPR_RS1", "OPR_RS2", "OPR_REGS",
     "OPR_IMM_I", "OPR_IMM_S", "OPR_IMM_B", "OPR_IMM_U", "OPR_IMM_J",

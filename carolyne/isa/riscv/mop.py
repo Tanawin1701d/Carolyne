@@ -33,7 +33,7 @@
 # - Module CONSTANTS (`MOP_<group>` + the `MOP_TABLE` tuple), not a builder
 #   function, matching uop.py's UOP_*/UOPS shape: the table is frozen data all
 #   the way down and nothing mutates it, so the rebuild a function implied
-#   bought nothing. Accepted cost — every rv32i() build now shares one table,
+#   bought nothing. Accepted cost — every Rv32i() build now shares one table,
 #   which is the same bargain the package already makes for reg.RegFile and the
 #   operand constants, and for the same reason: IsaBase matches reg files by
 #   IDENTITY, so sharing is what keeps the description self-consistent.

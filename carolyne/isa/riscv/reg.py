@@ -21,7 +21,7 @@
 #   builder behind it. IsaBase matches register files by identity, so
 #   everything that names this class must name the same object: the operand
 #   rules of operand.py are module constants, so the class they target has to
-#   be one too. The cost is real and accepted: two rv32i() builds in one
+#   be one too. The cost is real and accepted: two Rv32i() builds in one
 #   process share it, and a caller who wants genuinely independent
 #   descriptions calls x_file() and builds its own operands. Nothing mutates
 #   a RegFile, so sharing is safe; only identity makes it visible.

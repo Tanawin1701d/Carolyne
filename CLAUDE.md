@@ -255,7 +255,11 @@ and `FORMATS` = the six base formats R/I/S/B/U/J as `union`s of those fields,
 each tiling the word exactly once — declared but not yet consumed, since a
 `Mop` has no format slot), `uop.py` (`UOP_*` + `UOPS`), `mop.py` (`MOP_*` +
 `MOP_TABLE` → 11 opcode-group `Mop`s, exhaustive over `UOPS`), `rv32i.py`
-(`rv32i()` → `IsaBase`, nothing else). The table is grouped by OPCODE, not by
+(`Rv32i`, an `IsaBase` **subclass** supplying every vocabulary as a field
+default — `Rv32i()` is the whole description, and `Rv32i(name=...)` varies one
+part without a builder signature for the rest; it stays DATA, no method
+override, so every inherited cross-check still runs. An `rv32i()` factory stood
+there until 2026-08-15; don't restore it). The table is grouped by OPCODE, not by
 format: the two are different partitions — I-type spans LOAD, OP-IMM, JALR and
 SYSTEM — so a format-grouped table would need one `Mop` matching four opcode
 values, which one matcher cannot say. `MOP_TABLE` is a module constant rather
@@ -263,9 +267,9 @@ than a builder function, on the same frozen-data / shared-instance terms as
 the operand constants below. It builds and passes every container cross-check.
 The operand rules (`OPR_RD/OPR_RS1/OPR_RS2`, and the six `OPR_IMM_*`) are
 **module constants**, so the register class they target is one too:
-`reg.RegFile` — a shared instance built by `x_file()`, which `rv32i()` also
+`reg.RegFile` — a shared instance built by `x_file()`, which `Rv32i` also
 declares. `IsaBase` matches reg files by identity, and sharing constants
-makes those the same object by construction. Accepted cost: two `rv32i()`
+makes those the same object by construction. Accepted cost: two `Rv32i()`
 builds share it; `x_file()` builds a fresh one for a caller who needs
 independence. An immediate operand targets `reg.ImmTarget` (an
 `Intermediate`, so it allocates no PRF) and carries **no index** — an index
