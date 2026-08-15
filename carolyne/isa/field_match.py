@@ -31,6 +31,9 @@ from typing import Tuple
 @dataclass(frozen=True)
 class InstrFieldMatch:
     name      : str
+    # ORDER IS SIGNIFICANT — the tuple is the caller's statement about the field,
+    # not a set of bits: nothing here sorts, merges or dedups it, and consumers
+    # must read it in the order written (imm_b: (7,8) is imm[11], (8,12) is imm[4:1]).
     match_idx : Tuple[Tuple[int, int], ...]  # ((start_match_idx, end_match_idx), ...), end exclusive
 
     def __post_init__(self):
@@ -62,8 +65,12 @@ class InstrFieldMatch:
                 raise TypeError(
                     f"InstrFieldMatch.union expects InstrFieldMatch, "
                     f"got {type(other).__name__}")
-        return InstrFieldMatch(name or "+".join(f.name for f in fields),
-                               tuple(seg for f in fields for seg in f.match_idx))
+        union_name = name or "+".join(f.name for f in fields)
+        # Flattened in ARGUMENT order, each field's own segment order kept intact:
+        # `a | b` and `b | a` are different rules, not the same one.
+        union_segs = tuple(seg for f in fields for seg in f.match_idx)
+
+        return InstrFieldMatch(union_name, union_segs)
 
     def __or__(self, other: "InstrFieldMatch") -> "InstrFieldMatch":
         return self.union(other)
