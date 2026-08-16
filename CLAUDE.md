@@ -210,8 +210,8 @@ Immediates are deliberately NOT an `Operand` target — the µop record carries
   `IsaBase`, which sees the whole table. `Operand` keeps a single `matcher`
   (`InstrFieldMatch` only): it says where an index or immediate is READ from
   and tests nothing.
-- **`IsaBase(name, reg_files, atomic_operands, operands, ops, exec_units,
-  uops, mops)`** (`isa.py`) — the
+- **`IsaBase(name, pc_width, pc_align, ilen_bytes, reg_files, atomic_operands,
+  operands, ops, exec_units, uops, mops)`** (`isa.py`) — the
   whole ISA, the object a generator is handed. Decision: `ops` and
   `reg_files` are **declared, not derived** from the mops — deriving would
   make a typo self-consistent. It cross-checks at construction: every op and
@@ -243,14 +243,38 @@ Immediates are deliberately NOT an `Operand` target — the µop record carries
   may subclass it for fields this container doesn't model — subclasses must
   stay `frozen=True` and stay **data**: overriding `op()`/`units_for()`/
   `__post_init__` would put ISA-specific behavior on the elaborator's path.
-  `ilen` / trap policy join it when those types exist.
+  Decision (2026-08-16): three **addressing scalars** joined the vocabularies —
+  `pc_width`, `pc_align` (bytes), `ilen_bytes` — one subject, "where does an
+  instruction sit and how long is it", and the container had none of it. The PC
+  is not a register class (§4.3) but its WIDTH is still an ISA fact: fetch, the
+  redirect path, the branch-target adder and the ROB's pc cannot be sized
+  without it, and the contract doc has the same gap (§4.3 claims the ISA
+  influences the PC "only via `br` and `ilen`"). `ilen_bytes` is §6 deliverable
+  three finally getting a home — `riscv/field_match.py` held `ILEN_BYTES` with a
+  comment saying so. Declared, not derived: pc_width from the integer class
+  would make the container name a specific reg file, the one thing it must not
+  do (a *package* may still write `PC_WIDTH = X_LEN` — that's the ISA quoting
+  its own spec). Required, no defaults — a default 32 is a silent wrong answer
+  for a 64-bit ISA. **Three plain fields, not an `InstrAddr` type**: the
+  container states them itself and the cross-checks ride in the `__post_init__`
+  that already runs; a type earns its place the day `ilen_bytes` grows §1.3's
+  variable-length function form, which needs validation of its own. Checks:
+  `pc_align` a power of two (alignment is a mask), `ilen_bytes` a multiple of it
+  (aligned steps from an aligned start stay aligned), `pc_width` wide enough to
+  address past one aligned unit. `pc_align_bits` is **derived** (the always-zero
+  low bits a stored PC can drop), the same store-the-count/derive-the-log2
+  bargain `RegFile.amount`→`index_width` makes. NOT here: the reset vector —
+  where a core starts fetching is machine configuration, not an ISA fact.
+  Trap policy joins when that type exists.
 
 **`carolyne/isa/riscv/`** is the first per-ISA package, deliberately a
 TEMPLATE skeleton: `reg.py` (`x_file()` → x0..x31, x0 via `const_regs`;
 **PC is deliberately not a register class** — it is front-end/ROB state, not
 something the engine renames through a PRF port, so a 1-entry `pc` file was
 drafted and deleted), `op.py` (its own op vocabulary + `exec_units()` — no
-shipped catalog), `field_match.py` (32-bit field positions, `ILEN_BYTES = 4`,
+shipped catalog), `field_match.py` (32-bit field positions, the addressing group
+`PC_WIDTH = X_LEN` / `PC_ALIGN = 4` / `ILEN_BYTES = 4` that `Rv32i` names as its
+three scalar defaults,
 and `FORMATS` = the six base formats R/I/S/B/U/J as `union`s of those fields,
 each tiling the word exactly once — declared but not yet consumed, since a
 `Mop` has no format slot), `uop.py` (`UOP_*` + `UOPS`), `mop.py` (`MOP_*` +

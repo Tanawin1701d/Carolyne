@@ -70,6 +70,46 @@
 #   cores offer. A two-target core carrying a RegFile no operand ever selects
 #   is not "used", so it need not be declared — worth revisiting if an ISA
 #   ever leaves a candidate unselected on purpose.
+#
+# Decisions (2026-08-16) — instruction addressing:
+# - Three scalars join the vocabularies: `pc_width`, `pc_align`, `ilen_bytes`.
+#   They are one subject — how instruction addresses work — and the container
+#   had none of them. PC is deliberately not a register class (§4.3, and
+#   riscv/reg.py says why), but its WIDTH is still an ISA fact: fetch, the
+#   redirect path, the branch-target adder and the ROB's pc field cannot be
+#   sized without it. The contract doc has the same gap — §4.3 claims the ISA
+#   influences the PC "only via `br` fields and `ilen`", which is not enough to
+#   size a single wire. `ilen_bytes` is §6 deliverable three, which until now
+#   had no home in the container: riscv/field_match.py held ILEN_BYTES with a
+#   comment saying this is where it belongs.
+# - DECLARED, not derived, on exactly the terms `ops` and `reg_files` are. The
+#   tempting derivation — pc_width from the integer register class — would make
+#   the container name a specific class, which is the one thing it must never
+#   do, and would make a typo self-consistent. (A per-ISA package may still say
+#   `PC_WIDTH = X_LEN`: that is the ISA stating its own spec, not the container
+#   inferring one.)
+# - REQUIRED, no defaults. A default `pc_width = 32` is a silent wrong answer
+#   for a 64-bit ISA, and this layer's whole bargain is that a bad description
+#   fails at construction rather than deep in elaboration.
+# - Three plain fields, NOT a small `InstrAddr` type holding them. The container
+#   states them itself, so nothing new has to be imported to read an ISA's
+#   addressing, and the cross-checks below can hold all three to each other in
+#   the one __post_init__ that already runs. A type earns its place the day
+#   `ilen_bytes` grows its second form — §1.3's pure function over the prefix
+#   window, for a variable-length ISA — because that form needs validation of
+#   its own. Until x86mini shows what that function looks like, the constant is
+#   the whole story and a type would be a wrapper around one int.
+# - `pc_align` stores BYTES and derives `pc_align_bits`, the same bargain
+#   RegFile makes with `amount`/`index_width`: store the count the description
+#   states, derive the log2 the hardware wants, so the two can never disagree.
+#   Those are the always-zero low bits of every instruction address — what lets
+#   the ROB store a narrowed PC.
+# - The cross-checks are what loose scalars could not do alone: `pc_align` a
+#   power of two (alignment is a mask, not a modulus), `ilen_bytes` a multiple
+#   of it (a sequence of aligned steps from an aligned start stays aligned), and
+#   `pc_width` wide enough to address past one aligned unit.
+# - NOT here: the reset vector. Where a core starts fetching is a machine
+#   configuration choice, not something the ISA states.
 
 from __future__ import annotations
 
@@ -118,6 +158,13 @@ def _label(target) -> str:
 @dataclass(frozen=True)
 class IsaBase:
     name            : str                       # ISA name, e.g. "rv32i", "x86mini"
+    pc_width        : int                       # bits of program counter (§4.3); the PC is
+                                                # engine state, not a register class
+    pc_align        : int                       # bytes: every instruction address is a
+                                                # multiple of this (RV32I 4, x86 1)
+    ilen_bytes      : int                       # instruction length in bytes (§1.3, §6.3).
+                                                # A constant means fixed-length: the fetch
+                                                # aligner degenerates to the fast path
     reg_files       : Tuple[RegFile, ...]       # architectural register classes
     atomic_operands : Tuple[AtomicOperand, ...] # the value/direction cores
     operands        : Tuple[Operand, ...]       # cores + encoding side: the slot rules
@@ -129,12 +176,40 @@ class IsaBase:
     def __post_init__(self) -> None:
         if not self.name:
             raise ValueError("IsaBase needs a non-empty name")
+        self._check_addressing()
         self._normalize()
         self._reject_duplicates()
         self._reject_undeclared()
         self._reject_unrunnable_ops()
 
     # --- construction checks --------------------------------------------------
+    def _check_addressing(self) -> None:
+        """Hold the three addressing scalars to each other (header, 2026-08-16)."""
+        for field, value in (("pc_width",   self.pc_width),
+                             ("pc_align",   self.pc_align),
+                             ("ilen_bytes", self.ilen_bytes)):
+            if isinstance(value, bool) or not isinstance(value, int):
+                raise TypeError(
+                    f"IsaBase '{self.name}': {field} must be an int, "
+                    f"got {type(value).__name__}")
+            if value < 1:
+                raise ValueError(
+                    f"IsaBase '{self.name}': {field} must be >= 1, got {value}")
+
+        if self.pc_align & (self.pc_align - 1):
+            raise ValueError(
+                f"IsaBase '{self.name}': pc_align must be a power of two "
+                f"(alignment is a mask), got {self.pc_align}")
+        if self.ilen_bytes % self.pc_align:
+            raise ValueError(
+                f"IsaBase '{self.name}': ilen_bytes {self.ilen_bytes} is not a multiple "
+                f"of pc_align {self.pc_align} — stepping by it would leave an aligned "
+                f"instruction address misaligned")
+        if (1 << self.pc_width) <= self.pc_align:
+            raise ValueError(
+                f"IsaBase '{self.name}': pc_width {self.pc_width} cannot address past "
+                f"one aligned unit (pc_align {self.pc_align})")
+
     def _normalize(self) -> None:
         """Accept any sequence, store a tuple, hold each member to its type."""
         for field, want in _VOCABULARIES:
@@ -198,6 +273,18 @@ class IsaBase:
                 raise ValueError(
                     f"IsaBase '{self.name}': no exec unit executes op '{op.name}' "
                     f"(units: {', '.join(u.name for u in self.exec_units)})")
+
+    # --- derived facts --------------------------------------------------------
+    @property
+    def pc_align_bits(self) -> int:
+        """Low PC bits that are always zero — the ones a stored PC can drop.
+
+        Derived from `pc_align` the way RegFile.index_width is derived from
+        `amount`: the description states the count, the hardware wants the
+        log2, and deriving is what stops the two from disagreeing. Byte-aligned
+        (pc_align == 1) gives 0.
+        """
+        return self.pc_align.bit_length() - 1
 
     # --- what the mops actually reach -----------------------------------------
     def _uops(self):

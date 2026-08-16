@@ -26,7 +26,7 @@
 #   only, no override of __post_init__/op()/units_for(). Every inherited
 #   cross-check still runs at construction, and code holding an IsaBase is
 #   holding exactly what it thinks it is.
-# - All eight fields are redeclared, and that is not repetition for its own
+# - All eleven fields are redeclared, and that is not repetition for its own
 #   sake: a dataclass picks up a default only through an ANNOTATED assignment,
 #   so a bare `name = "rv32i"` would be a plain class attribute and `Rv32i()`
 #   would still demand the argument. The base's types are imported for those
@@ -37,6 +37,15 @@
 #   the old factory built fresh units per call. Nothing observable changes:
 #   ExecUnit is frozen data and IsaBase matches units by NAME, not identity —
 #   the same object-sharing bargain reg.RegFile and MOP_TABLE already make.
+#
+# Decision (2026-08-16):
+# - The three addressing scalars IsaBase grew today (pc_width, pc_align,
+#   ilen_bytes) are named from field_match.py, not written as literals here:
+#   PC_WIDTH / PC_ALIGN / ILEN_BYTES sit beside the field positions they belong
+#   with, and this file stays what it says it is — the assembly, nothing else.
+#   PC_WIDTH is X_LEN there, which is the RV32I spec speaking; the CONTAINER
+#   still refuses to derive it (isa.py header), because deriving would mean
+#   naming a specific register class.
 #
 # The KNOWN GAPS of the description live with the parts that carry them:
 # mop.py for the encoding table, uop.py for the µop shapes, field_match.py for
@@ -55,6 +64,7 @@ from ..op import Op
 from ..operand import Operand
 from ..reg import RegFile                 # the CLASS, for the field annotations
 from ..uop import Uop
+from .field_match import ILEN_BYTES, PC_ALIGN, PC_WIDTH
 from .mop import MOP_TABLE
 from .op import OPS, exec_units
 from .operand import (AOPR_DEST_1, AOPR_SRC_1, AOPR_SRC_2, AOPR_SRC_3,
@@ -72,6 +82,9 @@ class Rv32i(IsaBase):
     """The RV32I description — the object a generator is handed."""
 
     name            : str                       = "rv32i"
+    pc_width        : int                       = PC_WIDTH
+    pc_align        : int                       = PC_ALIGN
+    ilen_bytes      : int                       = ILEN_BYTES
     reg_files       : Tuple[RegFile, ...]       = (X_FILE,)
     atomic_operands : Tuple[AtomicOperand, ...] = (AOPR_SRC_1, AOPR_SRC_2,
                                                    AOPR_SRC_3, AOPR_DEST_1)

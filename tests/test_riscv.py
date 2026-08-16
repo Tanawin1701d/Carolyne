@@ -10,7 +10,7 @@ from carolyne.isa import (
     OperandRole, TargetKind)
 from carolyne.isa.riscv import (
     ILEN_BYTES, ImmTarget, MOP_TABLE, OPR_IMMS, OPR_RD, OPR_RS1, OPR_RS2,
-    RegFile, Rv32i, UOPS, field_match as FM, op as O, uop as U, x_file,
+    RegFile, Rv32i, UOPS, X_LEN, field_match as FM, op as O, uop as U, x_file,
 )
 
 
@@ -182,7 +182,7 @@ def test_every_rv32i_instruction_is_one_uop():
     assert jr.srcs[0].index.name == "rs1" and jr.dests[0].index.name == "rd"
 
 
-def test_pc_is_not_a_register_class():
+def test_pc_is_not_a_register_class_but_still_has_a_width():
     # The program counter is front-end / ROB state, not something the engine
     # renames through a PRF port (reg.py header). Consequence: the
     # pc-relative shapes are missing an input this layer cannot name.
@@ -190,6 +190,10 @@ def test_pc_is_not_a_register_class():
     assert [r.name for r in isa.reg_files] == ["x"]
     with pytest.raises(ValueError):
         isa.reg_file("pc")
+    # Not a class, but the engine still cannot size fetch or the redirect path
+    # without these three — declared, and named from field_match.py.
+    assert (isa.pc_width, isa.pc_align, isa.ilen_bytes) == (X_LEN, 4, 4)
+    assert isa.pc_align_bits == 2                   # the two always-zero low bits
     auipc, = _uops(isa, O.AUIPC)
     beq,   = _uops(isa, O.BEQ)
     # auipc is rd = pc + imm, but only the imm is nameable — see GAPS.

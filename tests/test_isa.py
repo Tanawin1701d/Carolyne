@@ -51,7 +51,8 @@ def _walk(mops):
 def _isa(**overrides):
     mops = overrides.pop("mops", (_mop(ADD, "add"), _mop(LOAD, "lw")))
     uops, operands, cores = _walk(mops)
-    kwargs = dict(name="toy", reg_files=(X,), atomic_operands=cores,
+    kwargs = dict(name="toy", pc_width=32, pc_align=4, ilen_bytes=4,
+                  reg_files=(X,), atomic_operands=cores,
                   operands=operands, ops=(ADD, LOAD), exec_units=(ALU, MEM),
                   uops=uops, mops=mops)
     kwargs.update(overrides)
@@ -75,6 +76,35 @@ def test_isa_holds_the_vocabularies():
         isa.unit("crypto")
     with pytest.raises(ValueError):
         isa.reg_file("gpr")
+
+
+def test_it_carries_how_instruction_addresses_work():
+    # The PC is not a register class (§4.3) but it still has a width, and the
+    # engine cannot size fetch, the redirect path or the ROB's pc without it.
+    isa = _isa()
+    assert (isa.pc_width, isa.pc_align, isa.ilen_bytes) == (32, 4, 4)
+    # Derived, not declared — the always-zero low bits of any instruction
+    # address, which is what lets a stored PC be narrowed.
+    assert isa.pc_align_bits == 2
+    # A byte-aligned ISA drops nothing.
+    assert _isa(pc_align=1, ilen_bytes=1).pc_align_bits == 0
+
+
+def test_the_addressing_scalars_are_held_to_each_other():
+    # What three loose ints could not check alone.
+    with pytest.raises(ValueError, match="power of two"):
+        _isa(pc_align=3)
+    with pytest.raises(ValueError, match="not a multiple"):
+        _isa(pc_align=4, ilen_bytes=2)      # stepping by 2 leaves a 4-aligned pc misaligned
+    with pytest.raises(ValueError, match="cannot address past"):
+        _isa(pc_width=2, pc_align=4)
+    for bad in (dict(pc_width=0), dict(pc_align=0), dict(ilen_bytes=0)):
+        with pytest.raises(ValueError, match=">= 1"):
+            _isa(**bad)
+    with pytest.raises(TypeError):
+        _isa(ilen_bytes="4")                # a string is not a length
+    with pytest.raises(TypeError):
+        _isa(pc_width=True)                 # nor is a bool a width
 
 
 def test_an_op_may_be_claimed_by_several_units():
@@ -212,10 +242,11 @@ def test_a_per_isa_package_may_subclass_it():
 
     mops = (_mop(ADD, "add"), _mop(LOAD, "lw"))
     uops, operands, cores = _walk(mops)
-    isa = ToyIsa(name="toy", reg_files=(X,), atomic_operands=cores,
+    addr = dict(pc_width=32, pc_align=4, ilen_bytes=4)
+    isa = ToyIsa(name="toy", **addr, reg_files=(X,), atomic_operands=cores,
                  operands=operands, ops=(ADD, LOAD), exec_units=(ALU, MEM),
                  uops=uops, mops=mops, prefixes=("0x66",))
     assert isa.prefixes == ("0x66",) and isa.op("ADD") is ADD
     with pytest.raises(ValueError):         # inherited checks still run
-        ToyIsa(name="", reg_files=(X,), atomic_operands=cores, operands=operands,
+        ToyIsa(name="", **addr, reg_files=(X,), atomic_operands=cores, operands=operands,
                ops=(ADD,), exec_units=(ALU,), uops=uops, mops=mops)

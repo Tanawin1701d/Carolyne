@@ -6,6 +6,9 @@
 # - RV32I is fixed 32-bit, so `ilen` is the constant 4 and no length decoder
 #   is needed. The field has no type in the isa layer yet (§6 deliverable
 #   three); ILEN_BYTES below is the value it will carry.
+#   (2026-08-16: IsaBase grew `ilen_bytes`, so ILEN_BYTES is now carried rather
+#   than merely declared, and PC_WIDTH / PC_ALIGN joined it — one group, since
+#   all three answer "where does an instruction sit and how long is it".)
 # - The scrambled immediates (S/B/J) are the reason InstrFieldMatch takes a
 #   TUPLE of segments. imm_b is written as four segments rather than merged
 #   ranges even where two are adjacent — (7,8) is imm[11] and (8,12) is
@@ -37,6 +40,7 @@
 from __future__ import annotations
 
 from ..field_match import InstrFieldMatch, InstrValueMatch
+from .reg import X_LEN
 
 
 def val(*values: int) -> InstrValueMatch:
@@ -51,6 +55,13 @@ def val(*values: int) -> InstrValueMatch:
     """
     return InstrValueMatch(values)
 
+# --- instruction addressing (the three scalars IsaBase takes) ---------------
+# Grouped here because they are one subject with the field positions below:
+# where an instruction sits and how long it is. PC_WIDTH is XLEN by the RV32I
+# spec — the PC still has a width even though it is not a register class, and
+# reg.py says why it is not one.
+PC_WIDTH   = X_LEN      # program counter is XLEN bits
+PC_ALIGN   = 4          # instruction addresses are 4-byte aligned (2 with the C ext)
 ILEN_BYTES = 4          # RV32I is fixed-length; no length decoder needed
 
 # --- register / function fields --------------------------------------------
