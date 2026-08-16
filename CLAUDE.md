@@ -385,17 +385,23 @@ elaboration from a `RegFile` in `uarch`.
   element / mux trees on read; callable index → one-hot writes or reduce
   trees; k2k assigns pair fields structurally. clk/mrst wiring is automatic
   in `build_flow`.
-- **Field widths are per-instantiation** (added to Kathryn on 2026-08-16 for
-  this project): a `kaf(w)` width in the class body is a DEFAULT, overridable
-  with a keyword at construction — `FetchDT(REG, (lanes,), "fetch", pc=64,
-  instr=16)` — and `kaf()` with no width declares a field every instantiation
-  must size. This is what lets the engine write each record class ONCE and size
-  it from the description (`isa.pc_width`, `ilen_bytes * 8`); before it, one
-  shape at two widths meant a `type()` factory per record, because
-  `__init_subclass__` stamps the field list when the class is created and a
-  class body cannot see a caller's parameters. A field may not be named
-  `backing`/`shape`/`name` (they are `Karray.__init__` parameters); declaring
-  one raises at class creation.
+- **A Karray record is finished at instantiation** (added to Kathryn on
+  2026-08-16 for this project). The class body states the shape a record usually
+  has; the call settles it, and the keyword's VALUE picks what it does — an
+  `int` sets the width of a DECLARED field, a `kaf()` ADDS a field only that
+  array has:
+  `FetchDT(REG, (lanes,), "fetch", pc=64, instr=16, spectag=kaf(8))`.
+  `kaf()` with no width in the class body declares a field every instantiation
+  must size. Added fields append after the declared ones, flatten like any
+  bundle (`pos=kaf(Vec2)` → `pos_x`/`pos_y`) and read back as `d[0].spectag`.
+  This is what lets the engine write each record class ONCE, size it from the
+  description (`isa.pc_width`, `ilen_bytes * 8`), and let one pipeline carry a
+  field another does not — before it, one shape at two widths meant a `type()`
+  factory per record, because `__init_subclass__` stamps the field list when the
+  class is created and a class body cannot see a caller's parameters. The class
+  is never mutated, so two arrays of one class may differ. A field may not be
+  named `backing`/`shape`/`name` (they are `Karray.__init__` parameters);
+  declaring one raises at class creation.
 
 ## 7. Conventions
 

@@ -1,5 +1,8 @@
+from typing import Optional
 
 from kathryn import *
+
+from carolyne.uarch.common import BlockManager
 
 
 ##################################################################
@@ -19,5 +22,11 @@ class FetchDT(Karray):
     #                        pc=isa.pc_width, instr=isa.ilen_bytes * 8)
     pc    = kaf(32)
     instr = kaf(32)
+
+class Fetch(Module):
+
+    def __init__(self, lane):
+
+
 
 
