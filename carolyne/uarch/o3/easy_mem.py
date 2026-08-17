@@ -14,10 +14,12 @@ class EasyMem(Module):
     """A handful of memory banks, indexed like a list."""
 
     def __init__(self, data_width: int = 32, index_width: int = 8, blk_request: int = 4):
-        super().__init__()
+        # Config BEFORE super().__init__(): that call runs the @init methods, so
+        # com_declare below already needs these fields to exist.
         self.data_width  = data_width
         self.index_width = index_width
         self.blk_request = blk_request
+        super().__init__()
 
     @init
     def com_declare(self):

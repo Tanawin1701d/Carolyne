@@ -23,20 +23,30 @@ class Fetch(Module):
     def __init__(self,
                  config: CPUO3_Config,
                  simple_mem: EasyMem):
+        # Plain-Python configuration only. Module.__init__ opens the module
+        # scope, runs the @init methods and closes it before it returns, so
+        # hardware declared after super().__init__() lands outside this module —
+        # it panics standalone, or attaches to the PARENT that happens to be
+        # open. Both config fields must therefore be set before the super call.
+        self.config     = config
+        self.simple_mem = simple_mem
         super().__init__()
-        self.config = config
 
+    @init
+    def com_declare(self):
         # constant
         pc_width = self.config.isa.pc_width
         pc_align = self.config.isa.pc_align
         lanes    = self.config.fe_lanes
 
         # hardware component
-        self.pc          = reg(pc_width)
-        self.mem_req     = [ simple_mem.read_sync(i, self.pc + (i * pc_align))
+        self.pc          = reg(pc_width, "pc")
+        self.mem_req     = [ self.simple_mem.read_sync(i, self.pc + (i * pc_align))
                              for i in range(lanes)]
         self.fetch_stages = [ FetchDT(HwComponentType.REG, (1,),
-                                     "fetchDT{}".format(i))
+                                     "fetchDT{}".format(i),
+                                     pc=pc_width,
+                                     instr=self.config.instr_width)
                              for i in range(lanes)]
         self.fetch_meta  = PipCon()
 
@@ -45,8 +55,10 @@ class Fetch(Module):
         self.decode_meta = decoder.decode_meta
 
     def override_pc(self, new_pc, override_priority: int):
+        # `|=`, not `=`: a bare assignment rebinds the Python attribute and
+        # throws the reg away.
         with priority(override_priority):
-            self.pc = new_pc
+            self.pc |= new_pc
 
 
 
