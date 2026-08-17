@@ -35,6 +35,11 @@ class EasyMem(Module):
                        True,
                        "read{}".format(blk_id))
 
+    def read_sync(self, blk_id: int, read_addr):
+        # TODO we will handle it later
+        dayta = wire(self.data_width, "dayta{}".format(blk_id))
+        return PipCon(), dayta
+
 
     def write(self, blk_id : int, write_addr, data):
         x = mem_ele(self.mempool[blk_id], write_addr, self.data_width, False, "write{}".format(blk_id))
