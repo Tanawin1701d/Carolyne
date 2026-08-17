@@ -9,5 +9,6 @@
 from __future__ import annotations
 
 from .block_manager import BlockManager, BlockStatus
+from .hw_util import ceil_log2
 
-__all__ = ["BlockManager", "BlockStatus"]
+__all__ = ["BlockManager", "BlockStatus", "ceil_log2"]
