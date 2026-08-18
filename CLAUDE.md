@@ -385,6 +385,37 @@ elaboration from a `RegFile` in `uarch`.
   element / mux trees on read; callable index → one-hot writes or reduce
   trees; k2k assigns pair fields structurally. clk/mrst wiring is automatic
   in `build_flow`.
+- **Multiple drivers on one component resolve by PRIORITY, and priority IS
+  emission order.** A component's update events are emitted in ascending priority
+  inside one `always` block, so the LAST one wins (`reg.reset` sits at
+  `DEFAULT_UE_PRI_RST`, above everything). At EQUAL priority the order is NOT the
+  order the statements were written: an assignment made inside a flow block
+  (`zif`) is emitted BEFORE every unconditional one. So "copy the row, then
+  overlay the exception on top" only builds what it reads like if the overlay
+  names a higher `priority(...)`; written plainly it produces the OPPOSITE
+  hardware, silently, with no error anywhere. A layered structure (a wire row
+  copied forward and then overlaid, as a rename table's stage chain is) must
+  therefore state one priority per layer and rely on statement order for nothing.
+- **A wire needs no `.default(0)`** — an undriven wire already falls back to an
+  implicit zero at the lowest priority. (Until 2026-08-18 an explicit
+  `.default(v)` was bound ABOVE user priority and therefore overrode the very
+  assignments it was supposed to back up, which left `Prf`'s and `TagGen`'s
+  `.default(0)` port wires reading 0 forever. Fixed in Kathryn; those two files
+  are correct as written again, and new code can simply omit the call.)
+- **A Karray selection collapses every dimension to exactly ONE element**, and
+  every dimension must be indexed — there are no ranges, so there is no row copy
+  and no whole-array assign; copying a row is a Python loop of element k2k
+  assigns. A runtime-indexed (`arr[sig]`/`arr[fn]`) WRITE additionally requires a
+  reg backing, because a wire cannot hold its non-selected elements. Both push the
+  same way for a combinational structure: index the element statically and put the
+  runtime part in the guard (`zif(req & idx == a)`), which builds the same
+  hardware with the fan-out visible.
+- **`Karray.reset(**field_values)`** (added to Kathryn on 2026-08-18):
+  one value per field, shared by every element, recorded on each element's own
+  backing register so the reset event stays the reg's. A field left out powers up
+  undefined. Before it a Karray had no reset at all — fatal for any state array
+  whose valid bits must start at 0 (a RAT's `renamed`; `Prf.storage.fin` still
+  wants one).
 - **A Karray record is finished at instantiation** (added to Kathryn on
   2026-08-16 for this project). The class body states the shape a record usually
   has; the call settles it, and the keyword's VALUE picks what it does — an
