@@ -46,10 +46,9 @@ from kathryn import *
 
 from carolyne.uarch.common import ceil_log2
 from carolyne.uarch.o3.config import CPUO3_Config
-
-# Above DEFAULT_UE_PRI_USER (10), below DEFAULT_UE_PRI_INTERNAL_MIN (50), so a
-# mispredict write overrides the rename/resolve write of the same cycle.
-PRI_MIS_PRED = DEFAULT_UE_PRI_USER + 1
+# One rung of the engine-wide ladder (priority.py): a mispredict write overrides
+# the rename/resolve write of the same cycle.
+from carolyne.uarch.o3.priority import PRI_MIS_PRED
 
 
 class TagGen(Module):

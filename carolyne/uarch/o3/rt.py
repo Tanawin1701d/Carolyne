@@ -3,11 +3,7 @@ from kathryn.signal import to_ref
 
 from carolyne.isa import RegFile
 from carolyne.uarch.o3.config import CPUO3_Config
-
-
-PRI_MIS_PRED = DEFAULT_UE_PRI_USER + 5
-PRI_RENAME   = DEFAULT_UE_PRI_USER + 4
-PRI_COMMIT   = DEFAULT_UE_PRI_USER + 3
+from carolyne.uarch.o3.priority import PRI_COMMIT, PRI_MIS_PRED, PRI_RENAME
 
 
 def OH(one_hot_sig):
