@@ -2,25 +2,9 @@ from kathryn import *
 from kathryn.signal import to_ref
 
 from carolyne.isa import RegFile
+from carolyne.uarch.common.karray_util import OH
 from carolyne.uarch.o3.config import CPUO3_Config
 from carolyne.uarch.o3.priority import PRI_COMMIT, PRI_MIS_PRED, PRI_RENAME
-
-
-def OH(one_hot_sig):
-    """Index a Karray dimension with a ONE-HOT signal.
-
-    Kathryn's callable index splits by DIRECTION. On a write destination it is
-    called once per index and returns that element's 1-bit enable; on a read
-    source the dimension folds through a reduce tree and the callable is a 2:1
-    select, picking the side whose covered indices hold the hot bit. One object
-    serves both, dispatching on how many arguments Kathryn hands it.
-    """
-    def index(*args):
-        if len(args) == 1:                          # write: fn(i) -> enable bit
-            return one_hot_sig[args[0]]
-        left, _right, _level = args                 # read : fn(a, b, level) -> pick-left
-        return any_of([one_hot_sig[i] for i in left.indices])
-    return index
 
 
 def write_entry(dst_row, dyn_idx, amount, **fields):
