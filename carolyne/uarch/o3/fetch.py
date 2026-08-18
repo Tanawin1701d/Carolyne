@@ -2,7 +2,6 @@ from typing import Optional
 
 from kathryn import *
 
-from carolyne.uarch.common import BlockManager
 from carolyne.uarch.o3.config import CPUO3_Config
 from carolyne.uarch.o3.easy_mem import EasyMem
 

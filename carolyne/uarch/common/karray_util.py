@@ -12,11 +12,12 @@
 #   there (rt.py keeps `write_entry` and `copy_row` until something else asks).
 # - `uarch/common/` rather than `uarch/o3/`, because a Karray rule is a fact
 #   about Kathryn and not about out-of-order execution.
-# - NOT re-exported from `carolyne.uarch.common`. That package's __init__ pulls
-#   in block_manager and hw_util, both deliberately Kathryn-free so the block
-#   lifecycle stays testable with no arena; re-exporting this module would put
-#   a Kathryn import behind `from carolyne.uarch.common import ceil_log2`.
-#   Import it by module: `from carolyne.uarch.common.karray_util import OH`.
+# - NOT re-exported from `carolyne.uarch.common`. What that package's __init__
+#   exports is deliberately Kathryn-free, so the arithmetic a block does at
+#   elaboration time stays testable with no arena; re-exporting this module
+#   would put a Kathryn import behind `from carolyne.uarch.common import
+#   ceil_log2`. Import it by module instead:
+#   `from carolyne.uarch.common.karray_util import OH`.
 
 from kathryn import any_of
 
