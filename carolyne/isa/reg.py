@@ -3,13 +3,6 @@
 # (Intermediate, §1.4). Pure data, no Kathryn imports — the uarch reads these
 # numbers to size its RAT, free list, physical register file, and the
 # src/dest index fields of the µop record.
-#
-# Decision (2026-08-14): one module, because the two types are the same kind
-# of thing from the engine's side — both name a value the rename stage
-# allocates a physical register for. What separates them is lifetime
-# (architectural state vs dead at the instruction boundary) and identity
-# semantics, and those read best side by side; every consumer that imports
-# one imports the other.
 
 from __future__ import annotations
 

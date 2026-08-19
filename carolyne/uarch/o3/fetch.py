@@ -22,11 +22,8 @@ class Fetch(Module):
     def __init__(self,
                  config: CPUO3_Config,
                  simple_mem: EasyMem):
-        # Plain-Python configuration only. Module.__init__ opens the module
-        # scope, runs the @init methods and closes it before it returns, so
-        # hardware declared after super().__init__() lands outside this module —
-        # it panics standalone, or attaches to the PARENT that happens to be
-        # open. Both config fields must therefore be set before the super call.
+        # Plain-Python configuration only, set BEFORE super().__init__():
+        # that call runs the @init methods, which read these fields.
         self.config     = config
         self.simple_mem = simple_mem
         super().__init__()

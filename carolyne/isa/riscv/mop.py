@@ -3,49 +3,25 @@
 # grouping and nothing else — what an instruction does is uop.py's business,
 # and the IsaBase assembly is rv32i.py's.
 #
-# Decisions (2026-08-14):
-# - The Mop/UopSeq nesting mirrors RISC-V's own decode shape: the Mop matches
-#   the opcode, each UopSeq variant matches the funct field that picks one
-#   instruction out of the group. That is why the group comments below name
-#   the funct values — they are the ISA's real content, even though the type
-#   cannot carry them yet (see GAPS).
-# - Each Mop matches an opcode and lists the templates that share it; which
-#   funct field picks one template out of the group is declared on the template
-#   itself (uop.py), so a fact about SRAI lives with SRAI rather than with the
-#   sequence wrapping it.
-# - Every variant holds a one-µop sequence, because RV32I cracks nothing (no
-#   AGU, and the jumps write their own link register). If an instruction ever
-#   does crack, its UopSeq lists several templates — and any µtemp linking
-#   them must be minted per instruction, never shared, since that instance IS
-#   the dataflow link.
+# The Mop/UopSeq nesting mirrors RISC-V's own decode shape: the Mop matches an
+# opcode (stated as a matcher_value beside FM.OPCODE), and each UopSeq variant
+# is picked by the funct matcher declared on the template itself (uop.py), so a
+# fact about SRAI lives with SRAI.
 #
-# Decisions (2026-08-15):
-# - Grouped by OPCODE, not by instruction format, and each group names its
-#   format in a comment only. Format and opcode are not the same partition —
-#   I-type covers LOAD, OP-IMM, JALR and SYSTEM — so a format-grouped table
-#   would need one Mop matching four opcode values, which a single matcher
-#   naming the opcode field cannot say. The formats themselves are
-#   field_match.FORMATS, declared but not yet consumed; a Mop has no format
-#   slot to bind them to.
-# - Exhaustive over uop.UOPS: every template appears in exactly one UopSeq,
-#   pinned by test_riscv.py, since no container check catches an instruction
-#   written but never wrapped in an encoding.
-# - Module CONSTANTS (`MOP_<group>` + the `MOP_TABLE` tuple), not a builder
-#   function, matching uop.py's UOP_*/UOPS shape: the table is frozen data all
-#   the way down and nothing mutates it, so the rebuild a function implied
-#   bought nothing. Accepted cost — every Rv32i() build now shares one table,
-#   which is the same bargain the package already makes for reg.RegFile and the
-#   operand constants, and for the same reason: IsaBase matches reg files by
-#   IDENTITY, so sharing is what keeps the description self-consistent.
-# - Lives beside uop.py rather than inside rv32i.py, which is now the IsaBase
-#   assembly alone. Named mop.py after the type it builds; `from ..mop import`
-#   still reaches the isa-layer types, since the relative form is explicit.
+# Grouped by OPCODE, not by instruction format — the two are different
+# partitions, since I-type covers LOAD, OP-IMM, JALR and SYSTEM, and one
+# matcher naming the opcode field cannot say four values. Each group names its
+# format in a comment; field_match.FORMATS is declared but not yet consumed.
 #
-# Decision (2026-08-15): every group states its opcode as a matcher_value
-# beside FM.OPCODE, so "opcode == 0110011" is code rather than a comment and
-# the eleven groups are actually distinguishable from each other. The funct
-# values that pick one variant out of a group live on the templates (uop.py),
-# which is where the field they test is named.
+# Every variant holds a one-µop sequence, because RV32I cracks nothing. An
+# instruction that does crack lists several templates, and any µtemp linking
+# them must be minted per instruction, never shared — that instance IS the
+# dataflow link.
+#
+# Exhaustive over uop.UOPS: every template appears in exactly one UopSeq,
+# pinned by test_riscv.py, since no container check catches an instruction
+# written but never wrapped in an encoding. Module CONSTANTS (MOP_<group> +
+# MOP_TABLE), shared like the reg file and the operand constants.
 #
 # KNOWN GAPS — what this table cannot say yet, all of them contract-side:
 # 1. No `imm` field on Uop, so the immediates ride in `srcs` as operands

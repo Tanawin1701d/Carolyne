@@ -4,45 +4,27 @@
 # base+imm, computed in the mem unit) and no separate link µop (the jumps
 # write rd themselves), so nothing cracks. See the rv32i.py header.
 #
-# Decisions (2026-08-14):
-# - Module CONSTANTS named UOP_<mnemonic>, one per row of the listing, so the
-#   table in rv32i.py reads as encodings → named instructions and this file
-#   is the one place an instruction is written down.
-# - Each template declares its own `matcher_field`: the funct field that picks it
-#   out of its opcode group. That belongs with the instruction, not with the
-#   sequence wrapping it — "SRAI is the funct7 0100000 one" is a fact about
-#   SRAI. rv32i.py is then purely the opcode grouping. LUI/AUIPC/JAL have
-#   none: their opcode alone identifies them.
-# - Where an instruction needs BOTH funct3 and funct7 (add vs sub, srl vs
-#   sra, the shift-immediates), the template names FM.FUNCT3_7 — one rule
-#   spanning both fields, built with InstrFieldMatch.union. A single
-#   `matcher_field` slot is enough because a rule may cover several fields.
-# - (2026-08-15) Every template that names a field also states its
-#   `matcher_value`, so the funct values are CODE, not comments, and the table
-#   is genuinely discriminable — add vs sub differ by a value on the same
-#   field. Written as `FM.val(...)`, one value per segment of the field, in
-#   the field's own segment order: beside FM.FUNCT3_7 that is funct3 then
-#   funct7, because that is the order FUNCT3_7 was unioned in. Uop's
-#   check_matcher_pair holds the two to each other, so a value too wide for
-#   its segment or a count that does not match the segments fails here at
-#   import, not in a generator.
-# - LUI/AUIPC/JAL name NO field and therefore no value: their opcode alone
-#   identifies them, and the opcode is the Mop's rule, not the template's.
-# - Two mnemonics share one Uop constant only when they are the same
-#   operation on the same operands; they never are here, because width, sign
-#   and branch condition are distinct Ops (op.py), so the file is 1:1 with
-#   the listing.
-# - ADDI/SLTI/... reuse the ALU Op of their register form (ADD, SLT, ...):
-#   the operation is identical, only the second operand rule differs, which
-#   is exactly what the operand tuple says. SLLI/SRLI/SRAI take SHAMT rather
-#   than IMM_I — a 5-bit count, not a 12-bit signed value.
-# - The immediate rides in `srcs` as an operand (OPR_IMM_*), because that is
-#   the only slot this layer has: `Uop.imm` does not exist while the matcher
-#   design is in flight. NOTE the tension — contract §2 says an immediate is
-#   NOT an operand and rides in its own record field, so the ≤3 src cap it
-#   specifies does not budget for one. RV32I still fits (store and branch are
-#   the widest, at rs1+rs2+imm = 3), but the contract has to settle which way
-#   this goes before the record is generated.
+# Module CONSTANTS named UOP_<mnemonic>, one per row of the listing, so this
+# file is the one place an instruction is written down and rv32i.py is purely
+# the opcode grouping.
+#
+# Each template declares its own matcher: the funct field that picks it out of
+# its opcode group, plus the value that field must equal (`FM.val(...)`, one
+# value per segment, in the field's own segment order). Where an instruction
+# needs BOTH funct3 and funct7 (add vs sub, srl vs sra, the shift-immediates)
+# it names FM.FUNCT3_7, one rule spanning both fields. LUI/AUIPC/JAL name no
+# field and no value: their opcode alone identifies them, and the opcode is
+# the Mop's rule.
+#
+# Width, sign and branch condition are distinct Ops (op.py), so the file is
+# 1:1 with the listing. ADDI/SLTI/... reuse the ALU Op of their register form —
+# only the second operand rule differs; SLLI/SRLI/SRAI take SHAMT rather than
+# IMM_I, a 5-bit count instead of a 12-bit signed value.
+#
+# The immediate rides in `srcs` as an operand (OPR_IMM_*) because `Uop.imm`
+# does not exist yet. NOTE the tension: contract §2 says an immediate is NOT
+# an operand and rides in its own record field, so the ≤3 src cap does not
+# budget for one. RV32I still fits (store and branch are widest, at 3).
 #
 # KNOWN GAPS carried from the layer below:
 # - A value says WHICH BITS but not where each segment lands in an assembled

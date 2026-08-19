@@ -1,35 +1,29 @@
 # CPUO3_Config — everything one O3 core is built from: the ISA description, and
 # the numbers the description does NOT decide.
 #
-# Decisions (2026-08-16):
-# - The ISA comes in whole, as an IsaBase. The config never copies facts out of
-#   it (no pc_width field of its own) — a copy is a second answer that can go
-#   stale. It DERIVES the hardware numbers instead, so a block reads one object
-#   and never has to know which half a number came from.
-# - The knobs are only what the ISA cannot say: how wide the machine is, how
-#   deep its structures are, and which execution units it actually builds.
-# - `phy_specs` is a map from RegFile to physical-file size, and it is a TUPLE
-#   OF PAIRS rather than a dict because a RegFile cannot be a dict key: it
-#   carries `const_regs`, so it is unhashable. Matching by identity is the same
-#   discipline IsaBase runs on — one PRF per declared instance — and an
-#   equal-but-separate RegFile really is a second class.
-# - EVERY renamed class must be listed. There is no default size, because a
-#   default is a number nobody chose, and the PRF the elaborator builds is not
-#   the place to discover that. A size must EXCEED the class's architectural
-#   count, or rename can never allocate — a core that deadlocks, not one that is
-#   merely slow.
-# - `rsv_specs` is the machine's execution side: one entry per reservation
-#   station, each naming the units it feeds. Between them they must cover every
-#   op the ISA's instructions use — the machine-level counterpart of IsaBase's
-#   "every declared op needs a unit that executes it".
-# - `sptag_len` is stated in BITS — the one knob that holds a width where every
-#   other holds a count and derives its log2 (rob_depth -> rob_idx_width, and
-#   RegFile.amount -> index_width before it). The tag is a value records carry
-#   and compare, not an index into a structure, so there is no count to derive
-#   it from; 2**sptag_len speculations are distinguishable. Blocks use it as
-#   written: `FetchDT(..., spectag=kaf(cfg.sptag_len))`.
-# - Frozen data, checked at construction, in the same spirit as the description
-#   layer: a config that cannot work fails here, not deep in elaboration.
+# The ISA comes in whole, as an IsaBase, and is never copied out of: the config
+# DERIVES its hardware numbers instead, so a block reads one object and never
+# has to know which half a number came from. The knobs are only what the ISA
+# cannot say — how wide the machine is, how deep its structures are, and which
+# execution units it builds.
+#
+# `phy_specs` is a TUPLE OF PAIRS rather than a dict, because a RegFile carries
+# `const_regs` and is unhashable; matching by identity is the discipline
+# IsaBase already runs on. EVERY renamed class must be listed — there is no
+# default size — and a size must EXCEED the class's architectural count, or
+# rename can never allocate.
+#
+# `rsv_specs` is the execution side: one entry per reservation station, naming
+# the units it feeds. Between them they must cover every op the ISA's
+# instructions use.
+#
+# `sptag_len` is stated in BITS, the one knob holding a width where every other
+# holds a count and derives its log2: a tag is a value records carry and
+# compare, not an index into a structure. Blocks use it as written —
+# `FetchDT(..., spectag=kaf(cfg.sptag_len))`.
+#
+# Frozen data, checked at construction: a config that cannot work fails here,
+# not deep in elaboration.
 
 from __future__ import annotations
 

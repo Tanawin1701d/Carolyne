@@ -5,58 +5,21 @@
 # is what makes an encoding discriminable. It names no field: the two are
 # separate rules, paired by whoever holds both.
 #
-# Decisions (2026-08-14):
-# - A TUPLE of segments, because a field need not be contiguous: RISC-V's
-#   s/b/j-type immediates are scattered across the word, and x86 fields are
-#   split by prefixes. A single (start, end) would force every consumer to
-#   special-case the split ones.
-# - Lives in its own module rather than inside mop.py. Everything that names
-#   a field imports it — Operand, Uop, UopSeq, Mop, and each per-ISA package
-#   — so keeping it in mop.py made mop.py a dependency of the whole layer and
-#   forced the Uop annotation there to be a stringified TYPE_CHECKING import
-#   to dodge the cycle. Split out, the dependency runs one way: field_match
-#   → operand/uop → mop.
-#
-# Decisions (2026-08-15) — InstrValueMatch, the value half:
-# - It carries VALUES ONLY, no field. The two halves stay separate types the
-#   way "where a field is" and "which index reads it" already are (Operand's
-#   FieldRef vs its matcher): a value rule is a bit pattern, and which bits it
-#   is compared against is stated by whatever pairs the two. Consequence —
-#   neither type can check the pairing, so the HOLDER of both does it:
-#   `check_matcher_pair` at the bottom of this file, called by Uop, UopSeq and
-#   Mop, is where "one value per segment, each narrow enough for its segment"
-#   is enforced.
-# - The holders name the halves SEPARATELY: `matcher_field` and
-#   `matcher_value`, two slots, rather than one slot typed as either. Two
-#   slots is what makes the pair checkable at all — a single either-typed slot
-#   can hold a value with no field to test it against — and a field with no
-#   value is then just the value slot left None, which is exactly the state
-#   RV32I is in today.
-# - ONE VALUE PER SEGMENT of the field it pairs with, in the same order — not
-#   one assembled integer. The segments of a scrambled field land in unrelated
-#   places and the type cannot yet say where (see GAPS), so an assembled value
-#   would have no defined layout to be assembled INTO. Per segment, add vs sub
-#   reads the way the spec table does: `(funct3, funct7)`.
-# - `union` mirrors InstrFieldMatch.union and is meant to be used in step with
-#   it — union the fields in one order, the values in the same one, and the
-#   segment↔value pairing survives. Same append-only rule, same reason.
-# - No `matches(word)` method. Evaluating a rule against an instruction word
-#   is a runtime act; this layer holds the rule and the generator builds the
-#   comparator (CLAUDE.md §2 — no runtime value ever lives in the ISA layer).
+# A field is a TUPLE of segments, because it need not be contiguous (RISC-V's
+# s/b/j immediates, x86 fields split by prefixes). A value rule states ONE
+# VALUE PER SEGMENT, in the same order, so add vs sub reads like the spec
+# table: (funct3, funct7). Neither half can check the pairing, so the holder
+# of both — Uop, UopSeq, Mop — calls check_matcher_pair at the bottom of this
+# file. There is no matches(word) method: evaluating a rule is runtime, and
+# this layer holds rules only.
 #
 # KNOWN GAPS — contract-side, and still blocking decoder generation:
 # - No segment placement. For RISC-V's imm_s, (7,12) is imm[4:0] and (25,32)
 #   is imm[11:5]; the type records the segments but not where each lands in
-#   the assembled value, nor whether the result is sign-extended. This is why
-#   InstrValueMatch counts values per segment rather than assembling one.
-# - Nothing REQUIRES a value. `matcher_value` defaults to None at every
-#   holder, so an encoding that supplies only field positions is still
-#   accepted — which is what RV32I does today. Whether a DECODABLE ISA must
-#   supply values throughout is a contract call, and the place to enforce it
-#   is IsaBase, which sees the whole table.
-# The first gap here — no VALUE at all — is closed by InstrValueMatch, and
-# where a value binds to a field is answered by the matcher_field /
-# matcher_value pair on Uop, UopSeq and Mop.
+#   the assembled value, nor whether the result is sign-extended.
+# - Nothing REQUIRES a value: matcher_value defaults to None at every holder,
+#   so an encoding stating only field positions is still accepted. Enforcing
+#   values for a decodable ISA belongs in IsaBase, which sees the whole table.
 
 from __future__ import annotations
 
@@ -67,9 +30,9 @@ from typing import Optional, Tuple
 @dataclass(frozen=True)
 class InstrFieldMatch:
     name      : str
-    # ORDER IS SIGNIFICANT — the tuple is the caller's statement about the field,
-    # not a set of bits: nothing here sorts, merges or dedups it, and consumers
-    # must read it in the order written (imm_b: (7,8) is imm[11], (8,12) is imm[4:1]).
+    # ORDER IS SIGNIFICANT — nothing here sorts, merges or dedups the segments;
+    # consumers read them in the order written (imm_b: (7,8) is imm[11],
+    # (8,12) is imm[4:1]).
     match_idx : Tuple[Tuple[int, int], ...]  # ((start_match_idx, end_match_idx), ...), end exclusive
 
     def __post_init__(self):
@@ -92,8 +55,8 @@ class InstrFieldMatch:
                     f"InstrFieldMatch.union expects InstrFieldMatch, "
                     f"got {type(other).__name__}")
         union_name = name or "+".join(f.name for f in fields)
-        # Flattened in ARGUMENT order, each field's own segment order kept intact:
-        # `a | b` and `b | a` are different rules, not the same one.
+        # Flattened in ARGUMENT order, each field's own segment order intact:
+        # `a | b` and `b | a` are different rules.
         union_segs = tuple(seg for f in fields for seg in f.match_idx)
 
         return InstrFieldMatch(union_name, union_segs)
@@ -127,10 +90,8 @@ class InstrValueMatch:
     def union(self, *others: "InstrValueMatch") -> "InstrValueMatch":
         """One value rule covering this rule's values and the others'.
 
-        The counterpart of InstrFieldMatch.union, and used in step with it:
-        union the fields in one order and the values in the same one, and the
-        segment↔value pairing survives the merge (add vs sub = funct3's value
-        then funct7's).
+        Used in step with InstrFieldMatch.union: union the fields in one order
+        and the values in the same one, and the segment↔value pairing survives.
         """
         rules = (self,) + others
         for other in others:
@@ -149,12 +110,9 @@ class InstrValueMatch:
 def check_matcher_pair(matcher_field : Optional[InstrFieldMatch],
                        matcher_value : Optional[InstrValueMatch],
                        where         : str = "matcher") -> None:
-    """Hold a (field, value) matcher pair to each other.
-
-    The two halves are separate types that know nothing of one another, so a
-    holder of BOTH — Uop, UopSeq, Mop — is the only place the pairing can be
-    checked: one value per segment, each narrow enough for the segment it is
-    compared against. `where` names the holder for the error message.
+    """Hold a (field, value) matcher pair to each other: one value per
+    segment, each narrow enough for the segment it is compared against.
+    `where` names the holder for the error message.
 
     A field alone is legal (bit positions, nothing tested yet). A value alone
     is not: it says nothing until a field says which bits it tests.

@@ -6,49 +6,36 @@
 # any other. This is the object that reads the ISA's list of classes, decides
 # what each one needs, and keeps the numbers they share in step.
 #
-# Decisions (2026-08-18):
-# - NOT a Kathryn Module, and no lifecycle base class either. It builds blocks;
-#   it declares no hardware of its own, has no ports and emits no Verilog, so a
-#   module wrapper around it would add a level to the hierarchy that carries
-#   nothing. It is a plain object.
-# - IT BUILDS IN `__init__`, like every block it owns. Arf, Prf and Rt each
-#   declare their storage the moment they are constructed, so a separate
-#   "generate" step here would be a stage with nothing in it — the blocks are
-#   already built by the time it could run. Construct it and it is done.
-# - CONSEQUENCE, and the one rule a caller has to know: construct it inside an
-#   open Kathryn module scope — from the @init of the module that should own
-#   these blocks. That storage attaches to whatever module is open; built from
-#   nowhere it panics, built from the wrong @init it silently lands in the wrong
-#   module.
-# - EVERY class gets an Arf; only a RENAMED class gets a Prf and an Rt. That is
-#   not a policy invented here, it is what the blocks already say: a class the
-#   machine does not rename is read straight out of the Arf (Rt refuses to be
-#   built for one), and it has no physical file to size (CPUO3_Config refuses to
-#   size one). So `RegClassHw.prf`/`.rt` are None exactly when `renamed` is False,
-#   and a caller that reaches for them on a committed class gets a message naming
-#   the class rather than an AttributeError on None.
-# - THE PHYSICAL FILE SIZE IS READ ONCE and handed to both the Prf and the Rt.
-#   Prf sizes its storage from it, Rt derives its `prf_idx` field width from it,
-#   and if those two ever disagreed the rename table would name registers the
-#   file does not have. One read is what makes that impossible; it is the main
-#   thing this class exists to guarantee.
-# - PORT COUNTS ARE PARAMETERS, not derived from the config. CPUO3_Config states
-#   `fe_lanes`, which is how wide the front end fetches — not how many renames or
-#   retirements a cycle allows, and a machine may rename narrower than it fetches.
-#   Inventing `rename_ports = fe_lanes` here would be this file answering a
-#   question the config has not been asked yet; when the config grows the fields,
-#   they replace these arguments.
-# - Lookup is BY IDENTITY, scanning a tuple, the same bargain CPUO3_Config makes
-#   with `phy_specs`: a RegFile carries `const_regs`, so it is a dict and cannot
-#   be a dict key, and an equal-but-separate RegFile really is a second class.
-# - The FAN-OUTS are only the calls that take no per-class argument
-#   (`on_update_meta`, `on_rename`) plus the mispredict, which takes one and says
-#   so. Commit is deliberately absent: it needs a port index, an architectural
-#   index and a physical index per class per port, so a blanket fan-out would be
-#   inventing a policy for how a retiring instruction maps onto ports. A commit
-#   stage reaches `mng.rt(rf)` and `mng.prf(rf)` and drives them itself.
-# - This file names no Kathryn symbol. It builds Kathryn modules by constructing
-#   them, which is a different thing from declaring hardware.
+# NOT a Kathryn Module: it declares no hardware of its own, has no ports and
+# emits no Verilog, so it is a plain object. It BUILDS IN `__init__`, like the
+# blocks it owns — which is the one rule a caller has to know: construct it
+# inside an open Kathryn module scope, from the @init of the module that should
+# own these blocks. Built from nowhere it panics; built from the wrong @init it
+# lands in the wrong module.
+#
+# EVERY class gets an Arf; only a RENAMED class gets a Prf and an Rt, which is
+# what the blocks already say (Rt refuses to be built for an unrenamed class,
+# CPUO3_Config refuses to size a physical file for one). `RegClassHw.prf`/`.rt`
+# are None exactly when `renamed` is False.
+#
+# THE PHYSICAL FILE SIZE IS READ ONCE and handed to both the Prf and the Rt —
+# Prf sizes its storage from it, Rt derives its `prf_idx` width from it, and if
+# the two disagreed the rename table would name registers the file does not
+# have. That is the main thing this class exists to guarantee.
+#
+# PORT COUNTS ARE PARAMETERS, not derived from the config: `fe_lanes` says how
+# wide the front end fetches, not how many renames or retirements a cycle
+# allows. When the config grows those fields they replace these arguments.
+#
+# Lookup is BY IDENTITY, scanning a tuple, the same bargain CPUO3_Config makes
+# with `phy_specs`. The FAN-OUTS are only the calls that take no per-class
+# argument (`on_update_meta`, `on_rename`) plus the mispredict, which takes one
+# and says so. Commit is deliberately absent: it needs a port index, an
+# architectural index and a physical index per class per port, so a commit stage
+# reaches `mng.rt(rf)` / `mng.prf(rf)` and drives them itself.
+#
+# This file names no Kathryn symbol: it builds Kathryn modules by constructing
+# them, which is a different thing from declaring hardware.
 
 from __future__ import annotations
 

@@ -1,18 +1,10 @@
 # Mop / UopSeq — the encoding side: a macro-op is one encoding group, and each
 # UopSeq variant binds a finer field match to the µop sequence it decodes to.
 #
-# Decision (2026-08-14): InstrFieldMatch used to live here, which made this
-# module a dependency of Operand and Uop and forced the `Uop` annotation below
-# to be a stringified TYPE_CHECKING import to dodge the cycle. It now lives in
-# field_match.py and the dependency runs one way: field_match → operand/uop →
-# mop, so Uop is a plain import.
-#
-# Decision (2026-08-15): the matcher is TWO slots, `matcher_field` (which bits)
-# and `matcher_value` (what they must equal), not one slot typed as either.
-# Two slots is what makes the pair checkable — check_matcher_pair holds them to
-# each other, which neither type can do alone — and "positions only, nothing
-# tested yet" is then just matcher_value left None, the state RV32I is in.
-# Mop requires its matcher_field; every value slot defaults to None.
+# The matcher is two slots: `matcher_field` (which bits) and `matcher_value`
+# (what they must equal), held to each other by check_matcher_pair. A field
+# with no value states positions and tests nothing. Mop requires its
+# matcher_field; every value slot defaults to None.
 
 from __future__ import annotations
 from dataclasses import dataclass

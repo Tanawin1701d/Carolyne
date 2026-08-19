@@ -15,14 +15,12 @@
 #   rv32i.py   — the IsaBase assembly
 # Not supplied: the trap policy (§6.5), which has no type yet.
 #
-# The operand rules are module constants, so the register class they target
-# is one too: `reg.RegFile`, built by `x_file()` and shared by every shape
-# and by the `reg_files=(RegFile,)` the description declares. IsaBase matches reg files by
-# IDENTITY, and sharing constants is what makes those the same object.
-# Consequence: two Rv32i() builds share it — call `x_file()` and build your own
-# operands if you need genuinely independent descriptions. MOP_TABLE is shared
-# on the same terms and for the same reason; `exec_units()` stays a function.
-# Nothing mutates any of it.
+# The operand rules are module constants, so the register class they target is
+# one too: `reg.RegFile`, built by `x_file()` and shared by every shape and by
+# the `reg_files=(RegFile,)` the description declares — IsaBase matches reg
+# files by IDENTITY. Two Rv32i() builds therefore share it; call `x_file()` and
+# build your own operands for genuinely independent descriptions. MOP_TABLE is
+# shared on the same terms; `exec_units()` stays a function.
 #
 # Every file carries a KNOWN GAPS block naming what it cannot express. The
 # short version: Uop has no immediate, PC is not nameable as a µop input, and

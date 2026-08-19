@@ -2,50 +2,21 @@
 # (uop_contract.md §6). The instruction table itself moved to mop.py on
 # 2026-08-15 — this file is now the handoff point and nothing else.
 #
-# Decisions (2026-08-14):
-# - The shapes name the shared operand constants of operand.py, which target
-#   the shared register class reg.RegFile — and this file declares that same
-#   instance. IsaBase matches reg files by identity, so those two must be one
-#   object; sharing module constants is what makes that true by construction
-#   (and is why nothing here takes a register-class argument).
+# `Rv32i` is a SUBCLASS of IsaBase supplying every vocabulary as a field
+# DEFAULT, so `Rv32i()` is the whole description and `Rv32i(name=...)` varies
+# one part of it. It stays DATA — field defaults only, no override of
+# __post_init__ / op() / units_for() — so every inherited cross-check still
+# runs. All eleven fields are redeclared because a dataclass picks up a default
+# only through an ANNOTATED assignment; that is why the RegFile CLASS and this
+# ISA's one RegFile INSTANCE both appear below, the latter aliased X_FILE.
 #
-# Decisions (2026-08-15):
-# - The four cores, the nine operand rules and the 40 µop templates are
-#   declared here alongside the mops, from the same module constants the shapes
-#   are built out of. IsaBase matches all three by identity for the same reason
-#   it matches reg files that way, so listing the constants — not rebuilt
-#   copies of them — is what makes the cross-check pass, and what makes it mean
-#   something. Same for `mops=MOP_TABLE`: frozen data, so every build handing
-#   out the same tuple changes nothing observable (mop.py header).
-# - `Rv32i` is a SUBCLASS of IsaBase, not a factory function returning one. It
-#   supplies every vocabulary as a field DEFAULT, so `Rv32i()` is the whole
-#   description and `Rv32i(name="rv32i-dbg")` varies one part of it without a
-#   builder signature to thread the rest through. It replaces an `rv32i()`
-#   factory that stood here until today; don't restore that from git.
-# - It stays DATA, which is what isa.py demands of a subclass: field defaults
-#   only, no override of __post_init__/op()/units_for(). Every inherited
-#   cross-check still runs at construction, and code holding an IsaBase is
-#   holding exactly what it thinks it is.
-# - All eleven fields are redeclared, and that is not repetition for its own
-#   sake: a dataclass picks up a default only through an ANNOTATED assignment,
-#   so a bare `name = "rv32i"` would be a plain class attribute and `Rv32i()`
-#   would still demand the argument. The base's types are imported for those
-#   annotations — which is why the RegFile CLASS and this ISA's one RegFile
-#   INSTANCE both appear below, the latter aliased X_FILE to keep them apart.
-# - `EXEC_UNITS = exec_units()` is called ONCE, at import, because a field
-#   default is evaluated once. Every Rv32i() then shares one unit tuple, where
-#   the old factory built fresh units per call. Nothing observable changes:
-#   ExecUnit is frozen data and IsaBase matches units by NAME, not identity —
-#   the same object-sharing bargain reg.RegFile and MOP_TABLE already make.
+# The shapes name the shared constants of operand.py / uop.py / mop.py, and
+# this file declares those same instances: IsaBase matches cores, operands,
+# µops and reg files by IDENTITY, so listing the constants rather than rebuilt
+# copies is what makes the cross-check pass and mean something.
 #
-# Decision (2026-08-16):
-# - The three addressing scalars IsaBase grew today (pc_width, pc_align,
-#   ilen_bytes) are named from field_match.py, not written as literals here:
-#   PC_WIDTH / PC_ALIGN / ILEN_BYTES sit beside the field positions they belong
-#   with, and this file stays what it says it is — the assembly, nothing else.
-#   PC_WIDTH is X_LEN there, which is the RV32I spec speaking; the CONTAINER
-#   still refuses to derive it (isa.py header), because deriving would mean
-#   naming a specific register class.
+# The three addressing scalars are named from field_match.py, not written as
+# literals here, so they stay beside the field positions they belong with.
 #
 # The KNOWN GAPS of the description live with the parts that carry them:
 # mop.py for the encoding table, uop.py for the µop shapes, field_match.py for

@@ -2,31 +2,22 @@
 # (uop_contract.md §1.3). Segments are (start, end) with end EXCLUSIVE and
 # bit 0 = LSB, so funct7 = (25, 32) is bits 31..25.
 #
-# Decisions (2026-08-14):
-# - RV32I is fixed 32-bit, so `ilen` is the constant 4 and no length decoder
-#   is needed. The field has no type in the isa layer yet (§6 deliverable
-#   three); ILEN_BYTES below is the value it will carry.
-#   (2026-08-16: IsaBase grew `ilen_bytes`, so ILEN_BYTES is now carried rather
-#   than merely declared, and PC_WIDTH / PC_ALIGN joined it — one group, since
-#   all three answer "where does an instruction sit and how long is it".)
-# - The scrambled immediates (S/B/J) are the reason InstrFieldMatch takes a
-#   TUPLE of segments. imm_b is written as four segments rather than merged
-#   ranges even where two are adjacent — (7,8) is imm[11] and (8,12) is
-#   imm[4:1], and merging them would erase that they land in different places.
+# RV32I is fixed 32-bit, so ILEN_BYTES is the constant 4 and no length decoder
+# is needed; PC_WIDTH / PC_ALIGN sit beside it as one addressing group.
 #
-# Decision (2026-08-15):
-# - The six base FORMATS are InstrFieldMatch unions of the fields they contain,
-#   not a new type. A format IS "one rule spanning several fields", which is
-#   exactly what union() gives, and keeping formats in the same type means a
-#   consumer that can read a field rule can read a format for free. They are
-#   DECLARED, NOT CONSUMED: Mop has no format slot, so rv32i.py names the
-#   format of each opcode group in a comment. Grouping the mop table by format
-#   instead of by opcode was considered and rejected — one I-type Mop would
-#   have to cover four different opcodes (LOAD, OP-IMM, JALR, SYSTEM), and a
-#   matcher naming one opcode field cannot say four values.
-# - `val(...)` is the package's shorthand for an InstrValueMatch, and it lives
-#   here beside the fields those values are compared against — the two halves
-#   are separate types, so the one place that reads as a pair is this file.
+# The scrambled immediates (S/B/J) are why InstrFieldMatch takes a TUPLE of
+# segments. imm_b keeps four segments even where two are adjacent — (7,8) is
+# imm[11] and (8,12) is imm[4:1], and merging would erase that they land in
+# different places.
+#
+# The six base FORMATS are InstrFieldMatch unions of the fields they contain,
+# DECLARED but NOT CONSUMED: Mop has no format slot, so rv32i.py names the
+# format of each opcode group in a comment. The mop table is grouped by
+# OPCODE, not by format — one I-type Mop would have to cover four opcodes
+# (LOAD, OP-IMM, JALR, SYSTEM), which one matcher cannot say.
+#
+# `val(...)` is the package's shorthand for an InstrValueMatch, kept here
+# beside the fields those values are compared against.
 #
 # KNOWN GAPS — this file is where the encoding side runs out of road, and the
 # missing pieces belong in the contract, not here:
@@ -46,12 +37,9 @@ from .reg import X_LEN
 def val(*values: int) -> InstrValueMatch:
     """One match value per segment of the field this will be paired with.
 
-    Shorthand only, and it exists for readability at the call site: the
-    one-segment case spelled out is `InstrValueMatch((0b000,))`, whose lone
-    trailing comma is exactly the kind of thing that gets dropped. `val(0b000)`
-    cannot lose it. Segment order is the field's — `val(0b000, 0b0100000)`
-    beside FUNCT3_7 is funct3 then funct7, because that is how FUNCT3_7 was
-    unioned.
+    Shorthand for InstrValueMatch, which spelled out needs a lone trailing
+    comma in the one-segment case. Segment order is the field's:
+    `val(0b000, 0b0100000)` beside FUNCT3_7 is funct3 then funct7.
     """
     return InstrValueMatch(values)
 

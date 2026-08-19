@@ -3,59 +3,37 @@
 # storage plus the two numbers rename allocates from: how many entries are free,
 # and which entry goes out next.
 #
-# Decisions (2026-08-17):
-# - `amt_num` must be a POWER OF TWO, checked at construction. The allocation
-#   pointer is circular, so every step over it is arithmetic mod amt_num; at a
-#   power-of-two size that is exactly what an idx_width adder already does, and
-#   the explicit "== amt_num-1 ? 0 : +1" wrap drops out of every path — most
-#   importantly out of the mispredict distance, which becomes one subtraction.
-#   At a non-power-of-two size each of those sites needs its own compare and
-#   select, for a file whose only cost of rounding up is unused entries.
-# - TWO widths, not one. `idx_width` addresses an entry (0..amt_num-1);
-#   `cnt_width` holds a COUNT of free entries (0..amt_num INCLUSIVE), which is
-#   one value more and so one bit wider — free_entry resets to amt_num, which
-#   idx_width bits cannot hold. One shared width let an index carry values past
-#   the end of the file.
-# - Hardware is declared in an `@init` method, never in `__init__`.
-#   Module.__init__ opens the module scope, runs the @init methods, and closes it
-#   before it returns, so anything declared after `super().__init__()` is outside
-#   the scope: it panics ("module trace stack is empty") standalone, or silently
-#   attaches to whatever module is open — the PARENT's. `__init__` therefore does
-#   plain-Python configuration only, which is also what lets it validate amt_num
-#   before any hardware exists.
-# - Rename and commit resolve into ONE clocked write per quantity, in the spirit
-#   of Kathryn's counter.add/update: the callers state what happened and
-#   `on_update_meta` commits the result. That is what makes "commit + rename" in
-#   one cycle real — two independent whole-value writes to free_entry would
-#   silently lose one of them.
-# - CALL ORDER MUST NOT MATTER — for ANY of the three, including which one runs
-#   last. That is why the ports are WIRES declared in `com_declare` and the
-#   methods only DRIVE them: `book_rename` and `on_commit` connect a source to a
-#   port, `on_update_meta` reads the ports and emits the writes, and a wire read
-#   before it is driven still connects, because these are netlist nodes and not
-#   values. So the three compose in HARDWARE, where the order they were spoken in
-#   cannot be observed, instead of in a Python accumulator that only reads right
-#   if the calls arrived in the intended sequence.
-#   Two earlier shapes were tried and are not worth restoring. Appending to a
-#   chain per caller made `over_use` depend on the rename/commit order: called
-#   before `on_commit`, a rename judged a pool the commit was refilling as empty
-#   and raised exhaustion on an entry that was available, so a caller stalling on
-#   `over_use` lost that slot every time the free list ran dry mid-refill. (The
-#   COUNT was always fine — (free-req)+cmc and (free+cmc)-req agree, and the
-#   intermediate underflow unwraps modulo 2**cnt_width.) Recording the terms and
-#   assembling them at update fixed that, but left `on_update_meta` obliged to
-#   run last: called early, it reset the record and every later `book_rename`
-#   vanished from the netlist with no error at all.
-# - The cost is that the PORT COUNT is now a construction parameter, since a
-#   declared network cannot discover its own width from how many times a method
-#   happened to be called. That is the honest shape anyway — a machine has a
-#   fixed number of rename and commit ports, and they are what the widths of this
-#   logic were always describing.
-# - A mispredict is EXCLUSIVE of rename/commit, so it does not join the chain: it
-#   writes at raised priority and overrides them.
-# - Kathryn sizes a binary expression to its LEFT operand (expression.rs), so
-#   every expression here leads with the wide operand and extends the narrow one.
-#   Backwards, it silently truncates.
+# `amt_num` must be a POWER OF TWO, checked at construction: the allocation
+# pointer is circular, so every step over it is arithmetic mod amt_num, which at
+# a power-of-two size is what an idx_width adder already does. The explicit wrap
+# then drops out of every path — most importantly out of the mispredict
+# distance, which becomes one subtraction.
+#
+# TWO widths, not one. `idx_width` addresses an entry (0..amt_num-1);
+# `cnt_width` holds a COUNT of free entries (0..amt_num INCLUSIVE), one value
+# more and so one bit wider — free_entry resets to amt_num, which idx_width bits
+# cannot hold.
+#
+# Hardware is declared in an `@init` method, never in `__init__`:
+# Module.__init__ opens the module scope, runs the @init methods and closes it
+# before returning, so anything declared after `super().__init__()` lands
+# outside the scope — a panic standalone, or silently attached to the PARENT.
+# `__init__` therefore does plain-Python configuration only, which is what lets
+# it validate amt_num before any hardware exists.
+#
+# Rename and commit resolve into ONE clocked write per quantity, committed by
+# `on_update_meta`: two independent whole-value writes to free_entry in one
+# cycle would silently lose one. CALL ORDER MUST NOT MATTER for any of the
+# three — the ports are WIRES declared in `com_declare`, the methods only DRIVE
+# them, and a wire read before it is driven still connects, so the three compose
+# in hardware. The cost is that the PORT COUNT is a construction parameter.
+#
+# A mispredict is EXCLUSIVE of rename/commit, so it does not join the chain: it
+# writes at raised priority and overrides them.
+#
+# Kathryn sizes a binary expression to its LEFT operand (expression.rs), so
+# every expression here leads with the wide operand and extends the narrow one.
+# Backwards, it silently truncates.
 
 from kathryn import *
 

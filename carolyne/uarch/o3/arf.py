@@ -1,47 +1,30 @@
 # Arf — the committed architectural state of ONE register class: one entry per
 # architectural register, holding the value that has retired.
 #
-# Decisions (2026-08-17):
-# - `__init__` sets configuration and then calls `super().__init__()`, in that
-#   order. Module.__init__ is what mints the module ident, opens the module
-#   scope and RUNS the @init methods, so leaving it out builds a hollow object:
-#   com_declare never fires, `storage` never exists, and the failure surfaces at
-#   the first read as an AttributeError rather than at construction. Config must
-#   still be set first, because com_declare reads it during that same call.
-# - `read` returns a SignalRef, not the Karray field ref. A KarrayRef carries
-#   `|=`/`*=` and the to_ref hook but NO arithmetic or relational operators, so
-#   the raw field works as an assignment source and breaks the moment a caller
-#   computes with it (`arf.read(i) + imm` is a TypeError). A method named `read`
-#   has to hand back something a datapath can use.
-# - It goes through `to_ref` rather than `KarrayRef._to_read_ref()`. Both reach
-#   the same node; one is private. If more blocks need this, the right move is
-#   for Kathryn to re-export `to_ref` from the package root — it is currently
-#   only reachable as `kathryn.signal.to_ref`.
-# - Both ports are indexed by a DECODED register number (`dyn_idx`), never by a
-#   literal, so a hardwired register can only be recognized at RUNTIME. The write
-#   port therefore compares the index against every entry of `const_regs` and
-#   suppresses the write when it matches — the "writes are discarded" half of
-#   uop_contract.md §1.1, enforced in hardware rather than assumed of the caller.
-#   The guard is a `zif` over an AND of `!=` terms, one per const register, and
-#   collapses to nothing at all when the class declares none (RV32I's flags-like
-#   classes, every x86 class), so an ISA without hardwired registers pays zero.
-# - The READ half of §1.1 is a chain of muxes, one per hardwired register, NOT
-#   the single `_not_const` guard the write side uses. The two halves are not
-#   symmetric: a write only has to know THAT the index is constant, while a read
-#   has to know WHICH constant, and each entry of `const_regs` carries its own
-#   value. So the guard stays a write-only helper and the read builds per-index
-#   equalities instead. Both collapse to nothing when the class declares none.
-# - Consequence of the mux: `read` DECLARES hardware for a class with const
-#   registers, so it must be called inside an open flow scope, and inside a
-#   `seq()` the wire is gated on that step's state — read it in the step that
-#   built it. For a class with no const registers `read` stays a pure expression.
-# - Together the two halves make this file self-sufficient: x0 reads as 0 and
-#   cannot be written, with no reset value and nothing assumed of rename. Rename
-#   may still bypass x0 for its own reasons (saving a PRF port); it no longer has
-#   to for the architectural state to be right.
-# - The const entry is still allocated rather than skipped. Skipping it would
-#   put a hole in the array and make every index past it disagree with the
-#   architectural number, to save one register.
+# `__init__` sets configuration BEFORE calling `super().__init__()`:
+# Module.__init__ mints the ident, opens the module scope and runs the @init
+# methods, which read that config — leaving it out builds a hollow object whose
+# `storage` never exists.
+#
+# `read` returns a SignalRef (via `to_ref`), not the raw Karray field ref: a
+# KarrayRef carries `|=`/`*=` but no arithmetic, so `arf.read(i) + imm` would
+# be a TypeError.
+#
+# Both ports are indexed by a DECODED register number, so a hardwired register
+# can only be recognized at RUNTIME. The two halves of uop_contract.md §1.1 are
+# not symmetric: the WRITE port only has to know THAT the index is constant, so
+# it suppresses the write with one `zif` guard; the READ port has to know WHICH
+# constant, so it builds a mux chain, one per entry of `const_regs`. Both
+# collapse to nothing when the class declares none.
+#
+# Consequence of the mux: `read` DECLARES hardware for a class with const
+# registers, so it must be called inside an open flow scope, and inside a
+# `seq()` the wire is gated on that step's state — read it in the step that
+# built it. With no const registers `read` stays a pure expression.
+#
+# The const entry is still ALLOCATED, not skipped: skipping it would put a hole
+# in the array and make every index past it disagree with the architectural
+# number.
 
 from kathryn import *
 from kathryn.signal import to_ref

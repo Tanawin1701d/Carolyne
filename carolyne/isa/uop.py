@@ -4,49 +4,15 @@
 # index *rules* (Operand), imm is an extraction rule or a cracker-baked
 # constant, never a runtime value.
 #
-# Decisions (2026-08-13):
-# - Operand counts are capped at the µop RECORD's shape (§2: src[0..2],
-#   dest[0..1]) so a cracker cannot describe a µop the hardware plane
-#   cannot carry.
-# - `imm` is deliberately NOT an Operand (§2): FieldRef = extracted encoding
-#   field; int = constant the cracker bakes in (x86 push adjusts ESP by -4).
-# - `op` is a SINGLE concrete Op, so every Uop is fully resolved. An
-#   instruction family sharing one shape (RISC-V R-type) is a plain factory
-#   function in the per-ISA package; the encoding-table row — which exists
-#   per instruction anyway, for the bit pattern — passes the op in. A
-#   multi-op `ops` field was tried and reverted: the §2 record carries
-#   exactly one `kind`, so a family is an *unbound* template that forces a
-#   resolved/unresolved distinction on every consumer downstream, plus a
-#   marker for which µop varies in a multi-µop crack. Python-level
-#   construction is the templating mechanism here, same as an Intermediate
-#   instance being the link between µops.
-# - No first/last bound here — that is a property of a template's position
-#   in its cracker sequence, stamped by the sequence type (next step).
-# - mem (size/sign) and br (cond-kind) sub-fields are deferred until the FU
-#   semantics that consume them land.
-#
-# Decisions (2026-08-14):
-# - `op` is an `Op` object (op.py), not a string. A bare string is rejected
-#   with TypeError instead of being looked up in a unit: the description
-#   layer should hold the catalog object, and `unit.op("ADD")` is the one
-#   sanctioned way to turn text (an encoding-table row) into one.
-# - The template carries NO unit. A µop names only what it does; which
-#   ExecUnit executes it is a machine-configuration question (how many ALUs,
-#   which unit claims which op), answered by the unit set at elaboration —
-#   ExecUnit.ops is the kind→FU map, read the other way round. Consequence:
-#   a wrong (unit, op) pairing can no longer be caught here, and an op listed
-#   by several units is a routing choice the elaborator makes, not an error.
-#
-# Decision (2026-08-15):
-# - An operand now states its own role (operand.py), which the srcs/dests
-#   tuples also state positionally. This is the one place that sees both, so
-#   this is where they are held to each other: a DEST operand sitting in
-#   `srcs` is a construction error, not a silently-wrong template. Without the
-#   check the redundancy would be a bug source rather than a convenience.
-# - A slot holds an Operand and nothing else. AtomicOperand (atomic_operand.py)
-#   is a sibling type, not an alternative here: a µop template always states
-#   its index rule, so admitting a union would make every consumer downstream
-#   ask which kind it got before it could read one.
+# Operand counts are capped at the record's shape (§2: src[0..2], dest[0..1]).
+# `op` is a single concrete Op object — an instruction family sharing one shape
+# is a factory function in the per-ISA package. The template names no unit:
+# which ExecUnit executes a kind is answered by the unit set at elaboration.
+# A slot holds an Operand and nothing else, and this is the one place that sees
+# both an operand's own role and its position, so it holds them to each other.
+# No first/last bound here — that comes from position in the cracker sequence.
+# mem (size/sign) and br (cond-kind) sub-fields are deferred until the FU
+# semantics that consume them land.
 
 from __future__ import annotations
 

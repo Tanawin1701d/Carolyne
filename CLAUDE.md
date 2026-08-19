@@ -437,7 +437,12 @@ elaboration from a `RegFile` in `uarch`.
 ## 7. Conventions
 
 - Discuss design decisions before coding them; when a choice is made, record
-  the *why* in the file's header comment.
+  the *why* in **§4 of this file** (the design log), never in the source. A
+  file's own comments stay CORE: what the code does, plus the Kathryn or
+  contract rule a reader would break without. No `Decisions (date):` blocks,
+  no "this was tried and reverted", no cost/benefit prose in headers or
+  docstrings. (On 2026-08-19 those blocks were stripped from every file under
+  `carolyne/`, −948 lines; don't reintroduce them.)
 - Validate descriptions at construction (`__post_init__` raising ValueError
   with the reg-file/operand name in the message) so bad ISA specs fail
   loudly, not deep in elaboration.

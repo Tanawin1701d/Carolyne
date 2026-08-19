@@ -6,41 +6,27 @@
 # comparison per entry. `free_tag` is the COUNT of tags left, which is why it is
 # ceil_log2(sptag_len) bits while the tag itself is sptag_len.
 #
-# Decisions (2026-08-17):
-# - `book_rename` returns the tag BEFORE rotating, so a branch carries the
-#   current tag and the pointer moves past it. That is the relation
-#   `on_mis_pred` inverts — it restores `next_tag = rot(last_valid_tag)` — and
-#   the two would disagree under the other convention.
-# - A non-branch changes nothing: it takes the same tag and leaves both counters
-#   alone. `is_branch` is 1 bit, so the free-count step is a subtraction of the
-#   extended bit and needs no select; the tag pointer does need one, because a
-#   rotate has no "by zero" form that is also a rotate.
-# - Rename and a resolved prediction resolve into ONE clocked write per counter,
-#   committed by `on_update_meta` — the same structure Prf uses, and for the same
-#   reason: two independent whole-value writes to `free_tag` in one cycle would
-#   silently lose one. The class comment reads the three events as exclusive, but
-#   this costs nothing if they never overlap and is the only thing that makes
-#   them free to overlap later.
-# - CALL ORDER MUST NOT MATTER — for ANY of the three, including which one runs
-#   last, exactly as in Prf and by exactly the same means. The ports are WIRES
-#   declared in `com_declare`; `book_rename` and `on_suc_pred` only DRIVE one,
-#   and `on_update_meta` READS them all. A wire read before it is driven still
-#   connects, because these are netlist nodes and not values, so the three
-#   compose in hardware where the order they were spoken in cannot be observed.
-#   It also means `book_rename` can still return its tag: the tag for a lane is
-#   the pointer stepped past every EARLIER lane's port wire, which exists from
-#   declaration whether or not that lane has been booked yet.
-# - The cost is that the rename PORT COUNT is a construction parameter, since a
-#   declared network cannot discover its width from how many times a method was
-#   called. The RESOLVE side needs no such parameter: it is fixed at ONE port.
-#   Tags are handed out by rotating a single pointer and come back in that same
-#   order, so at most one can be returned per cycle — a second resolve port would
-#   be describing a machine this allocator cannot express. That also drops the
-#   `sum_cnt` on the resolve side to a plain `extend`.
-# - A mispredict does NOT join the chain: it is exclusive of the other two, so
-#   it writes at raised priority and overrides them.
-# - `over_use` reports a rename booked with no tag left. Like Prf's, it only
-#   REPORTS — `book_rename` still decrements — so the caller must stall on it.
+# `book_rename` returns the tag BEFORE rotating, so a branch carries the
+# current tag and the pointer moves past it — the relation `on_mis_pred`
+# inverts when it restores `next_tag = rot(last_valid_tag)`. A non-branch takes
+# the same tag and leaves both counters alone.
+#
+# Rename and a resolved prediction resolve into ONE clocked write per counter,
+# committed by `on_update_meta`: two independent whole-value writes to
+# `free_tag` in one cycle would silently lose one.
+#
+# CALL ORDER MUST NOT MATTER, for any of the three. The ports are WIRES
+# declared in `com_declare`; `book_rename` and `on_suc_pred` only DRIVE one and
+# `on_update_meta` READS them all, so the three compose in hardware however
+# they were spoken. The cost is that the rename PORT COUNT is a construction
+# parameter. The resolve side is fixed at ONE port: tags are handed out by
+# rotating a single pointer and come back in that order, so at most one can be
+# returned per cycle.
+#
+# A mispredict does NOT join the chain — it is exclusive of the other two, so
+# it writes at raised priority and overrides them. `over_use` only REPORTS a
+# rename booked with no tag left; `book_rename` still decrements, so the caller
+# must stall on it.
 
 from kathryn import *
 

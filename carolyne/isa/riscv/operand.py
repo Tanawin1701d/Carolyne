@@ -3,54 +3,26 @@
 # "this index / this constant arrives from that encoding field at runtime"
 # (uop_contract.md §1.1, §2).
 #
-# Decisions (2026-08-14):
-# - Module CONSTANTS, shared by every shape. The register ones target
-#   reg.RegFile, the one class instance this description declares — IsaBase
-#   matches reg files by identity, so an operand constant and the declared
-#   class must be the same object (reg.py header). An Operand is frozen and
-#   value-only, so sharing one across every instruction costs nothing and
-#   reads better than rebuilding an identical slot per shape.
-# - The FieldRef name of a register operand is taken FROM the field-match
-#   table (`FM.RD.name`) rather than spelled again as a literal. The two
-#   halves — "which encoding field supplies this index" and "which bits that
-#   field occupies" — are independent types, so a typo in either would only
-#   surface when a decoder is generated. Deriving one from the other makes
-#   them agree by construction.
-# - `matcher` carries the field's bit positions alongside the index rule, so
-#   an operand says both which field it reads and where that field lives.
-#   That is the FieldRef→bits binding the layer above defers to "when a
-#   cracker is bound to an encoding"; nothing checks it yet, but the
-#   description can already state it.
-# - An immediate operand targets `reg.ImmTarget` and carries NO index. An
-#   index rule answers "which register of the class", which an immediate does
-#   not have — the layer above enforces exactly that (Operand on an
-#   Intermediate carries no index), so the six constants differ only by their
-#   matcher, and the matcher is what says which bits the value comes from.
-# - No µtemp operands beyond that: RV32I produces no intra-instruction values
-#   (rv32i.py header). A real µtemp must be built where its instruction is
-#   and never shared, so it could not be a constant here.
+# Module CONSTANTS, shared by every shape, built on four shared AtomicOperand
+# cores. The register rules target reg.RegFile, the one class instance this
+# description declares — IsaBase matches reg files by identity, so the operand
+# constants and the declared class must be the same object.
 #
-# Decisions (2026-08-15):
-# - An Operand is built on an AtomicOperand core, so the four cores here are
-#   shared the same way the operands are, and for the same reason: frozen,
-#   value-equal, so sharing couples nothing. The nine rules then differ only
-#   where they actually differ — the field they read and the bits they read
-#   it from.
-# - The cores are named per SLOT (src 1 = rs1, src 2 = rs2, src 3 = the
-#   immediate, dest 1 = rd), not per target kind. AOPR_SRC_1 and AOPR_SRC_2
-#   are therefore value-equal twins on purpose: they are two different slots
-#   that happen to agree on everything the core says.
-# - Every operand states its `target_kind` even though each core here offers
-#   exactly one target. RV32I has no slot that resolves either way, so nothing
-#   is being chosen — but the selection is what the rule READS as, and an
-#   inferred one would change meaning silently if a core ever grew its second
-#   target.
-# - Each constant states its ROLE, which is what lets these stay constants:
-#   RV32I reads rs1/rs2 and writes rd through three DIFFERENT encoding fields,
-#   so no slot is ever both, and one OPR_RD serves all 30 instructions that
-#   write a register. (An ISA whose one field is read and written — x86's
-#   modrm_reg — needs a src constant and a dest constant; see operand.py.)
-#   The immediates are SRC: a value flowing in, never written back.
+# The FieldRef name of a register operand is taken FROM the field-match table
+# (`FM.RD.name`) rather than spelled again, so the two halves agree by
+# construction, and `matcher` carries that field's bit positions alongside the
+# index rule.
+#
+# The cores are named per SLOT (src 1 = rs1, src 2 = rs2, src 3 = the
+# immediate, dest 1 = rd); AOPR_SRC_1 and AOPR_SRC_2 are value-equal twins on
+# purpose. Each rule states its role and its target_kind. RV32I reads rs1/rs2
+# and writes rd through three DIFFERENT encoding fields, so no slot is ever
+# both and one OPR_RD serves all 30 instructions that write a register.
+#
+# An immediate operand targets `reg.ImmTarget` and carries NO index: an index
+# answers "which register of the class", which an immediate has not got. The
+# six immediate constants differ only by their matcher. No µtemp operands
+# beyond that — RV32I produces no intra-instruction values.
 #
 # KNOWN GAPS
 # - An immediate operand cannot say how its bits become a value: sign

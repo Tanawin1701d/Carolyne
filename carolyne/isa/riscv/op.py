@@ -4,32 +4,18 @@
 # for why. Names follow the §1.2 table so two ISAs that mean the same thing
 # spell it the same way.
 #
-# Decisions (2026-08-14):
-# - The unit split is a MACHINE choice, not an ISA one: RV32I would work just
-#   as well with one big unit, or with two ALUs. This file is where a
-#   configuration knob will eventually sit (issue ports, unit counts); until
-#   the issue-port design exists, one unit per §1.2 row is the plain default.
-# - MULDIV is absent: the M extension is not RV32I. It joins as another
-#   ExecUnit + ops when an rv32im description is added, changing nothing else.
-# - The Ops below stay module CONSTANTS while `exec_units()` is a function.
-#   The split follows identity: an Op is value-equal (Op("ADD") == Op("ADD")),
-#   so two descriptions holding "the same" op cannot drift apart and a shared
-#   constant is safe — and naming ops as constants is what keeps the
-#   instruction table readable. The unit set is the machine-configuration knob (how many ALUs,
-#   which unit claims which op), so it is built per description, and that
-#   function is where a config argument will land.
-# - Memory width/sign and branch condition are DISTINCT OPS, not sub-fields
-#   of one LOAD/STORE/BR_COND kind: lb/lh/lw/lbu/lhu, sb/sh/sw and
-#   beq/bne/blt/bge/bltu/bgeu each get their own Op. Generic kinds would need
-#   the µop record to carry a size/sign field and a condition field that only
-#   those kinds read — a second, parallel way of saying what `kind` already
-#   says. Enumerating costs the FU more cases to implement and buys a record
-#   that stays exactly as §2 describes it, plus a decoder that never has to
-#   fill a field it does not understand.
-# - AUIPC is its own op rather than an ADD with the PC as a source. Since PC
-#   is not a register class (reg.py), an `ADD` for auipc would be an add with
-#   one operand missing — an op whose meaning depends on knowing which
-#   instruction produced it. AUIPC names the pc-relative add outright.
+# The unit split is a MACHINE choice, not an ISA one: one unit per §1.2 row is
+# the plain default, and this file is where an issue-port / unit-count config
+# knob will sit. MULDIV is absent — the M extension is not RV32I.
+#
+# The Ops are module CONSTANTS (value-equal, so sharing couples nothing) while
+# `exec_units()` is a function, since the unit set is the configuration knob.
+#
+# Memory width/sign and branch condition are DISTINCT OPS, not sub-fields of
+# one LOAD/STORE/BR_COND kind: lb/lh/lw/lbu/lhu, sb/sh/sw and
+# beq/bne/blt/bge/bltu/bgeu each get their own Op, so the µop record needs no
+# size/sign or condition field. AUIPC is likewise its own op, not an ADD with
+# a PC source it has no way to name.
 
 from __future__ import annotations
 

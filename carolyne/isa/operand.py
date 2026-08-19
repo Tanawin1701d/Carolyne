@@ -19,47 +19,14 @@
 #
 # An Intermediate target needs no index either: the instance IS the value node.
 #
-# FieldRef lives here rather than in its own module: it is the index rule of
-# an Operand (and the same rule for a Uop's imm), meaningless on its own, and
-# a one-field dataclass is not worth a file.
+# Operand HOLDS an AtomicOperand rather than extending it. `target_kind` is the
+# selector, required and resolved in __post_init__, so a rule selecting a
+# target its core does not carry fails at construction. The selection lives
+# here, so `target`, `width`, `is_arch` and `is_intermediate` do too; only
+# `role`/`is_src`/`is_dest` forward from the core.
 #
-# Decisions (2026-08-15):
-# - The role and the candidate targets are NOT repeated here: Operand HOLDS an
-#   AtomicOperand (atomic_operand.py). Composition, not inheritance — Operand
-#   is not substitutable for its core, since it demands an index rule the core
-#   knows nothing about.
-# - `target_kind` is the SELECTOR, and it is required. A core may offer both a
-#   reg_file and an intermediate; this slot says which of them it names, and
-#   __post_init__ resolves it immediately, so a rule selecting a target its
-#   core does not carry fails at construction rather than at elaboration. It is
-#   never inferred from "the core only has one" — an inferred selector would
-#   silently change meaning the day that core grows its second target.
-# - Because the selection lives here, so do `target`, `width`, `is_arch` and
-#   `is_intermediate`: the core cannot answer any of them, since two candidate
-#   targets may differ in kind and in width. Only `role`/`is_src`/`is_dest`
-#   forward from the core.
-# - Consequence, accepted: every construction site names the core AND the
-#   selection — `Operand(AtomicOperand(DEST, reg_file=x), ARCH,
-#   FieldRef("rd"))`. Per-ISA packages keep the noise down by sharing core
-#   constants (riscv/operand.py), which is free because an AtomicOperand is
-#   frozen and value-equal.
-# - The role lives in the core, so an operand still states its own direction
-#   and Uop still cross-checks it against srcs/dests position (uop.py). A
-#   shared constant self-documents: OPR_RD *is* a destination, in every
-#   template that uses it.
-# - `index` may now be OMITTED on a one-register class. This is the surviving
-#   half of a rule that briefly lived in AtomicOperand ("a target the ISA
-#   never has to index"); it belongs here, because it is a statement about the
-#   index, and only this type has one. is_const then reads register 0, the
-#   only register there is.
-# - An Operand will NOT point at its post-rename counterpart when the
-#   hardware-plane record type lands. Two reasons, either sufficient: a
-#   physical index is a run-time value, which the elaboration plane may not
-#   hold; and an Operand is a frozen, value-equal, SHARED constant — OPR_RS1
-#   is one object across 37 templates — so there is no per-use slot on it to
-#   point from. That map has to run one-way, reading an Operand.
-# - A Uop slot is an Operand, full stop — never a bare AtomicOperand and never
-#   a union of the two (uop.py). A µop template always states its index rule.
+# FieldRef lives here rather than in its own module: it is the index rule of
+# an Operand (and the same rule for a Uop's imm), meaningless on its own.
 
 from __future__    import annotations
 
@@ -76,10 +43,8 @@ from .field_match    import InstrFieldMatch
 # template; elaboration turns a FieldRef into wiring from the generated
 # decoder's field extractor into the rename read/write port.
 #
-# A FieldRef is only a name here. Which bits the field occupies — and whether
-# the name exists at all — is defined by the encoding table and checked when
-# a cracker is bound to an encoding (that layer lands later). Equality is by
-# name: within one instruction template, "rd" is "rd".
+# A FieldRef is only a name here; which bits the field occupies is defined by
+# the encoding table. Equality is by name.
 @dataclass(frozen=True)
 class FieldRef:
     name : str          # encoding field name, e.g. "rd", "rs1", "modrm_reg"
@@ -104,13 +69,11 @@ class Operand:
             raise TypeError(
                 f"Operand needs an AtomicOperand core, got {type(self.atomic).__name__} "
                 f"(AtomicOperand(role, reg_file=..., intermediate=...))")
-        # Raises if the core does not offer this kind — the selection is the
-        # first thing that has to hold, before any index rule means anything.
+        # Raises if the core does not offer this kind.
         target = self.atomic.target_for(self.target_kind)
         if isinstance(target, RegFile):
             if self.index is None:
-                # Legal only where there is nothing to choose: one register,
-                # index_width 0, and the elaborator wires it.
+                # Legal only on a one-register class: index_width is 0.
                 if target.amount != 1:
                     raise ValueError(
                         f"Operand on reg file '{target.name}' needs an index rule "
@@ -143,8 +106,7 @@ class Operand:
 
     @property
     def width(self) -> int:
-        # The SELECTED target's width — the core cannot answer this, since it
-        # may offer two targets of different widths.
+        # The SELECTED target's width.
         return self.target.width
 
     # --- forwarded from the core ----------------------------------------------
@@ -169,8 +131,7 @@ class Operand:
     @property
     def is_const(self) -> bool:
         # Statically-known hardwired reg (implicit int index onto a const reg).
-        # A decoded index can still hit x0 at runtime — that check is rename's
-        # job, elaborated from RegFile.const_regs; it cannot be known here.
+        # A decoded index hitting x0 is rename's runtime check, not this one.
         if not self.is_arch:
             return False
         # An omitted index means the class holds one register, which is 0.

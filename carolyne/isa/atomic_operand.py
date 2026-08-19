@@ -10,34 +10,8 @@
 #
 # At least one must be present; both may be. The Operand built on the core
 # states WHICH of them it selects (`target_kind`), so one core can serve rules
-# that resolve differently — the shape an ISA needs when a single encoding slot
-# is a register in one form and a loaded value in another (x86 ModRM r/m).
-#
-# Decisions (2026-08-15):
-# - This type is the CORE of an operand, not a variant of one. Operand
-#   composes it rather than repeating role and targets.
-# - OperandRole and TargetKind are declared HERE, with the smaller type, so
-#   the dependency runs operand -> atomic_operand and never back.
-# - TWO OPTIONAL target fields, not one Union field. A Union says "this slot
-#   names exactly one of these, decided here"; the pair says "these are the
-#   values this slot may name, and the Operand decides". The second is what
-#   lets a core be shared across rules that select differently. Cost, and it
-#   is a real one: a core no longer states WHICH value a slot names, only the
-#   candidates, so two rules sharing a core share a *menu* — the check that a
-#   slot targets what it should now lives on Operand, where the selection is.
-# - The core carries NO `width`, NO `is_arch`, NO `is_intermediate`: with two
-#   candidate targets each is ambiguous, and only the selection answers them.
-#   `has_arch`/`has_temp` say what is on offer; `target_for(kind)` performs the
-#   selection, so the one place that knows how a kind maps to a field is here.
-# - It carries no is_const and no is_decoded either. Each is a fact about the
-#   INDEX, which this type has not got: whether a slot is hardwired depends on
-#   WHICH register of the class it names, and whether it is decoded depends on
-#   where that index comes from. Answering either here would mean guessing.
-# - REMOVED on the way here (don't restore from git): a rule refusing a target
-#   with more than one register, which could not survive Operand holding a
-#   core — 30 of RV32I's 37 operands target a 32-register file. Its useful half
-#   lives on in Operand, which lets the index be OMITTED exactly when the class
-#   holds one register.
+# that resolve differently (x86 ModRM r/m). The core has no width / is_arch /
+# is_const of its own: those are answered by the selection, on Operand.
 
 from __future__ import annotations
 
@@ -50,18 +24,8 @@ from .reg import Intermediate, RegFile
 
 # Which direction the slot flows, and therefore which rename port it becomes.
 # Values are the words Uop's error messages use, so `f"{role}"` reads right.
-#
-# This IS an enum where Op (op.py) deliberately is not: the two are different
-# kinds of set. An ISA may declare an op nobody anticipated, but contract §2
-# gives the record exactly src[0..2] and dest[0..1] slots, so no ISA can
-# invent a third role. A closed set is an enum.
-#
-# There is no SRC_DEST member. An arch slot both read and written through one
-# encoding field (x86 `add eax, ebx`) becomes TWO operands, because rename
-# genuinely does a RAT read and a RAT write + free-list alloc there, filling
-# one src slot AND one dest slot of the record. One object claiming both roles
-# would hide two slots behind one entry and force every consumer downstream to
-# expand it.
+# No SRC_DEST member: a slot both read and written (x86 `add eax, ebx`) is TWO
+# operands, filling one src slot and one dest slot of the record.
 class OperandRole(Enum):
     SRC  = "src"
     DEST = "dest"
@@ -70,8 +34,7 @@ class OperandRole(Enum):
         return self.value
 
 
-# Which of a core's two targets an operand selects. Closed for the same reason
-# OperandRole is: the core has exactly these two slots to choose between.
+# Which of a core's two targets an operand selects.
 class TargetKind(Enum):
     ARCH = "arch"       # the core's reg_file — renamed through that class's RAT/PRF
     TEMP = "temp"       # the core's intermediate — the µtemp instance IS the value node
@@ -105,9 +68,7 @@ class AtomicOperand:
                 "or both (the Operand then selects which with target_kind)")
 
     def target_for(self, kind: TargetKind) -> Union[RegFile, Intermediate]:
-        # The selection itself, so the kind -> field mapping is written once.
-        # Raises rather than returning None: a slot selecting a target the core
-        # does not offer is a broken rule, not an empty one.
+        # Maps a kind to the field holding it; raises if the core lacks it.
         if not isinstance(kind, TargetKind):
             raise TypeError(
                 f"target_kind must be a TargetKind, got {type(kind).__name__} "
