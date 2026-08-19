@@ -250,3 +250,56 @@ def test_a_per_isa_package_may_subclass_it():
     with pytest.raises(ValueError):         # inherited checks still run
         ToyIsa(name="", **addr, reg_files=(X,), atomic_operands=cores, operands=operands,
                ops=(ADD,), exec_units=(ALU,), uops=uops, mops=mops)
+
+
+def test_it_reads_the_operand_cores_that_reach_one_exec_unit():
+    # units_for() walked the other way, in two halves: the elaborator building
+    # the ALU sizes its read ports off the srcs and its write ports off the
+    # dests, so the query never makes it re-split a mixed tuple.
+    isa     = _isa()
+    add_uop = isa.mops[0].uop_seq[0].uops[0]
+
+    srcs  = isa.src_atomic_operands_for(ALU)
+    dests = isa.dest_atomic_operands_for(ALU)
+    assert [c.role for c in srcs]  == [SRC]
+    assert [c.role for c in dests] == [DEST]
+    # The ADD µop's slots and only those, BY IDENTITY — the LOAD µop's cores
+    # belong to mem, even though every core in this toy is value-equal.
+    assert [id(c) for c in srcs]  == [id(add_uop.srcs[0].atomic)]
+    assert [id(c) for c in dests] == [id(add_uop.dests[0].atomic)]
+
+
+def test_the_two_halves_are_disjoint():
+    # Role lives in the core and Uop cross-checks it against slot position,
+    # so nothing can land in both halves.
+    isa = _isa()
+    for unit in isa.exec_units:
+        srcs  = {id(c) for c in isa.src_atomic_operands_for(unit)}
+        dests = {id(c) for c in isa.dest_atomic_operands_for(unit)}
+        assert not srcs & dests
+
+
+def test_the_op_half_of_the_walk_matches_by_value():
+    # Ops are the one link that is not identity (op.py), so a unit assembled
+    # from a fresh Op("ADD") reaches the same cores as ALU does.
+    isa  = _isa()
+    alu2 = ExecUnit("alu2", {Op("ADD")})
+    assert isa.src_atomic_operands_for(alu2)  == isa.src_atomic_operands_for(ALU)
+    assert isa.dest_atomic_operands_for(alu2) == isa.dest_atomic_operands_for(ALU)
+
+
+def test_a_unit_that_runs_nothing_the_mops_reach_has_no_cores():
+    # Declared-but-unused units stay legal, so the empty tuple is an answer,
+    # not an error (same rule as test_a_unit_may_list_ops_this_isa_never_uses).
+    isa = _isa()
+    fpu = ExecUnit("fpu", {Op("FADD")})
+    assert isa.src_atomic_operands_for(fpu)  == ()
+    assert isa.dest_atomic_operands_for(fpu) == ()
+
+
+def test_the_unit_query_wants_a_unit_not_its_name():
+    isa = _isa()
+    with pytest.raises(TypeError, match="self.unit"):
+        isa.src_atomic_operands_for("alu")
+    with pytest.raises(TypeError, match="self.unit"):
+        isa.dest_atomic_operands_for("alu")

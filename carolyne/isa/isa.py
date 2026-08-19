@@ -111,12 +111,40 @@
 # - NOT here: the reset vector. Where a core starts fetching is a machine
 #   configuration choice, not something the ISA states.
 
+# Decision (2026-08-19) — atomic_operands_for(unit):
+# - The unit→core direction, added because the elaborator building ONE FU has
+#   to size that unit's operand ports and the container could only answer the
+#   question the other way round (units_for). It is units_for() walked the long
+#   way: unit → its ops → the µops some mop cracks to that name one → their
+#   slots → the cores those slots are built on.
+# - Composed on the spot instead of adding public uops_for()/operands_for()
+#   steps: nothing has asked for the intermediate hops yet, and each is one
+#   generator line the day something does.
+# - TWO public halves, src_ and dest_, not one call returning both: they are
+#   different hardware — the source cores size a unit's READ ports, the dest
+#   cores its WRITE ports — so a caller almost always wants one of them, and
+#   the pair-returning form would make every call site unpack and re-label
+#   what the method name can just say. Wanting both is `a + b`.
+# - The halves are disjoint by construction: role lives in the CORE, and Uop
+#   cross-checks it against slot position (operand.py), so "filter the walk by
+#   role" and "walk uop.srcs / uop.dests" are the same partition. The filter is
+#   what the shared _cores_for() runs on, which keeps one walk for both.
+# - It walks what the MOPS reach (_uops), not the declared `uops` tuple, so it
+#   agrees with the used_* family above: a template no mop cracks to cannot
+#   reach any unit at run time, so it is not that unit's problem. Empty is a
+#   legal answer — a unit may list ops this ISA never uses (2026-08-14).
+# - An undeclared unit is NOT rejected, exactly as units_for() does not check
+#   that its Op was declared: both are pure queries over the argument, and the
+#   caller got the unit from somewhere. Only the TYPE is held, because passing
+#   the NAME is the plausible slip and a bare AttributeError would not say that
+#   self.unit(name) is the sanctioned text→unit door.
+
 from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Tuple
 
-from .atomic_operand import AtomicOperand
+from .atomic_operand import AtomicOperand, OperandRole
 from .exec_unit import ExecUnit
 from .mop import Mop
 from .op import Op
@@ -346,3 +374,33 @@ class IsaBase:
         elaborator's scheduling choice (see exec_unit.py).
         """
         return tuple(unit for unit in self.exec_units if unit.has(op))
+
+    def src_atomic_operands_for(self, unit: ExecUnit) -> Tuple[AtomicOperand, ...]:
+        """The cores this exec unit READS — one per distinct source slot of
+        the µops it executes, so their count is what sizes its read ports."""
+        return self._cores_for(unit, OperandRole.SRC)
+
+    def dest_atomic_operands_for(self, unit: ExecUnit) -> Tuple[AtomicOperand, ...]:
+        """The cores this exec unit WRITES — the write-port side of the same
+        walk, disjoint from the src half because role lives in the core."""
+        return self._cores_for(unit, OperandRole.DEST)
+
+    def _cores_for(self, unit: ExecUnit, role: OperandRole) -> Tuple[AtomicOperand, ...]:
+        """The walk behind both halves — units_for() read the long way round,
+        one hop per line below.
+
+        Deduped by identity like the other used_* walkers. Only the op hop
+        matches by VALUE (op.py); everything under it is one shared instance,
+        which is why a package shares its operand constants. Empty is a legal
+        answer: a unit may run nothing the mops crack to. Full reasoning in
+        the header, 2026-08-19.
+        """
+        if not isinstance(unit, ExecUnit):
+            raise TypeError(
+                f"IsaBase '{self.name}': an exec-unit query wants an ExecUnit, got "
+                f"{type(unit).__name__} (self.unit(name) is the text→unit door)")
+
+        runs  = (uop for uop in self._uops() if unit.has(uop.op))       # µops it executes
+        slots = (opr for uop in runs for opr in uop.srcs + uop.dests)   # their operand slots
+        return _by_identity(opr.atomic for opr in slots                 # the cores under
+                            if opr.role is role)                        # the asked-for half
