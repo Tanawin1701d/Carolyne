@@ -259,14 +259,14 @@ class IsaBase:
     def src_atomic_operands_for(self, unit: ExecUnit) -> Tuple[AtomicOperand, ...]:
         """The cores this exec unit READS — one per distinct source slot of
         the µops it executes; their count sizes its read ports."""
-        return self._cores_for(unit, OperandRole.SRC)
+        return self._atomic_operands_for(unit, OperandRole.SRC)
 
     def dest_atomic_operands_for(self, unit: ExecUnit) -> Tuple[AtomicOperand, ...]:
         """The cores this exec unit WRITES — the write-port side of the same
         walk, disjoint from the src half."""
-        return self._cores_for(unit, OperandRole.DEST)
+        return self._atomic_operands_for(unit, OperandRole.DEST)
 
-    def _cores_for(self, unit: ExecUnit, role: OperandRole) -> Tuple[AtomicOperand, ...]:
+    def _atomic_operands_for(self, unit: ExecUnit, role: OperandRole) -> Tuple[AtomicOperand, ...]:
 
         if not isinstance(unit, ExecUnit):
             raise TypeError(
