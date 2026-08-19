@@ -412,6 +412,28 @@ The table is `reset(valid=0)`: a station powers up empty. `station_cores`
 gathers srcs then dests across every unit of the station, deduped by identity,
 and refuses an unnamed core or a name collision.
 
+**`carolyne/uarch/o3/rsv.py`** — **`RsvBase`** (2026-08-19), the station itself:
+the `table` of waiting entries, the `exec_src` row the FU reads, and the events
+that move them, modelled on the C++ engine's `rsv.h`. `build_issue` is left
+abstract (`NotImplementedError`) — which ready entry goes next is the station's
+policy, age order out of order vs the head in order — so a subclass says it and
+everything else is shared. `slot_ready(row)` ANDs `valid` with `valid_<n>` over
+the ARCH sources only, since a µtemp/immediate has no physical register to wait
+for; `wake_operands` is that subset, computed once at declaration. `on_bypass`
+takes `RsvBypass(reg_file, valid, pr_idx, data)` records and only wakes sources
+naming the SAME class — two PRFs number their entries independently, so a bare
+index would cross-wake. `on_suc_pred` masks the resolved tag out
+(`spec_tag &= ~suc_tag`, `is_spec = spec_tag != 0`) rather than comparing
+equal, because an entry may sit under several open speculations — the same
+idiom `Rt`/`Mpft` already use. Decision: **no new priority rungs**. The C++
+ladder (mispredict > writeEntry > the rest) maps exactly onto the engine-wide
+one: a dispatched entry is written at `PRI_RENAME`, since dispatch and rename
+are one instant, and a squash is `PRI_MIS_PRED`. Issue, bypass and a resolved
+prediction stay on the bottom rung. `rsv_helper` grew `rsv_entry_shape()` so
+the table and the slot cannot drift, plus `build_rsv_slot()` for the one-row
+`exec_src`. NOT here: the `SyncPip`, the sim probes, and the o3 sort-bit rung
+of the C++ original; the age-track maintenance lands with the o3 subclass.
+
 Agreed next steps: give `UopSeq` the cracker-sequence duties it still lacks
 (stamp first/last, validate µtemp def-before-use), settle how a matcher binds
 `FieldRef`s to bit segments, and add the remaining §6 deliverables to
@@ -472,6 +494,14 @@ elaboration from a `RegFile` in `uarch`.
   same way for a combinational structure: index the element statically and put the
   runtime part in the guard (`zif(req & idx == a)`), which builds the same
   hardware with the fan-out visible.
+- **An augmented assign REBINDS the Python name it is written on.**
+  `row |= {...}` is `row = row.__ior__(...)`, and Kathryn's assignment returns
+  an internal assigned-marker, so the handle is dead afterwards: a loop that
+  writes a cached row and then reads it again fails with
+  `'_Assigned' object has no attribute ...`. Write through a fresh selection
+  every time (`self.table[idx] |= {...}`) and keep a cached handle for READS
+  only. An element accepts a `{field_name: source}` dict, which is what lets a
+  loop over ISA-derived field names write without naming them statically.
 - **`Karray.reset(**field_values)`** (added to Kathryn on 2026-08-18):
   one value per field, shared by every element, recorded on each element's own
   backing register so the reset event stays the reg's. A field left out powers up

@@ -100,11 +100,10 @@ def operand_fields(config: CPUO3_Config,
     return fields
 
 
-def build_rsv_table(config: CPUO3_Config, rsv_spec: RsvSpec, name: str = ""):
-    """One station's entry table: a Karray of `rsv_spec.size` rows.
+def rsv_entry_shape(config: CPUO3_Config, rsv_spec: RsvSpec) -> tuple:
+    """The entry class one station uses, and the widths of every field it holds.
 
-    Declares hardware, so it must be called from inside an open Kathryn module
-    scope — the @init of the module that owns the station.
+    Shared by the table and the issued-entry slot, so the two cannot drift.
     """
     entry_cls = RsvO3Entry if rsv_spec.issue_o3 else RsvIOREntry
 
@@ -121,8 +120,26 @@ def build_rsv_table(config: CPUO3_Config, rsv_spec: RsvSpec, name: str = ""):
 
     for atm_operand in station_atm_operands(config.isa, rsv_spec):
         fields.update(operand_fields(config, rsv_spec, atm_operand))
+    return entry_cls, fields
 
+
+def build_rsv_table(config: CPUO3_Config, rsv_spec: RsvSpec, name: str = ""):
+    """One station's entry table: a Karray of `rsv_spec.size` rows.
+
+    Declares hardware, so it must be called from inside an open Kathryn module
+    scope — the @init of the module that owns the station.
+    """
+    entry_cls, fields = rsv_entry_shape(config, rsv_spec)
     table = entry_cls(HwComponentType.REG, (rsv_spec.size,),
                       name or f"rsv_{rsv_spec.label.replace('/', '_')}",
                       **fields)
     return table.reset(valid=0)     # a station powers up empty
+
+
+def build_rsv_slot(config: CPUO3_Config, rsv_spec: RsvSpec, name: str = ""):
+    """One row of the same shape — the entry a station issued this cycle."""
+    entry_cls, fields = rsv_entry_shape(config, rsv_spec)
+    slot = entry_cls(HwComponentType.REG, (1,),
+                     name or f"rsv_{rsv_spec.label.replace('/', '_')}_exec",
+                     **fields)
+    return slot.reset(valid=0)
