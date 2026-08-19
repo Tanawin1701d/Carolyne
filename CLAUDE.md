@@ -79,7 +79,7 @@ contain description data only — no hardware code.
 - **`FieldRef(name)`** — index *rule*: "register number comes from this
   encoding field at runtime". Name-only for now; bit positions and existence
   are validated when crackers get bound to the encoding table (not built yet).
-- **`AtomicOperand(role, reg_file=None, intermediate=None)`**
+- **`AtomicOperand(role, name="", reg_file=None, intermediate=None)`**
   (`atomic_operand.py`) — the core of an operand: the VALUES a slot may name
   and the DIRECTION it flows. Decision: **two optional target fields, not one
   `Union`** — a Union says "this slot names exactly one of these, decided
@@ -94,9 +94,25 @@ contain description data only — no hardware code.
   say what is on offer. Decision: it carries **no `width`, `is_arch`,
   `is_intermediate`** (ambiguous with two candidates — only the selection
   answers them) and **no `is_const`/`is_decoded`** (facts about the *index*,
-  which the core has not got). It owns `OperandRole` (`SRC`/`DEST`) and
-  `TargetKind` (`ARCH`/`TEMP`), so the import runs `operand` →
-  `atomic_operand` one-way. `OperandRole` **is** an enum where `Op`
+  which the core has not got). It owns `OperandRole`
+  (`SRC`/`DEST`/`DEST_W_REQ`) and `TargetKind` (`ARCH`/`TEMP`), so the import
+  runs `operand` → `atomic_operand` one-way. Decision (2026-08-19): a **`name`**
+  joined, optional and defaulting to `""`, validated as a Python identifier —
+  it is the STEM of every hardware field a consumer builds for that slot
+  (`valid_<name>`, `pr_idx_<name>`, `data_<name>`, `required_<name>`), so a
+  core with no name simply cannot be turned into hardware and the block that
+  needs one says so (`rsv.station_cores`). Optional, not required: 58
+  construction sites exist and a core is a legal description object without a
+  name; `IsaBase` enforces uniqueness across the ISA for the ones that have
+  one. Decision (2026-08-19): **`DEST_W_REQ`** is the third role — a
+  destination whose write is REQUIRED before the instruction retires, which a
+  reservation station tracks with a `required_` bit where a plain `DEST`
+  carries only its index. Two roles are now destinations, so `SRC_ROLES` /
+  `DEST_ROLES` live beside the enum and every consumer tests MEMBERSHIP rather
+  than `role is DEST` (`Uop`'s position check, `IsaBase`'s per-unit queries);
+  `role.is_src`/`role.is_dest` are properties on the enum itself so the group
+  test has one home. `is_write_required` on the core is what tells the two
+  dest roles apart. `OperandRole` **is** an enum where `Op`
   deliberately is not — an ISA may declare an unanticipated op, but §2 gives
   the record exactly src/dest slots, so no ISA invents a third role; and there
   is **no `SRC_DEST`**, since an arch slot read *and* written through one field
@@ -223,7 +239,20 @@ Immediates are deliberately NOT an `Operand` target — the µop record carries
   unhashable anyway. Names unique per vocabulary. Lookups: `op(name)`,
   `unit(name)`, `reg_file(name)`, `units_for(op)` (the kind→FU map read out),
   `used_ops()`, `used_reg_files()`, `used_uops()`, `used_operands()`,
-  `used_atomic_operands()`. Decision (2026-08-15): `atomic_operands`,
+  `used_atomic_operands()`. Decision (2026-08-19): **`src_atomic_operands_for(unit)`
+  / `dest_atomic_operands_for(unit)`** read `units_for()` the long way round —
+  unit → its ops → the µops some mop cracks to → their slots → the cores —
+  because the elaborator building ONE FU has to size that unit's operand ports
+  and the container could only answer the question the other way. Two public
+  halves over one private `_atomic_operands_for(unit, roles)`, because src
+  cores size READ ports and dest cores size WRITE ports; the halves are
+  disjoint by construction, since role lives in the core and `Uop` cross-checks
+  it against slot position. It walks what the MOPS reach, not the declared
+  `uops`; ops match by VALUE so a unit built from a fresh `Op("ADD")` still
+  matches, everything below by identity. An undeclared unit is not rejected
+  (neither is `units_for`'s op) but a non-`ExecUnit` is, pointing at
+  `self.unit(name)`. Core NAMES are also held unique here — unnamed ones
+  skipped — since a name becomes a field name downstream. Decision (2026-08-15): `atomic_operands`,
   `operands` and `uops` are declared on the same terms — the ISA writes its
   whole vocabulary down and the container checks the chain **one link at a
   time**: a mop's µops must be declared, their operands must be declared, and
@@ -349,6 +378,39 @@ keeping: a physical index is a run-time value, so the map across the boundary
 runs **one-way**, reading an `Operand`; and it could not tell RV32I's
 `ImmTarget` from a real µtemp, which is the same open gap as `Uop` having no
 `imm`.
+
+**`carolyne/uarch/o3/rsv_helper.py`** — `build_rsv_table(config, rsv_spec, name="")`
+builds ONE reservation station's entry table (2026-08-19). `RsvEntryBase`
+states the shape every station has (`valid`, `is_spec`, `spec_tag`, `uop_idx`,
+`pc`); `RsvO3Entry` adds the age track and `RsvIOREntry` adds nothing, since
+position in an in-order station IS the order. The builder adds the part that
+varies with the ISA: one field group per `AtomicOperand` the station's units
+read or write, named after the core —
+
+| core                    | fields                                  |
+| ----------------------- | --------------------------------------- |
+| src on a register class | `valid_<n>`, `pr_idx_<n>`, `data_<n>`   |
+| src on a µtemp only     | `data_<n>` only                         |
+| `DEST`                  | `pr_idx_<n>`                            |
+| `DEST_W_REQ`            | `required_<n>`, `pr_idx_<n>`            |
+
+A µtemp source gets data ALONE because there is no PRF entry to wake on — the
+value rides with the µop (RV32I's immediates are exactly this, via
+`ImmTarget`). A core offering BOTH targets is sized off the arch one: `pr_idx`
+from `config.phy_idx_width(reg_file)`, `data` from the class width. A µtemp
+DESTINATION *raises* — the config sizes a physical file per register CLASS, so
+there is no index width for one, and x86's AGU will surface that gap the day it
+lands. Decision: the signature takes the **config**, not just the `RsvSpec` —
+`spec_tag`, `pc` and `uop_idx` cannot be sized from a spec that holds only
+size + units. `uop_idx` is `CPUO3_Config.uop_idx_width` =
+`ceil_log2(len(isa.uops))` — it names WHICH µop of the ISA's vocabulary the
+entry holds, so one index means the same µop anywhere in the core. It is NOT
+the ROB index (that counts in-flight instructions and is narrower: 6 bits vs 5
+for RV32I on a 32-deep ROB). `track` is `ceil_log2(size)`, so an out-of-order
+station with one entry raises rather than asking Kathryn for a 0-bit field.
+The table is `reset(valid=0)`: a station powers up empty. `station_cores`
+gathers srcs then dests across every unit of the station, deduped by identity,
+and refuses an unnamed core or a name collision.
 
 Agreed next steps: give `UopSeq` the cracker-sequence duties it still lacks
 (stamp first/last, validate µtemp def-before-use), settle how a matcher binds

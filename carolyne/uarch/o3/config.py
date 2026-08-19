@@ -31,6 +31,7 @@ from dataclasses import dataclass
 from typing import Tuple
 
 from ...isa import ExecUnit, IsaBase, RegFile
+from ..common import ceil_log2
 
 # The map from a register class to its physical file size. A dict is impossible
 # (RegFile is unhashable — header), so the pairs ARE the map; read one with
@@ -172,6 +173,13 @@ class CPUO3_Config:
     @property
     def instr_width(self) -> int:
         return self.isa.ilen_bytes * 8
+
+    @property
+    def uop_idx_width(self) -> int:
+        """Bits naming ONE µop of the ISA's vocabulary — the id an in-flight
+        record carries to say what it is. Sized from the templates the ISA
+        declares, so one index means the same µop anywhere in the core."""
+        return ceil_log2(len(self.isa.uops))
 
     # --- derived from the knobs -----------------------------------------------
     @property

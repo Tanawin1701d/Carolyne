@@ -31,7 +31,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Tuple
 
-from .atomic_operand import AtomicOperand, OperandRole
+from .atomic_operand import (AtomicOperand, DEST_ROLES, OperandRole,
+                             SRC_ROLES)
 from .exec_unit import ExecUnit
 from .mop import Mop
 from .op import Op
@@ -152,6 +153,16 @@ class IsaBase:
                 raise ValueError(
                     f"IsaBase '{self.name}': {field} lists the same object twice "
                     f"(value-equal twins are fine; one instance is not two)")
+        # A core's name is the stem of every hardware field built for it, so two
+        # cores sharing one would collide in a record. Unnamed cores are skipped:
+        # the name is optional here and required where hardware needs it.
+        seen_names = set()
+        for core in self.atomic_operands:
+            if core.name and core.name in seen_names:
+                raise ValueError(
+                    f"IsaBase '{self.name}': two atomic operands named '{core.name}' — "
+                    f"a core's name has to be unique, it names that slot's fields")
+            seen_names.add(core.name)
 
     def _reject_undeclared(self) -> None:
         """Everything the mops reach must have been written down: the chain
@@ -259,14 +270,16 @@ class IsaBase:
     def src_atomic_operands_for(self, unit: ExecUnit) -> Tuple[AtomicOperand, ...]:
         """The cores this exec unit READS — one per distinct source slot of
         the µops it executes; their count sizes its read ports."""
-        return self._atomic_operands_for(unit, OperandRole.SRC)
+        return self._atomic_operands_for(unit, SRC_ROLES)
 
     def dest_atomic_operands_for(self, unit: ExecUnit) -> Tuple[AtomicOperand, ...]:
         """The cores this exec unit WRITES — the write-port side of the same
-        walk, disjoint from the src half."""
-        return self._atomic_operands_for(unit, OperandRole.DEST)
+        walk, disjoint from the src half. Both dest roles come back; read
+        `core.is_write_required` to tell DEST_W_REQ from a plain DEST."""
+        return self._atomic_operands_for(unit, DEST_ROLES)
 
-    def _atomic_operands_for(self, unit: ExecUnit, role: OperandRole) -> Tuple[AtomicOperand, ...]:
+    def _atomic_operands_for(self, unit  : ExecUnit,
+                                   roles : Tuple[OperandRole, ...]) -> Tuple[AtomicOperand, ...]:
 
         if not isinstance(unit, ExecUnit):
             raise TypeError(
@@ -276,4 +289,4 @@ class IsaBase:
         runs  = (uop for uop in self._uops() if unit.has(uop.op))       # µops it executes
         slots = (opr for uop in runs for opr in uop.srcs + uop.dests)   # their operand slots
         return _by_identity(opr.atomic for opr in slots                 # the cores under
-                            if opr.role is role)                        # the asked-for half
+                            if opr.role in roles)                       # the asked-for half

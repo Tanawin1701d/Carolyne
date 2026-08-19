@@ -19,7 +19,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Optional, Tuple, Union
 
-from .atomic_operand import OperandRole
+from .atomic_operand import DEST_ROLES, SRC_ROLES
 from .field_match import InstrFieldMatch, InstrValueMatch, check_matcher_pair
 from .op import Op
 from .operand import FieldRef, Operand
@@ -47,20 +47,20 @@ class Uop:
                 f"(name it from the catalog, or <unit>.op(<name>))")
         object.__setattr__(self, "srcs",  tuple(self.srcs))    # accept any sequence
         object.__setattr__(self, "dests", tuple(self.dests))
-        for role, operands, limit in ((OperandRole.SRC,  self.srcs,  MAX_SRCS),
-                                      (OperandRole.DEST, self.dests, MAX_DESTS)):
+        for kind, roles, operands, limit in (("src",  SRC_ROLES,  self.srcs,  MAX_SRCS),
+                                            ("dest", DEST_ROLES, self.dests, MAX_DESTS)):
             if len(operands) > limit:
                 raise ValueError(
-                    f"Uop '{self.op}': {len(operands)} {role} operands, "
+                    f"Uop '{self.op}': {len(operands)} {kind} operands, "
                     f"record carries at most {limit} (uop_contract.md §2)")
             for slot, operand in enumerate(operands):
                 if not isinstance(operand, Operand):
                     raise TypeError(
-                        f"Uop '{self.op}': {role} operands must be Operand, "
+                        f"Uop '{self.op}': {kind} operands must be Operand, "
                         f"got {type(operand).__name__}")
-                if operand.role is not role:
+                if operand.role not in roles:
                     raise ValueError(
-                        f"Uop '{self.op}': {role} slot {slot} holds an operand "
+                        f"Uop '{self.op}': {kind} slot {slot} holds an operand "
                         f"declared {operand.role} — an operand's role must match "
                         f"the list it sits in")
         check_matcher_pair(self.matcher_field, self.matcher_value,

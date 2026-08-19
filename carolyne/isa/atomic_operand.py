@@ -26,12 +26,31 @@ from .reg import Intermediate, RegFile
 # Values are the words Uop's error messages use, so `f"{role}"` reads right.
 # No SRC_DEST member: a slot both read and written (x86 `add eax, ebx`) is TWO
 # operands, filling one src slot and one dest slot of the record.
+#
+# DEST_W_REQ is a destination whose write is REQUIRED — the µop must produce it
+# before the instruction can retire, so a reservation station carries a
+# `required_<name>` bit for it where a plain DEST carries only its index.
 class OperandRole(Enum):
-    SRC  = "src"
-    DEST = "dest"
+    SRC        = "src"
+    DEST       = "dest"
+    DEST_W_REQ = "dest_w_req"
 
     def __str__(self) -> str:
         return self.value
+
+    @property
+    def is_src(self) -> bool:
+        return self is OperandRole.SRC
+
+    @property
+    def is_dest(self) -> bool:
+        return self in (OperandRole.DEST, OperandRole.DEST_W_REQ)
+
+
+# The roles a src slot and a dest slot may hold. Two roles are destinations, so
+# every consumer that used to compare against DEST tests membership instead.
+SRC_ROLES  = (OperandRole.SRC,)
+DEST_ROLES = (OperandRole.DEST, OperandRole.DEST_W_REQ)
 
 
 # Which of a core's two targets an operand selects.
@@ -46,6 +65,8 @@ class TargetKind(Enum):
 @dataclass(frozen=True)
 class AtomicOperand:
     role         : OperandRole              # src or dest; Uop checks it against position
+    name         : str                    = ""      # slot name; the stem of every
+                                                    # hardware field built for this core
     reg_file     : Optional[RegFile]      = None    # arch class this slot may name
     intermediate : Optional[Intermediate] = None    # µtemp this slot may name
 
@@ -53,7 +74,14 @@ class AtomicOperand:
         if not isinstance(self.role, OperandRole):
             raise TypeError(
                 f"AtomicOperand role must be an OperandRole, got {type(self.role).__name__} "
-                f"(OperandRole.SRC or OperandRole.DEST)")
+                f"({', '.join(r.name for r in OperandRole)})")
+        if not isinstance(self.name, str):
+            raise TypeError(
+                f"AtomicOperand name must be a str, got {type(self.name).__name__}")
+        if self.name and not self.name.isidentifier():
+            raise ValueError(
+                f"AtomicOperand name '{self.name}' is not an identifier — it becomes "
+                f"the stem of generated field names (valid_<name>, pr_idx_<name>)")
         if self.reg_file is not None and not isinstance(self.reg_file, RegFile):
             raise TypeError(
                 f"AtomicOperand reg_file must be a RegFile, "
@@ -90,8 +118,13 @@ class AtomicOperand:
 
     @property
     def is_src(self) -> bool:
-        return self.role is OperandRole.SRC
+        return self.role.is_src
 
     @property
     def is_dest(self) -> bool:
-        return self.role is OperandRole.DEST
+        return self.role.is_dest
+
+    @property
+    def is_write_required(self) -> bool:
+        """A destination the µop must write before the instruction retires."""
+        return self.role is OperandRole.DEST_W_REQ

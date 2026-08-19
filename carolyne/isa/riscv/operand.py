@@ -57,10 +57,10 @@ ARCH, TEMP  = TargetKind.ARCH, TargetKind.TEMP
 # single encoding slot resolves either way (x86 ModRM r/m); RV32I has no such
 # slot, and stating the selection anyway is what keeps a rule readable on its
 # own.
-AOPR_SRC_1   = AtomicOperand(SRC,  reg_file=RegFile)
-AOPR_SRC_2   = AtomicOperand(SRC,  reg_file=RegFile, intermediate=ImmTarget)
-AOPR_SRC_3   = AtomicOperand(SRC,  intermediate=ImmTarget)
-AOPR_DEST_1  = AtomicOperand(DEST, reg_file=RegFile)
+AOPR_SRC_1   = AtomicOperand(SRC,  "src_1",  reg_file=RegFile)
+AOPR_SRC_2   = AtomicOperand(SRC,  "src_2",  reg_file=RegFile, intermediate=ImmTarget)
+AOPR_SRC_3   = AtomicOperand(SRC,  "src_3",  intermediate=ImmTarget)
+AOPR_DEST_1  = AtomicOperand(DEST, "dest_1", reg_file=RegFile)
 
 
 # --- register operands ------------------------------------------------------
