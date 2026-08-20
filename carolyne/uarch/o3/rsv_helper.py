@@ -123,6 +123,19 @@ def rsv_entry_shape(config: CPUO3_Config, rsv_spec: RsvSpec) -> tuple:
     return entry_cls, fields
 
 
+def rsv_field_names(config: CPUO3_Config, rsv_spec: RsvSpec) -> tuple:
+    """Every field one station's entries carry, declared ones then added ones.
+
+    What a caller needs to copy a row field by field — the spelling that lets
+    one write substitute a field instead of layering a second write on top of a
+    whole-row copy, which equal priorities would order the wrong way round.
+    """
+    entry_cls, fields = rsv_entry_shape(config, rsv_spec)
+    declared = tuple(name for name, _ in entry_cls.__karray_fields__)
+    added    = tuple(name for name, spec in fields.items() if name not in declared)
+    return declared + added
+
+
 def build_rsv_table(config: CPUO3_Config, rsv_spec: RsvSpec, name: str = ""):
     """One station's entry table: a Karray of `rsv_spec.size` rows.
 
@@ -134,6 +147,29 @@ def build_rsv_table(config: CPUO3_Config, rsv_spec: RsvSpec, name: str = ""):
                       name or f"rsv_{rsv_spec.label.replace('/', '_')}",
                       **fields)
     return table.reset(valid=0)     # a station powers up empty
+
+
+def build_rsv_dispatch(config: CPUO3_Config, rsv_spec: RsvSpec,
+                       lanes: int, name: str = ""):
+    """The dispatch bus into one station: `lanes` wire rows of that station's
+    shape, each carrying the `rsv_id` of the station it is meant for.
+
+    A front-end lane may be dispatching to a different station this cycle, so
+    the row says who it is for and every station checks. `rsv_id` is an ADDED
+    field, not part of the entry: it is answered on the way in and there is
+    nothing to remember about it afterwards.
+    """
+    entry_cls, fields = rsv_entry_shape(config, rsv_spec)
+    fields = dict(fields, rsv_id=kaf(rsv_id_width(config)))
+    return entry_cls(HwComponentType.WIRE, (lanes,),
+                     name or f"rsv_{rsv_spec.label.replace('/', '_')}_disp",
+                     **fields)
+
+
+def rsv_id_width(config: CPUO3_Config) -> int:
+    """Bits naming one station of the machine. At least one: a single-station
+    machine still has to carry the field a lane compares against."""
+    return max(1, ceil_log2(len(config.rsv_specs)))
 
 
 def build_rsv_slot(config: CPUO3_Config, rsv_spec: RsvSpec, name: str = ""):

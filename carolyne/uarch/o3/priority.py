@@ -31,6 +31,11 @@
 
 from kathryn import DEFAULT_UE_PRI_USER
 
+# A station's age epoch rolls over: every entry already in the table is stamped
+# older. The bottom-most rung, because it must LOSE to the entry dispatch writes
+# in the same cycle — that entry belongs to the NEW epoch.
+PRI_TRACK_ROLL = DEFAULT_UE_PRI_USER + 1
+
 # A mapping retires: the physical register goes back to the free pool, so every
 # structure still naming it has to stop.
 PRI_COMMIT   = DEFAULT_UE_PRI_USER + 3

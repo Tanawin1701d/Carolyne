@@ -434,6 +434,95 @@ the table and the slot cannot drift, plus `build_rsv_slot()` for the one-row
 `exec_src`. NOT here: the `SyncPip`, the sim probes, and the o3 sort-bit rung
 of the C++ original; the age-track maintenance lands with the o3 subclass.
 
+**`carolyne/uarch/o3/rsv_o3.py` / `rsv_ior.py`** — the two issue policies
+(2026-08-19), from the C++ `orsv.h` / `irsv.h`.
+
+**MANY WRITERS, ONE ISSUE** is the shape of both. There is one write port per
+`fe_lanes`, since every front-end lane may dispatch in the same cycle and any
+of them may be aimed at this station; issue stays single, one entry per cycle
+to one unit. A lane says who it is for: `rsv_helper.build_rsv_dispatch()` gives
+the bus an **added** `rsv_id` field — added, not stored, because the station
+answers it on the way in and has nothing to remember afterwards — and
+`lane_targets_me()` is the check. `free_slots()` hands each port a DIFFERENT
+entry, which is what lets two lanes land in one cycle.
+
+**`RsvO3`** issues the OLDEST ready entry. Decision, and the deliberate
+departure from the original: age is the STATION's own business — it keeps a
+`track_ptr` counter and stamps every entry dispatched in ONE CYCLE with the
+same value, where the C++ read the register file's RRF cycle
+(`regArch.rrf.nextRrfCycle`). The track counts dispatch cycles, so lanes of one
+cycle are equally old and the fold breaks the tie structurally; nothing outside
+has to publish a cycle id. `is_lower_track` is the epoch bit for the counter's
+wrap: set means "a wrap behind", so it is older; within one epoch the smaller
+stamp is older. On the wrap every entry already in the table is stamped older
+(`roll_track_epoch`) at **`PRI_TRACK_ROLL`**, a new bottom rung that must LOSE
+to the dispatch write at `PRI_RENAME` — entries arriving that cycle belong to
+the new epoch. That is what the C++ `RSV_SORTBIT_RST_PRED_PRIORITY` was for,
+and the emitted Verilog shows the roll emitted before the write. LIMIT, and it
+is a real one: an entry waiting through more than one wrap compares as merely
+old rather than oldest. That costs order, never correctness — what issues is
+always ready, so the age track is a heuristic and this is the price of not
+reading the RRF.
+
+`free_slots(dispatch)` gives each port its own entry, and it takes the DISPATCH
+BUS to do it: a port IS a lane, fixed to it, and a lane may be carrying a µop
+for another station this cycle, so what an earlier port actually takes here is
+only knowable from the lanes. Each port runs its own Karray **reduce** over the
+table: what is INJECTED at the leaves is `~valid & not claimed by an earlier
+lane`, and what comes back is the INDEX of a row where that holds — the free
+bit reduced with its index, log2(size) deep. Port k's leaves drop a row only
+when an earlier lane both landed here and landed on it
+(`accepted_p & (idx_p == row)`); a lane bound elsewhere excludes nothing.
+Decision: the fold carries its answer in the **`track` slot**, because an
+extra that REPLACES a field is the only kind a caller can read back — an
+appended one has no position in the record, so `read_field_hcps` cannot map it
+out — and `track` is exactly index-wide by construction. `valid` carries
+"something free under me" up the same tree. A first version captured the root
+node in a Python dict and returned that; a second ranked the free rows by
+prefix count (`sum_cnt(is_free[:i]) == k`), which could not say "unless that
+lane went to another station" at all. The fold muxes the whole record on the
+way, since Kathryn carries every field through a reduce, but both replaced
+slots are expressions and nothing reads the rest — the emitted Verilog keeps
+ZERO mux wires from the free folds, only the select logic.
+
+The winner is chosen by a Karray **REDUCE read** (`table[select_fn]`) rather
+than a hand-built fold: a reduce carries the WHOLE record at every level, so
+one fold builds the comparison tree once and drops the winning row on
+`issue_row` — the wire slot the issue block reads, the C++'s `WireSlot iw`.
+`entry_ready` and the one-hot ride up as extras, so a node compares subtree
+answers instead of rebuilding them, and the node whose covered indices are the
+whole table IS the root (a structural test, not an assumption about the order
+the fold visits nodes in). Issue then runs inside `cwhile` + `zync` on the
+execution unit's `PipCon`: a busy unit STALLS the station, where a plain `zif`
+would have cleared the entry into a unit that never took it.
+
+**`RsvIOR`** issues the head, through the same `cwhile`/`zync` gate. Its lanes
+land in a RUN from `alloc_ptr` that COMPACTS — a port's offset is how many
+earlier lanes are actually dispatching here, so a lane bound elsewhere leaves
+no gap — and a lane may only land if every earlier lane bound for this station did — in order, a hole would be an entry issuing
+before one dispatched ahead of it — after which the pointer moves on by
+`sum_cnt(accepted)`. Decision: TWO POINTERS (`alloc_ptr`, `head_ptr`)
+instead of the original's searches over the busy column — an in-order station's
+occupancy is contiguous by construction, so the search is answering a question
+the pointers already know. A squash always takes the YOUNGEST entries, so the
+survivors stay a prefix from the head and the allocation pointer is
+`head + popcount(survivors)`, computed with `sum_cnt` at `PRI_MIS_PRED`; the
+head does not move. The count reads the pre-clock valid bits, so an entry
+issuing in the same cycle is still counted — correct, because the head advances
+by one at the same time. The row count must be a POWER OF TWO, the bargain
+`Prf` already makes: both pointers step modulo the table, so at that size the
+modulo is the register width and no wrap compare is built.
+
+Shared additions on `RsvBase`: `rsv_idx` + `try_write_entry(target_idx, ...)`
+(the C++ `RSV_IDX` / `tryWriteEntry`, for a dispatch bus that names one
+station), an abstract `free_slot()` (where a dispatch lands is policy too), and
+`row_fields(src_row, **overrides)` — the spelling for "copy this row but say
+something else about two of its fields". Both `write_entry` (stamping the age)
+and `on_issue` (the `tryOwSpecBit` fixup, clearing a speculation that resolves
+in the issue cycle) use it, because layering a second write on a whole-row copy
+would put two writes at EQUAL priority and equal priority is not statement
+order. `rsv_helper.rsv_field_names()` is what makes that substitution possible.
+
 Agreed next steps: give `UopSeq` the cracker-sequence duties it still lacks
 (stamp first/last, validate µtemp def-before-use), settle how a matcher binds
 `FieldRef`s to bit segments, and add the remaining §6 deliverables to

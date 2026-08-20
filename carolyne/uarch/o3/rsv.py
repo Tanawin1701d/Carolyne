@@ -27,7 +27,7 @@ from carolyne.isa import RegFile
 from carolyne.uarch.o3.config import CPUO3_Config, RsvSpec
 from carolyne.uarch.o3.priority import PRI_MIS_PRED, PRI_RENAME
 from carolyne.uarch.o3.rsv_helper import (build_rsv_slot, build_rsv_table,
-                                          station_atm_operands)
+                                          rsv_field_names, station_atm_operands)
 
 
 @dataclass(frozen=True, eq=False)
@@ -51,10 +51,17 @@ class RsvBase(Module):
     def __init__(self,
                  config   : CPUO3_Config,
                  rsv_spec : RsvSpec,
-                 name     : str = ""):
+                 name        : str = "",
+                 rsv_idx     : int = 0,
+                 write_ports : int = 0):
 
-        self.config   = config
-        self.rsv_spec = rsv_spec
+        self.config      = config
+        self.rsv_spec    = rsv_spec
+        self.rsv_idx     = rsv_idx      # which station a dispatch bus names
+        # One write port per front-end lane: every lane may dispatch in the
+        # same cycle, and any of them may be aimed at this station. Issue stays
+        # single — one entry leaves per cycle, to one execution unit.
+        self.write_ports = write_ports or config.fe_lanes
         self.label    = name or f"rsv_{rsv_spec.label.replace('/', '_')}"
 
         super().__init__()
@@ -72,13 +79,14 @@ class RsvBase(Module):
         self.atm_operands  = station_atm_operands(self.config.isa, self.rsv_spec)
         self.wake_operands = tuple(a for a in self.atm_operands
                                    if a.is_src and a.has_arch)
+        self.entry_fields  = rsv_field_names(self.config, self.rsv_spec)
 
     # --- reads -----------------------------------------------------------------
     def slot_ready(self, row):
         """This entry is occupied and every source it waits on has landed."""
         ready = to_ref(row.valid)
         for atm_operand in self.wake_operands:
-            ready = ready.land(to_ref(getattr(row, f"valid_{atm_operand.name}")))
+            ready = ready & to_ref(getattr(row, f"valid_{atm_operand.name}"))
         return ready
 
     def row_idxs(self):
@@ -91,12 +99,39 @@ class RsvBase(Module):
         """
         return range(self.rsv_spec.size)
 
+    def row_fields(self, src_row, **overrides) -> dict:
+        """One row's fields, read out by name, with some of them replaced.
+
+        The spelling for "copy this row but say something else about two of its
+        fields": one write, so nothing depends on the order two writes of equal
+        priority happen to be emitted in.
+        """
+        fields = {name: to_ref(getattr(src_row, name))
+                  for name in self.entry_fields if name not in overrides}
+        fields.update(overrides)
+        return fields
+
     # --- the policy a subclass owns --------------------------------------------
     def build_issue(self, *args, **kwargs):
         raise NotImplementedError(
             f"{type(self).__name__}.build_issue: which ready entry issues is the "
             f"station's own policy — oldest by `track` out of order, the head in "
             f"order — so a subclass has to say")
+
+    def free_slots(self, dispatch):
+        """One free entry per write port: [(this port has a slot, where)].
+
+        Takes the dispatch bus because a port is a LANE, fixed to it, and a
+        lane may be carrying a µop for another station this cycle — so what an
+        earlier port takes here (and therefore what a later one must avoid) is
+        only knowable from the lanes themselves.
+
+        Policy too: out of order any free row will do so long as two ports get
+        different ones, in order they are the run the allocation pointer names.
+        """
+        raise NotImplementedError(
+            f"{type(self).__name__}.free_slots: where a dispatch lands is the "
+            f"station's own policy")
 
     # --- writes ----------------------------------------------------------------
     def write_entry(self, idx, src_row):
@@ -108,12 +143,39 @@ class RsvBase(Module):
         with priority(PRI_RENAME):
             self.table[idx] |= src_row
 
-    def on_issue(self, idx, src_row):
+    def lane_targets_me(self, disp_row):
+        """This dispatch lane is carrying a µop, and it is for this station."""
+        return to_ref(disp_row.valid) & (to_ref(disp_row.rsv_id) == self.rsv_idx)
+
+    def write_entries(self, dispatch):
+        """Take every dispatch lane aimed at this station, in one cycle.
+
+        `dispatch` is a lanes-wide wire Karray of this station's shape plus
+        `rsv_id` (rsv_helper.build_rsv_dispatch). A lane is taken when it names
+        this station AND the station has a free entry to give it — `free_slots`
+        hands out a DIFFERENT one per port, so two lanes never collide.
+        """
+        raise NotImplementedError(
+            f"{type(self).__name__}.write_entries: where each lane lands is the "
+            f"station's own policy")
+
+    def on_issue(self, idx, src_row, suc_tag=None):
         """One entry leaves for the FU: its contents land in `exec_src` and the
         row frees. `idx` is a plain signal or an OH(...) one-hot — a Karray
-        index takes either."""
-        self.exec_src[0] |= src_row
-        self.table[idx]  |= {"valid": 0}
+        index takes either.
+
+        `suc_tag` is the tag resolving THIS cycle: the entry on its way out
+        stops speculating under it, which is the issued-slot half of
+        `on_suc_pred`. Substituted into the copy rather than written over it,
+        so the two do not race at equal priority.
+        """
+        if suc_tag is None:
+            self.exec_src[0] |= src_row
+        else:
+            left = to_ref(src_row.spec_tag) & ~suc_tag
+            self.exec_src[0] |= self.row_fields(src_row, spec_tag=left,
+                                                is_spec=left != 0)
+        self.table[idx] |= {"valid": 0}
 
     def on_mis_pred(self, fix_tag):
         """A prediction was wrong: every entry speculating under a killed tag
@@ -122,8 +184,8 @@ class RsvBase(Module):
             for row_idx in self.row_idxs():
                 row      = self.table[row_idx]
                 squashed = (to_ref(row.valid)
-                            .land(to_ref(row.is_spec))
-                            .land((to_ref(row.spec_tag) & fix_tag) != 0))
+                            & to_ref(row.is_spec)
+                            & ((to_ref(row.spec_tag) & fix_tag) != 0))
                 with zif(squashed):
                     self.table[row_idx] |= {"valid": 0}
 
@@ -134,7 +196,7 @@ class RsvBase(Module):
         for row_idx in self.row_idxs():
             row  = self.table[row_idx]
             left = to_ref(row.spec_tag) & ~suc_tag
-            with zif(to_ref(row.valid).land(to_ref(row.is_spec))):
+            with zif(to_ref(row.valid) & to_ref(row.is_spec)):
                 self.table[row_idx] |= {"spec_tag": left,
                                         "is_spec" : left != 0}
 
@@ -152,9 +214,9 @@ class RsvBase(Module):
                     if bypass.reg_file is not atm_operand.reg_file:
                         continue
                     hit = (to_ref(row.valid)
-                           .land(to_ref(getattr(row, valid_f)).lnot())
-                           .land(bypass.valid)
-                           .land(to_ref(getattr(row, pr_idx_f)) == bypass.pr_idx))
+                           & ~to_ref(getattr(row, valid_f))
+                           & bypass.valid
+                           & (to_ref(getattr(row, pr_idx_f)) == bypass.pr_idx))
                     with zif(hit):
                         self.table[row_idx] |= {
                             valid_f                    : 1,
