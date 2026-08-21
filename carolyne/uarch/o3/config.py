@@ -17,9 +17,10 @@
 # the units it feeds. Between them they must cover every op the ISA's
 # instructions use.
 #
-# `fe_lanes` and `commit_lanes` are the machine's two widths: how many µops
-# arrive per cycle and how many instructions retire. A cycle cannot retire more
-# than the ROB holds, which is checked here.
+# `fe_lanes` and `commit_lanes` are the machine's two widths: how many µops may
+# arrive per cycle and how many instructions may retire. Both are CEILINGS the
+# hardware is built to — what actually moves in a cycle is whatever is ready —
+# so a cycle cannot retire more than the ROB holds, which is checked here.
 #
 # `sptag_len` is stated in BITS, the one knob holding a width where every other
 # holds a count and derives its log2: a tag is a value records carry and
@@ -81,7 +82,8 @@ class RsvSpec:
 class CPUO3_Config:
     isa          : IsaBase            # the description the core is generated from
     fe_lanes     : int                # front-end lanes: how wide fetch/dispatch is
-    commit_lanes : int                # instructions that may retire in one cycle
+    commit_lanes : int                # AT MOST this many instructions retire in
+                                      # one cycle; fewer is the normal case
     phy_specs    : PhySpecs           # register class -> physical file size
     rsv_specs    : Tuple[RsvSpec, ...]# one per reservation station
     rob_depth    : int                # in-flight instructions

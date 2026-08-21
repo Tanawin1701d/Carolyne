@@ -383,8 +383,10 @@ runs **one-way**, reading an `Operand`; and it could not tell RV32I's
 the ISA does not decide, and it never copies a fact out of the description (no
 `pc_width` field of its own) — it DERIVES, so a block reads one object and
 never has to know which half a number came from. Decision (2026-08-19):
-**`commit_lanes`** joined `fe_lanes` as the machine's second WIDTH — how many
-instructions retire per cycle against how many µops arrive. Separate knobs,
+**`commit_lanes`** joined `fe_lanes` as the machine's second WIDTH — the most
+instructions that may retire in a cycle, against the most µops that may arrive.
+Both are CEILINGS the hardware is sized to, not counts of what moves: commit
+retires whatever is ready up to that many. Separate knobs,
 because a core may retire narrower than it fetches and neither is derivable
 from the other; this is the field `reg_arch_mng`'s header was waiting for when
 it said "port counts are parameters… when the config grows those fields they
