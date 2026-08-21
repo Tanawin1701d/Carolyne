@@ -95,14 +95,14 @@ class RsvO3(RsvBase):
         if self._free_built:
             return list(zip(self.free_ok, self.free_idx))
 
+        wants   = self.lanes_for_me(dispatch)
         claimed = []
         for port in range(self.write_ports):
             found, idx = self._find_free(claimed)
             self.free_ok[port]  *= found
             self.free_idx[port] *= idx
             # This lane takes it only if it is dispatching here at all.
-            claimed.append((self.free_ok[port] & self.lane_targets_me(dispatch[port]),
-                            self.free_idx[port]))
+            claimed.append((self.free_ok[port] & wants[port], self.free_idx[port]))
 
         self._free_built = True
         return list(zip(self.free_ok, self.free_idx))
@@ -160,13 +160,13 @@ class RsvO3(RsvBase):
 
     def write_entries(self, dispatch):
         """Take every dispatch lane aimed at this station, all in one cycle."""
+        wants    = self.lanes_for_me(dispatch)
         accepted = []
         for port, (free_ok, free_idx) in enumerate(self.free_slots(dispatch)):
-            disp_row = dispatch[port]
-            accept   = free_ok & self.lane_targets_me(disp_row)
+            accept = free_ok & wants[port]
             accepted.append(accept)
             with zif(accept):
-                self.write_entry(to_ref(free_idx), disp_row)
+                self.write_entry(to_ref(free_idx), dispatch[port])
 
         # One stamp per dispatch CYCLE, so every lane taken above is the same
         # age. Spending it can wrap the counter, which ages everything already

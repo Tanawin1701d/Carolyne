@@ -149,3 +149,12 @@ def test_an_o3_station_refuses_an_in_order_spec():
         RsvO3(cfg, IOR_SPEC, "bad")
 
 
+def test_more_lanes_than_entries_is_safe_out_of_order():
+    # The in-order station needs a wrap guard here, because its slot is the
+    # allocation pointer plus an offset. This one does not: port k's fold drops
+    # what earlier lanes took, so with more lanes than rows the later folds
+    # simply find nothing free and those ports accept nothing.
+    small = RsvSpec(True, 2, (ISA.unit("alu"), ISA.unit("control")))
+    host  = _drive(RsvO3, small, fe_lanes=4)
+    assert host.station.size == 2 and host.station.write_ports == 4
+    assert len(host.station.free_slots(host.dispatch)) == 4

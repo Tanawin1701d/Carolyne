@@ -80,6 +80,7 @@ class RsvBase(Module):
         self.wake_operands = tuple(a for a in self.atm_operands
                                    if a.is_src and a.has_arch)
         self.entry_fields  = rsv_field_names(self.config, self.rsv_spec)
+        self._lane_wants   = None       # built on the first lanes_for_me call
 
     # --- reads -----------------------------------------------------------------
     def slot_ready(self, row):
@@ -147,6 +148,29 @@ class RsvBase(Module):
         """This dispatch lane is carrying a µop, and it is for this station."""
         return to_ref(disp_row.valid) & (to_ref(disp_row.rsv_id) == self.rsv_idx)
 
+    def lanes_for_me(self, dispatch):
+        """That answer for every write port, built ONCE.
+
+        Both halves ask — the slot search, to know what an earlier lane takes,
+        and the write side, to know whether to take it — and rebuilding it
+        would be two comparator trees saying one thing.
+        """
+        if self._lane_wants is None:
+            self._lane_wants = [self.lane_targets_me(dispatch[port])
+                                for port in range(self.write_ports)]
+        return self._lane_wants
+
+    def entry_squashed(self, row, fix_tag):
+        """This entry dies on this mispredict: occupied, speculating, and under
+        one of the tags being killed.
+
+        One definition, so a station that needs the SURVIVORS reads it back
+        rather than restating the predicate and drifting from it.
+        """
+        return (to_ref(row.valid)
+                & to_ref(row.is_spec)
+                & ((to_ref(row.spec_tag) & fix_tag) != 0))
+
     def write_entries(self, dispatch):
         """Take every dispatch lane aimed at this station, in one cycle.
 
@@ -182,11 +206,7 @@ class RsvBase(Module):
         goes away. `fix_tag` is the one-hot mask of what is being squashed."""
         with priority(PRI_MIS_PRED):
             for row_idx in self.row_idxs():
-                row      = self.table[row_idx]
-                squashed = (to_ref(row.valid)
-                            & to_ref(row.is_spec)
-                            & ((to_ref(row.spec_tag) & fix_tag) != 0))
-                with zif(squashed):
+                with zif(self.entry_squashed(self.table[row_idx], fix_tag)):
                     self.table[row_idx] |= {"valid": 0}
 
     def on_suc_pred(self, suc_tag):
