@@ -14,8 +14,10 @@
 #   dest, write required      required_<n>  pr_idx_<n>
 #
 # `uop_idx` names one µop of the ISA's vocabulary, so it is sized from the
-# template count and means the same µop anywhere in the CPU core. `track` is an
-# out-of-order station's age order, ceil_log2 of its own row count.
+# template count and means the same µop anywhere in the CPU core.
+# `rob_des_idx` names the ROB entry the µop belongs to, sized from the buffer's
+# depth — it rides in from dispatch and is what a writeback reports against.
+# `track` is an out-of-order station's age order, ceil_log2 of its own rows.
 
 from kathryn import *
 
@@ -34,6 +36,9 @@ class RsvEntryBase(Karray):
     spec_tag = kaf()
     # operation
     uop_idx  = kaf()
+    # which ROB entry this µop belongs to — what writeback marks finished and
+    # what commit retires
+    rob_des_idx = kaf()
     # program counter
     pc       = kaf()
 
@@ -103,9 +108,10 @@ def rsv_entry_shape(config: CPUO3_Config, rsv_spec: RsvSpec) -> tuple:
     """
     entry_cls = RsvO3Entry if rsv_spec.issue_o3 else RsvIOREntry
 
-    fields = {"spec_tag": config.sptag_len,
-              "uop_idx" : config.uop_idx_width,      # which µop of the ISA
-              "pc"      : config.pc_width}
+    fields = {"spec_tag"   : config.sptag_len,
+              "uop_idx"    : config.uop_idx_width,   # which µop of the ISA
+              "rob_des_idx": config.rob_idx_width,   # which ROB entry it is
+              "pc"         : config.pc_width}
 
     if rsv_spec.issue_o3:
         if rsv_spec.size < 2:

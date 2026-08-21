@@ -399,7 +399,9 @@ instructions than the buffer can hold.
 **`carolyne/uarch/o3/rsv_helper.py`** — `build_rsv_table(config, rsv_spec, name="")`
 builds ONE reservation station's entry table (2026-08-19). `RsvEntryBase`
 states the shape every station has (`valid`, `is_spec`, `spec_tag`, `uop_idx`,
-`pc`); `RsvO3Entry` adds the age track and `RsvIOREntry` adds nothing, since
+`rob_des_idx`, `pc`) — `rob_des_idx` names the ROB entry the µop belongs to,
+`ceil_log2(rob_depth)` wide, and is what a writeback reports against and what
+commit retires; `RsvO3Entry` adds the age track and `RsvIOREntry` adds nothing, since
 position in an in-order station IS the order. The builder adds the part that
 varies with the ISA: one field group per `AtomicOperand` the station's units
 read or write, named after the core —

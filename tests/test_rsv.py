@@ -16,6 +16,7 @@ from carolyne.isa import (AtomicOperand, ExecUnit, FieldRef, InstrFieldMatch,
 from carolyne.isa.riscv import Rv32i
 from carolyne.uarch.o3.config import CPUO3_Config, RsvSpec
 from carolyne.uarch.o3.rsv_helper import (RsvIOREntry, RsvO3Entry, build_rsv_table,
+                                          rsv_entry_shape,
                                    operand_fields, station_atm_operands)
 
 ISA     = Rv32i()
@@ -60,8 +61,8 @@ def test_a_station_table_is_the_isa_operands_plus_the_machine_shape():
     # The fixed half, sized from the config: which µop of the ISA this is
     # (uop_idx), the speculation tag, the PC — plus the age track, since this
     # station issues out of order.
-    for field in ("valid", "is_spec", "spec_tag", "uop_idx", "pc",
-                  "is_lower_track", "track"):
+    for field in ("valid", "is_spec", "spec_tag", "uop_idx", "rob_des_idx",
+                  "pc", "is_lower_track", "track"):
         assert _has_field(host.table, field), field
 
     # The ISA half: one field group per atomic operand the unit reads or
@@ -75,6 +76,19 @@ def test_a_station_table_is_the_isa_operands_plus_the_machine_shape():
     assert not _has_field(host.table, "required_dest_1")
     # src_3 is the immediate, which no ALU µop reads.
     assert not _has_field(host.table, "data_src_3")
+
+
+def test_an_entry_names_the_rob_entry_it_belongs_to():
+    # A waiting µop has to say which in-flight instruction it is, so writeback
+    # can mark that ROB entry finished and commit can retire it. Sized from the
+    # BUFFER, where uop_idx is sized from the ISA — the two are different
+    # questions and different widths.
+    cfg  = _cfg(rob_depth=32)
+    spec = RsvSpec(True, 16, (ALU,))
+    _cls, fields = rsv_entry_shape(cfg, spec)
+
+    assert fields["rob_des_idx"] == cfg.rob_idx_width == 5
+    assert fields["uop_idx"]     == cfg.uop_idx_width == 6
 
 
 def test_the_uop_id_is_sized_from_the_isa_not_the_rob():
