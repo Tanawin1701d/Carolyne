@@ -14,7 +14,7 @@ from carolyne.isa import (AtomicOperand, ExecUnit, FieldRef, InstrFieldMatch,
                           RegFile, TargetKind, Uop, UopSeq)
 from carolyne.isa.riscv import Rv32i
 from carolyne.uarch.o3.config import CPUO3_Config, RsvSpec
-from carolyne.uarch.o3.rob import (build_rob_table, rob_dest_operands,
+from carolyne.uarch.o3.rob_helper import (build_rob_table, rob_dest_operands,
                                    rob_entry_shape, rob_operand_fields)
 
 ISA = Rv32i()

@@ -35,6 +35,7 @@ from carolyne.uarch.common import ceil_log2
 from carolyne.uarch.common.karray_util import OH
 from carolyne.uarch.o3.config import CPUO3_Config, RsvSpec
 from carolyne.uarch.o3.priority import PRI_RENAME, PRI_TRACK_ROLL
+from carolyne.uarch.o3.operand_field import VALID, field_name
 from carolyne.uarch.o3.rsv import RsvBase
 from carolyne.uarch.o3.rsv_helper import rsv_entry_shape
 
@@ -254,5 +255,5 @@ class RsvO3(RsvBase):
 
         ready = view.fields["valid"]
         for atm_operand in self.wake_operands:
-            ready = ready & view.fields[f"valid_{atm_operand.name}"]
+            ready = ready & view.fields[field_name(VALID, atm_operand)]
         return ready, val(self.size, 1 << view.indices[0])

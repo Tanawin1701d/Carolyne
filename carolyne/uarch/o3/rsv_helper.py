@@ -22,6 +22,9 @@ from kathryn import *
 from carolyne.isa import AtomicOperand, IsaBase
 from carolyne.uarch.common import ceil_log2
 from carolyne.uarch.o3.config import CPUO3_Config, RsvSpec
+from carolyne.uarch.o3.operand_field import (DATA, PR_IDX, REQUIRED, VALID,
+                                             operand_fields as build_fields,
+                                             require_named)
 
 
 class RsvEntryBase(Karray):
@@ -61,11 +64,7 @@ def station_atm_operands(isa: IsaBase, rsv_spec: RsvSpec) -> tuple:
             for atm_operand in found:
                 if any(seen is atm_operand for seen in atm_operands):
                     continue
-                if not atm_operand.name:
-                    raise ValueError(
-                        f"reservation station '{rsv_spec.label}': a {atm_operand.role} "
-                        f"atomic operand has no name, so its entry fields cannot be "
-                        f"named — name the ones the ISA declares")
+                require_named(atm_operand, f"reservation station '{rsv_spec.label}'")
                 if atm_operand.name in by_name:
                     raise ValueError(
                         f"reservation station '{rsv_spec.label}': two atomic operands "
@@ -78,26 +77,23 @@ def station_atm_operands(isa: IsaBase, rsv_spec: RsvSpec) -> tuple:
 def operand_fields(config: CPUO3_Config,
                    rsv_spec: RsvSpec,
                    atm_operand: AtomicOperand) -> dict:
-    """The entry fields one atomic operand contributes, as kaf() specs."""
-    name = atm_operand.name
+    """The entry fields one atomic operand contributes, as kaf() specs.
 
+    Which KINDS a waiting entry keeps, in the order they read: a source waits
+    on a value, so it carries the wake pair and the value; a µtemp source has
+    no physical register to wake on, so the value rides alone. A destination
+    carries only where its result goes, plus the bit that says the write is
+    required. The names and widths themselves are operand_field's.
+    """
     if atm_operand.is_src:
-        if not atm_operand.has_arch:                    # a µtemp/immediate source
-            return {f"data_{name}": kaf(atm_operand.intermediate.width)}
-        return {f"valid_{name}" : kaf(1),
-                f"pr_idx_{name}": kaf(config.phy_idx_width(atm_operand.reg_file)),
-                f"data_{name}"  : kaf(atm_operand.reg_file.width)}
+        kinds = (VALID, PR_IDX, DATA) if atm_operand.has_arch else (DATA,)
+    elif atm_operand.is_write_required:
+        kinds = (REQUIRED, PR_IDX)
+    else:
+        kinds = (PR_IDX,)
 
-    if not atm_operand.has_arch:
-        raise ValueError(
-            f"reservation station '{rsv_spec.label}': destination atomic operand "
-            f"'{name}' targets a µtemp only, and the config sizes a physical file per "
-            f"register class — there is no index width for it")
-    fields = {}
-    if atm_operand.is_write_required:
-        fields[f"required_{name}"] = kaf(1)
-    fields[f"pr_idx_{name}"] = kaf(config.phy_idx_width(atm_operand.reg_file))
-    return fields
+    return build_fields(config, atm_operand, kinds,
+                        f"reservation station '{rsv_spec.label}'")
 
 
 def rsv_entry_shape(config: CPUO3_Config, rsv_spec: RsvSpec) -> tuple:

@@ -550,7 +550,22 @@ in the issue cycle) use it, because layering a second write on a whole-row copy
 would put two writes at EQUAL priority and equal priority is not statement
 order. `rsv_helper.rsv_field_names()` is what makes that substitution possible.
 
-**`carolyne/uarch/o3/rob.py`** — `build_rob_table(config, name="rob")`
+**`carolyne/uarch/o3/operand_field.py`** (2026-08-19) — the ONE place a µop
+operand's hardware fields are named and sized. Both records carry a group per
+operand and they differ only in WHICH kinds they keep, never in what a kind is
+called or how wide it is, so the vocabulary (`VALID`, `DATA`, `PR_IDX`,
+`AR_IDX`, `REQUIRED`, `ACTIVE`) and the width rules live here and a caller
+passes the kinds it wants: a station's source is `(VALID, PR_IDX, DATA)` — or
+`(DATA,)` on a µtemp — its destination `(REQUIRED, PR_IDX)` or `(PR_IDX,)`, and
+the ROB's `(ACTIVE, REQUIRED, PR_IDX, AR_IDX)`. A width of ZERO means "nothing
+to store", which is what drops `ar_idx` on a one-register class. `field_name()`
+is the single spelling, and the CONSUMERS use it too — `RsvBase.slot_ready` and
+`on_bypass`, `RsvO3._folded`, the ROB's reset — so a record and the logic
+reading it cannot disagree about a name. `require_named` and the µtemp refusal
+are here for the same reason: one message, `where` naming the caller, the way
+`check_matcher_pair` does in the ISA layer.
+
+**`carolyne/uarch/o3/rob_helper.py`** — `build_rob_table(config, name="rob")`
 (2026-08-19), the reorder buffer's entry table, built the way a station's is.
 `RobEntry` states the fixed half (`wb_fin`, `is_branch`, `is_store`, `pc`, the
 PC sized from `config.pc_width`); the builder adds one field group per

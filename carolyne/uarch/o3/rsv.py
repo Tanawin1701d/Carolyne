@@ -25,6 +25,7 @@ from kathryn.signal import to_ref
 
 from carolyne.isa import RegFile
 from carolyne.uarch.o3.config import CPUO3_Config, RsvSpec
+from carolyne.uarch.o3.operand_field import DATA, PR_IDX, VALID, field_name
 from carolyne.uarch.o3.priority import PRI_MIS_PRED, PRI_RENAME
 from carolyne.uarch.o3.rsv_helper import (build_rsv_slot, build_rsv_table,
                                           rsv_field_names, station_atm_operands)
@@ -87,7 +88,7 @@ class RsvBase(Module):
         """This entry is occupied and every source it waits on has landed."""
         ready = to_ref(row.valid)
         for atm_operand in self.wake_operands:
-            ready = ready & to_ref(getattr(row, f"valid_{atm_operand.name}"))
+            ready = ready & to_ref(getattr(row, field_name(VALID, atm_operand)))
         return ready
 
     def row_idxs(self):
@@ -226,8 +227,8 @@ class RsvBase(Module):
         for row_idx in self.row_idxs():
             row = self.table[row_idx]
             for atm_operand in self.wake_operands:
-                valid_f  = f"valid_{atm_operand.name}"
-                pr_idx_f = f"pr_idx_{atm_operand.name}"
+                valid_f  = field_name(VALID,  atm_operand)
+                pr_idx_f = field_name(PR_IDX, atm_operand)
                 for bypass in bypasses:
                     # A broadcast only wakes sources naming ITS register class:
                     # two PRFs number their entries independently.
@@ -239,5 +240,5 @@ class RsvBase(Module):
                            & (to_ref(getattr(row, pr_idx_f)) == bypass.pr_idx))
                     with zif(hit):
                         self.table[row_idx] |= {
-                            valid_f                    : 1,
-                            f"data_{atm_operand.name}" : bypass.data}
+                            valid_f                        : 1,
+                            field_name(DATA, atm_operand)  : bypass.data}

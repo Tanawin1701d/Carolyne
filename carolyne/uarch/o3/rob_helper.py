@@ -22,6 +22,10 @@ from kathryn import *
 
 from carolyne.isa import AtomicOperand, IsaBase
 from carolyne.uarch.o3.config import CPUO3_Config
+from carolyne.uarch.o3.operand_field import (ACTIVE, AR_IDX, PR_IDX, REQUIRED,
+                                             field_name,
+                                             operand_fields as build_fields,
+                                             require_named)
 
 
 class RobEntry(Karray):
@@ -42,32 +46,22 @@ def rob_dest_operands(isa: IsaBase) -> tuple:
     for atm_operand in isa.used_atomic_operands():
         if not atm_operand.is_dest:
             continue
-        if not atm_operand.name:
-            raise ValueError(
-                f"ISA '{isa.name}': a {atm_operand.role} operand core has no name, so "
-                f"its ROB fields cannot be named — name the cores the ISA declares")
+        require_named(atm_operand, f"ROB of ISA '{isa.name}'")
         dests.append(atm_operand)
     return tuple(dests)
 
 
 def rob_operand_fields(config: CPUO3_Config, atm_operand: AtomicOperand) -> dict:
-    """The entry fields one destination core contributes, as kaf() specs."""
-    name = atm_operand.name
+    """The entry fields one destination core contributes, as kaf() specs.
 
-    if not atm_operand.has_arch:
-        raise ValueError(
-            f"ROB: destination core '{name}' targets a µtemp only. A µtemp dies at the "
-            f"instruction boundary, so it has no architectural register to retire into "
-            f"and nothing to put in this table")
-
-    reg_file = atm_operand.reg_file
-    fields   = {f"active_{name}"  : kaf(1),
-                f"required_{name}": kaf(1),
-                f"pr_idx_{name}"  : kaf(config.phy_idx_width(reg_file))}
-    # A one-register class has an index width of 0 — no index to store.
-    if reg_file.index_width:
-        fields[f"ar_idx_{name}"] = kaf(reg_file.index_width)
-    return fields
+    Which KINDS a retiring instruction keeps: whether it writes that
+    destination at all, whether the write must land first, and the two indexes
+    commit hops between. `ar_idx` drops out on a one-register class, where
+    there is no index to choose. The names and widths themselves are
+    operand_field's.
+    """
+    return build_fields(config, atm_operand, (ACTIVE, REQUIRED, PR_IDX, AR_IDX),
+                        "ROB")
 
 
 def rob_entry_shape(config: CPUO3_Config) -> tuple:
@@ -94,5 +88,5 @@ def build_rob_table(config: CPUO3_Config, name: str = "rob"):
     # Powers up with nothing written back and no destination claimed.
     resets = {"wb_fin": 0}
     for atm_operand in rob_dest_operands(config.isa):
-        resets[f"active_{atm_operand.name}"] = 0
+        resets[field_name(ACTIVE, atm_operand)] = 0
     return table.reset(**resets)
