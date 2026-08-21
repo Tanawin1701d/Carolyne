@@ -22,7 +22,7 @@ X   = ISA.reg_file("x")
 
 
 def _cfg(**overrides):
-    kwargs = dict(isa=ISA, fe_lanes=2, phy_specs=((X, 64),),
+    kwargs = dict(isa=ISA, fe_lanes=2, commit_lanes=2, phy_specs=((X, 64),),
                   rsv_specs=(RsvSpec(True, 4, ISA.exec_units),),
                   rob_depth=32, sptag_len=4)
     kwargs.update(overrides)
@@ -107,7 +107,8 @@ def test_a_one_register_class_has_no_architectural_index_to_store():
                    ops=(op,), exec_units=(unit,), uops=(uop,),
                    mops=(Mop(matcher_field=InstrFieldMatch("opcode", ((0, 7),)),
                              uop_seq=(UopSeq(uops=(uop,)),)),))
-    cfg  = CPUO3_Config(isa=isa, fe_lanes=1, phy_specs=((flags, 4),),
+    cfg  = CPUO3_Config(isa=isa, fe_lanes=1, commit_lanes=1,
+                        phy_specs=((flags, 4),),
                         rsv_specs=(RsvSpec(True, 4, (unit,)),), rob_depth=8,
                         sptag_len=4)
 

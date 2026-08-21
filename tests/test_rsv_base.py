@@ -21,7 +21,8 @@ MEM  = ISA.unit("mem")
 
 
 def _cfg():
-    return CPUO3_Config(isa=ISA, fe_lanes=2, phy_specs=((X, 64),),
+    return CPUO3_Config(isa=ISA, fe_lanes=2, commit_lanes=2,
+                        phy_specs=((X, 64),),
                         rsv_specs=(RsvSpec(True, 8, ISA.exec_units),),
                         rob_depth=32, sptag_len=4)
 

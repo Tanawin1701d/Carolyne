@@ -379,6 +379,21 @@ runs **one-way**, reading an `Operand`; and it could not tell RV32I's
 `ImmTarget` from a real µtemp, which is the same open gap as `Uop` having no
 `imm`.
 
+**`carolyne/uarch/o3/config.py`** — `CPUO3_Config` is the ISA plus the numbers
+the ISA does not decide, and it never copies a fact out of the description (no
+`pc_width` field of its own) — it DERIVES, so a block reads one object and
+never has to know which half a number came from. Decision (2026-08-19):
+**`commit_lanes`** joined `fe_lanes` as the machine's second WIDTH — how many
+instructions retire per cycle against how many µops arrive. Separate knobs,
+because a core may retire narrower than it fetches and neither is derivable
+from the other; this is the field `reg_arch_mng`'s header was waiting for when
+it said "port counts are parameters… when the config grows those fields they
+replace these arguments", so its `commit_port` argument can now come from here.
+REQUIRED, no default, on the same terms as every other knob — a default is a
+number nobody chose — which is why every construction site names it. Checked
+against the ROB (`commit_lanes <= rob_depth`): a cycle cannot retire more
+instructions than the buffer can hold.
+
 **`carolyne/uarch/o3/rsv_helper.py`** — `build_rsv_table(config, rsv_spec, name="")`
 builds ONE reservation station's entry table (2026-08-19). `RsvEntryBase`
 states the shape every station has (`valid`, `is_spec`, `spec_tag`, `uop_idx`,

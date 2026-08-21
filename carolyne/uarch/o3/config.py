@@ -17,6 +17,10 @@
 # the units it feeds. Between them they must cover every op the ISA's
 # instructions use.
 #
+# `fe_lanes` and `commit_lanes` are the machine's two widths: how many µops
+# arrive per cycle and how many instructions retire. A cycle cannot retire more
+# than the ROB holds, which is checked here.
+#
 # `sptag_len` is stated in BITS, the one knob holding a width where every other
 # holds a count and derives its log2: a tag is a value records carry and
 # compare, not an index into a structure. Blocks use it as written —
@@ -75,24 +79,31 @@ class RsvSpec:
 
 @dataclass(frozen=True)
 class CPUO3_Config:
-    isa         : IsaBase             # the description the core is generated from
-    fe_lanes    : int                 # front-end lane
-    phy_specs   : PhySpecs            # register class -> physical file size
-    rsv_specs   : Tuple[RsvSpec, ...] # one per reservation station
-    rob_depth   : int                 # in-flight instructions
-    sptag_len   : int                 # speculative tag width, in BITS
+    isa          : IsaBase            # the description the core is generated from
+    fe_lanes     : int                # front-end lanes: how wide fetch/dispatch is
+    commit_lanes : int                # instructions that may retire in one cycle
+    phy_specs    : PhySpecs           # register class -> physical file size
+    rsv_specs    : Tuple[RsvSpec, ...]# one per reservation station
+    rob_depth    : int                # in-flight instructions
+    sptag_len    : int                # speculative tag width, in BITS
+
 
     def __post_init__(self) -> None:
         if not isinstance(self.isa, IsaBase):
             raise TypeError(
                 f"CPUO3_Config: isa must be an IsaBase, got {type(self.isa).__name__}")
-        for field in ("fe_lanes", "rob_depth", "sptag_len"):
+        for field in ("fe_lanes", "commit_lanes", "rob_depth", "sptag_len"):
             value = getattr(self, field)
             if isinstance(value, bool) or not isinstance(value, int):
                 raise TypeError(
                     f"CPUO3_Config: {field} must be an int, got {type(value).__name__}")
             if value < 1:
                 raise ValueError(f"CPUO3_Config: {field} must be >= 1, got {value}")
+        if self.commit_lanes > self.rob_depth:
+            raise ValueError(
+                f"CPUO3_Config: {self.commit_lanes} commit lanes over a "
+                f"{self.rob_depth}-entry ROB — a cycle cannot retire more "
+                f"instructions than the buffer can hold")
         object.__setattr__(self, "phy_specs", tuple(self.phy_specs))
         object.__setattr__(self, "rsv_specs", tuple(self.rsv_specs))
         self._check_phy_specs()

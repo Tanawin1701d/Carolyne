@@ -13,7 +13,7 @@ UNITS = ISA.exec_units                      # every unit RV32I declares
 
 
 def _cfg(**overrides):
-    kwargs = dict(isa=ISA, fe_lanes=2, phy_specs=((X, 64),),
+    kwargs = dict(isa=ISA, fe_lanes=2, commit_lanes=2, phy_specs=((X, 64),),
                   rsv_specs=(RsvSpec(True, 16, UNITS),), rob_depth=32,
                   sptag_len=8)
     kwargs.update(overrides)
@@ -32,6 +32,9 @@ def test_a_config_is_an_isa_plus_the_machine_knobs():
     assert cfg.phy_size(X) == 64 and cfg.phy_idx_width(X) == 6
     # sptag_len is a WIDTH, not a count — blocks use it as written.
     assert cfg.sptag_len == 8
+    # The machine's two widths: how many µops arrive, how many retire. Separate
+    # knobs, because a core may retire narrower than it fetches.
+    assert cfg.fe_lanes == 2 and cfg.commit_lanes == 2
 
 
 def test_phy_specs_is_keyed_by_the_reg_file_instance():
@@ -93,3 +96,17 @@ def test_the_config_is_checked_at_construction():
         _cfg(fe_lanes=0)
     with pytest.raises(TypeError, match="rob_depth must be an int"):
         _cfg(rob_depth=32.0)
+
+
+def test_a_cycle_cannot_retire_more_than_the_rob_holds():
+    _cfg(commit_lanes=4, rob_depth=32)          # a narrow retire is fine
+    _cfg(commit_lanes=32, rob_depth=32)         # so is retiring the whole buffer
+    with pytest.raises(ValueError, match="commit lanes over"):
+        _cfg(commit_lanes=33, rob_depth=32)
+
+
+def test_the_commit_width_is_held_to_the_same_rules_as_the_others():
+    with pytest.raises(ValueError, match="commit_lanes must be >= 1"):
+        _cfg(commit_lanes=0)
+    with pytest.raises(TypeError, match="commit_lanes must be an int"):
+        _cfg(commit_lanes="2")

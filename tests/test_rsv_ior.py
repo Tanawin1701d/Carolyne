@@ -23,7 +23,8 @@ IOR_SPEC = RsvSpec(False, 4, (ISA.unit("mem"), ISA.unit("system")))
 
 
 def _cfg(fe_lanes=2):
-    return CPUO3_Config(isa=ISA, fe_lanes=fe_lanes, phy_specs=((X, 64),),
+    return CPUO3_Config(isa=ISA, fe_lanes=fe_lanes, commit_lanes=2,
+                        phy_specs=((X, 64),),
                         rsv_specs=(O3_SPEC, IOR_SPEC), rob_depth=32, sptag_len=4)
 
 

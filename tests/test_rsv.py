@@ -26,7 +26,7 @@ SYSTEM  = ISA.unit("system")        # ecall/ebreak: no operands at all
 
 
 def _cfg(**overrides):
-    kwargs = dict(isa=ISA, fe_lanes=2, phy_specs=((X, 64),),
+    kwargs = dict(isa=ISA, fe_lanes=2, commit_lanes=2, phy_specs=((X, 64),),
                   rsv_specs=(RsvSpec(True, 16, ISA.exec_units),),
                   rob_depth=32, sptag_len=8)
     kwargs.update(overrides)
