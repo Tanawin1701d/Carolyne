@@ -76,6 +76,20 @@ def rob_entry_shape(config: CPUO3_Config) -> tuple:
     return RobEntry, fields
 
 
+def build_rob_dispatch(config: CPUO3_Config, lanes: int, name: str = "rob_disp"):
+    """The dispatch bus into the ROB: `lanes` wire rows of the entry shape, each
+    with a `valid` bit saying the lane is carrying an instruction.
+
+    EVERY lane allocates here — a µop goes to one station but every instruction
+    goes to the ROB — so the row says only whether it is there, where a
+    station's bus also has to say which station it is for. `valid` is an ADDED
+    field: the ROB answers it on the way in and stores nothing.
+    """
+    entry_cls, fields = rob_entry_shape(config)
+    return entry_cls(HwComponentType.WIRE, (lanes,),
+                     name, **dict(fields, valid=kaf(1)))
+
+
 def build_rob_table(config: CPUO3_Config, name: str = "rob"):
     """The reorder buffer: a Karray of `config.rob_depth` rows.
 

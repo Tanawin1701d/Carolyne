@@ -159,7 +159,7 @@ class RsvO3(RsvBase):
             return free[row_idx], val(self.track_width, row_idx)
         return view.fields["valid"], view.fields["track"]
 
-    def write_entries(self, dispatch):
+    def on_dispatch(self, dispatch):
         """Take every dispatch lane aimed at this station, all in one cycle."""
         wants    = self.lanes_for_me(dispatch)
         accepted = []
@@ -174,9 +174,9 @@ class RsvO3(RsvBase):
         # in the table.
         any_taken = any_of(accepted)
         with zif(any_taken):
-            with zif(to_ref(self.track_ptr) == (1 << self.track_width) - 1):
+            with zif(self.track_ptr == (1 << self.track_width) - 1):
                 self.roll_track_epoch()
-            self.track_ptr |= to_ref(self.track_ptr) + 1
+            self.track_ptr |= self.track_ptr + 1
 
     def write_entry(self, idx, src_row):
         """Fill one entry and stamp it with the current age.
@@ -187,7 +187,7 @@ class RsvO3(RsvBase):
         """
         with priority(PRI_RENAME):
             self.table[idx] |= self.row_fields(src_row,
-                                               track=to_ref(self.track_ptr),
+                                               track=self.track_ptr,
                                                is_lower_track=0)
 
     def roll_track_epoch(self):

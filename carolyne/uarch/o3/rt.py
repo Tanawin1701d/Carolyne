@@ -105,12 +105,16 @@ class Rt(Module):
 
         amount = self.isa_reg_file.amount
 
+        # The stage chain: the committed state, then one row per RENAME PORT,
+        # each lane seeing what the lane before it left. The loop is bounded by
+        # the rows temp_dispatch HAS — it is (rename_ports, amount) — and the
+        # row that goes back to master is the last lane's, not the commit row.
         copy_row(self.temp_commit[0],   self.master_rt[0],  amount, clocked=False)
         copy_row(self.temp_dispatch[0], self.temp_commit[0], amount, clocked=False)
-        for i in range(1, self.config.sptag_len):
+        for i in range(1, self.rename_ports):
             copy_row(self.temp_dispatch[i], self.temp_dispatch[i-1], amount, clocked=False)
 
-        copy_row(self.master_rt[0], self.temp_commit[self.config.sptag_len-1],
+        copy_row(self.master_rt[0], self.temp_dispatch[self.rename_ports - 1],
                  amount, clocked=True)
 
     # last_valid_spec_tag is dynamic

@@ -108,7 +108,7 @@ class RsvIOR(RsvBase):
 
         The offset counts the lanes that WANT in, not the ones that land. Those
         differ only when an earlier lane was refused for want of room — and a
-        refused lane blocks every later one anyway (`write_entries`), so the
+        refused lane blocks every later one anyway (`on_dispatch`), so the
         offset can only be wrong on a port that is taking nothing.
 
         The index is that offset MODULO the table, and two wanting lanes would
@@ -120,17 +120,17 @@ class RsvIOR(RsvBase):
             return list(zip(self.free_ok, self.free_idx))
 
         wants = self.lanes_for_me(dispatch)
-        alloc = to_ref(self.alloc_ptr)
+        alloc = self.alloc_ptr
         for port in range(self.write_ports):
             offset = None if port == 0 else sum_cnt(wants[:port])
             self.free_idx[port] *= alloc if offset is None else alloc + offset
             self.free_ok[port]  *= ~to_ref(
-                self.table[to_ref(self.free_idx[port])].valid)
+                self.table[self.free_idx[port]].valid)
 
         self._free_built = True
         return list(zip(self.free_ok, self.free_idx))
 
-    def write_entries(self, dispatch):
+    def on_dispatch(self, dispatch):
         """Take the lanes aimed at this station, in order, from the pointer on.
 
         A lane may only land if every earlier lane bound for this station did.
@@ -151,7 +151,7 @@ class RsvIOR(RsvBase):
                 self.write_entry(to_ref(idx), dispatch[port])
 
         with priority(PRI_RENAME):
-            self.alloc_ptr |= to_ref(self.alloc_ptr) + sum_cnt(accepted)
+            self.alloc_ptr |= self.alloc_ptr + sum_cnt(accepted)
 
     # --- issue ------------------------------------------------------------------
     def build_issue(self, exec_meta, suc_tag=None):
@@ -165,7 +165,7 @@ class RsvIOR(RsvBase):
         unit STALL the station: the entry stays, where a plain `zif` would have
         cleared it into a unit that never took it.
         """
-        head = to_ref(self.head_ptr)
+        head = self.head_ptr
         self.issue_row[0] *= self.table[head]
         self.issue_ready  *= self.slot_ready(self.issue_row[0])
 
@@ -197,4 +197,4 @@ class RsvIOR(RsvBase):
                      for row_idx in self.row_idxs()]
 
         with priority(PRI_MIS_PRED):
-            self.alloc_ptr |= to_ref(self.head_ptr) + sum_cnt(survivors)
+            self.alloc_ptr |= self.head_ptr + sum_cnt(survivors)

@@ -607,6 +607,64 @@ width. A µtemp destination RAISES: it dies at the instruction boundary, so it
 has no architectural register to retire into. The table is
 `reset(wb_fin=0, active_<n>=0)`, so nothing powers up claiming a register.
 
+**`carolyne/uarch/o3/rob.py`** — **`Rob`** (2026-08-19), the reorder buffer and
+the commit stage that drains it, from the C++ `rob.h` / `rob.cpp`.
+
+**TWO POINTERS AND A COUNT.** `alloc_ptr`, `com_ptr` and `in_flight`. The count
+is what tells a FULL buffer from an empty one, which two pointers of the same
+width cannot, and it takes ONE clocked write from `on_update_meta` — the Prf
+bargain, so allocating and retiring in the same cycle cannot lose each other.
+The depth must be a power of two and at least 2, the same refusals `RsvIOR`
+makes. Decision: the ROB keeps its OWN index space, where the C++ indexes by
+the RRF pointer — this engine renames each register class into its own physical
+file, so there is no single rename pointer to borrow.
+
+**A DISPATCH GROUP LANDS WHOLE OR NOT AT ALL.** `free_slots` asks once whether
+the cycle's whole bundle fits (`wanted <= depth - in_flight`) and every lane
+reads that one answer, so a partial dispatch — which would leave the rest of
+the group to be re-formed behind it — cannot happen, and no hole-blocking chain
+is needed the way `RsvIOR` needs one. It also makes `fe_lanes > rob_depth` a
+refusal at construction: a bundle that cannot fit an EMPTY buffer could never
+dispatch. The compare is written `wanted <= depth - in_flight` rather than
+`in_flight + wanted <= depth` so both sides stay inside the count's width.
+
+**COMMIT IN GROUPS, UP TO AND INCLUDING A BARRIER.** Lane k retires only if
+every earlier lane retires AND no earlier lane is a branch or a store, so a
+barrier is always the LAST of its group and at most one retires per cycle —
+which is what lets the store buffer pop once and the predictor update once. It
+is the C++ `com2Cond = wbFin & ~com1(isBranch) & ~com1(storeBit)` written for
+any number of lanes, as a running AND down the group.
+
+**COMMIT DRIVES `RegArchMng` DIRECTLY** — it is the commit stage `reg_arch_mng`'s
+header says will "reach `mng.rt(rf)` and `mng.prf(rf)` and drive them itself" —
+under TWO conditions, not one. **ACTIVE** alone frees the physical register:
+rename allocated it, so commit returns it whether or not anything was written
+into it. **ACTIVE and REQUIRED together** are what make the write
+architectural: only then does the value move PRF→ARF and the rename table stop
+pointing at the physical register. Freeing on the narrower condition would leak
+a register every time a claimed write was not required. `Prf.on_commit(port, valid)`
+is called ONCE per lane per class, since the port is a wire and a second drive
+would be a second answer. The ROB refuses a `RegArchMng` whose commit port
+count does not EQUAL `commit_lanes` — a lane and a port are the same thing
+counted twice, so they must agree rather than merely fit. A one-register class retires to `val(1, 0)`: it
+stores no `ar_idx` because there is nothing to choose.
+
+The commit body sits in a **`pip`** block on the stage's `PipCon`, and nothing
+retires in a squashed cycle because the mispredict is bound as that arbiter's
+RESET — what the C++ gets from its `PipStage`. The DRIVER binds it, not the
+ROB: an arb takes one reset, and the block that created the arb is the one that
+knows what else contends on it. `on_mis_pred(rob_idx)` then rolls the TAIL back to one past the
+branch (the branch still retires) and recomputes the count as the run from the
+head to it inclusive; the head does not move.
+
+FOUND ON THE WAY: `Rt.on_normal_flow` walked `sptag_len` rows of
+`temp_dispatch`, which is `(rename_ports, amount)` — out of bounds whenever the
+two differ, so NO design containing a rename table could elaborate. Fixed to
+walk `rename_ports` and to feed `master_rt` from the last lane's row rather
+than the commit row. `Rt.on_rename` has the same confusion between
+`temp_commit` and `temp_dispatch` and is NOT yet fixed — nothing calls it, and
+it is a bigger repair than a bounds correction.
+
 Agreed next steps: give `UopSeq` the cracker-sequence duties it still lacks
 (stamp first/last, validate µtemp def-before-use), settle how a matcher binds
 `FieldRef`s to bit segments, and add the remaining §6 deliverables to
@@ -675,6 +733,11 @@ elaboration from a `RegFile` in `uarch`.
   every time (`self.table[idx] |= {...}`) and keep a cached handle for READS
   only. An element accepts a `{field_name: source}` dict, which is what lets a
   loop over ISA-derived field names write without naming them statically.
+- **A `pip` / `zync` block must be built in an UNCONDITIONAL scope.** Nesting one
+  inside a `zif` panics at the block's exit with "zero-cond-if sub blocks must
+  have BasicNodeFlow join policy" — a conditional block joins differently from
+  the arbitrated one. Gate the WORK inside the block, or gate the arbiter with
+  `set_hold`/`set_reset`, never the block itself.
 - **`Karray.reset(**field_values)`** (added to Kathryn on 2026-08-18):
   one value per field, shared by every element, recorded on each element's own
   backing register so the reset event stays the reg's. A field left out powers up

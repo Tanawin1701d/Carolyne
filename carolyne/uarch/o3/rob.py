@@ -1,0 +1,302 @@
+# Rob — the reorder buffer: every in-flight instruction in program order, and
+# the commit that retires them into architectural state.
+#
+# TWO POINTERS AND A COUNT. `alloc_ptr` is where the next instruction lands,
+# `com_ptr` the oldest one, and `in_flight` how many sit between them. The
+# count is what tells a full buffer from an empty one, which two pointers of
+# the same width cannot; it takes ONE clocked write per cycle from
+# `on_update_meta`, the way Prf resolves rename against commit, so allocating
+# and retiring in the same cycle cannot lose each other. The depth must be a
+# POWER OF TWO: both pointers step modulo the table, so at that size the modulo
+# is the register width and no wrap compare is built.
+#
+# The C++ original indexes its ROB by the RRF pointer, which a per-class PRF
+# makes impossible here — this engine renames each register class into its own
+# physical file, so the ROB keeps an index space of its own.
+#
+# COMMIT IN GROUPS, UP TO AND INCLUDING A BARRIER. Lane k retires only if every
+# earlier lane in the group retires AND no earlier lane is a branch or a store:
+#
+#   lane      1    2    3*   4    5    6      (* = branch or store)
+#   retires   yes  yes  yes  no   no   no
+#
+# so a barrier is always the LAST instruction of its group and at most one of
+# them retires per cycle — which is what lets the store buffer pop once and the
+# predictor update once. It is the C++ `com2Cond = wbFin & ~com1(isBranch) &
+# ~com1(storeBit)` written for any number of lanes.
+#
+# The commit body sits in a `pip` block on the commit stage's arbiter, so a
+# mispredict CLEARS the grant and nothing retires that cycle.
+
+from kathryn import *
+from kathryn.signal import to_ref
+
+from carolyne.uarch.common import ceil_log2
+from carolyne.uarch.o3.config import CPUO3_Config
+from carolyne.uarch.o3.operand_field import (ACTIVE, AR_IDX, PR_IDX, REQUIRED,
+                                             field_name)
+from carolyne.uarch.o3.priority import PRI_MIS_PRED, PRI_RENAME
+from carolyne.uarch.o3.reg_arch_mng import RegArchMng
+from carolyne.uarch.o3.rob_helper import (build_rob_table, rob_dest_operands,
+                                          rob_entry_shape)
+
+
+class Rob(Module):
+    """The reorder buffer, and the commit stage that drains it."""
+
+    def __init__(self,
+                 config       : CPUO3_Config,
+                 reg_arch_mng : RegArchMng,
+                 name         : str = "rob"):
+
+        depth = config.rob_depth
+        if depth < 2:
+            raise ValueError(
+                f"Rob: {depth} entry — the buffer is addressed by two pointers, and "
+                f"one entry leaves them 0 bits wide")
+        if depth & (depth - 1):
+            raise ValueError(
+                f"Rob: {depth} entries — both pointers step modulo the buffer, so the "
+                f"depth must be a power of two or every step needs its own wrap compare")
+        if config.fe_lanes > depth:
+            raise ValueError(
+                f"Rob: {config.fe_lanes} front-end lanes into a {depth}-entry buffer — "
+                f"a group dispatches whole or not at all, so one that cannot fit in an "
+                f"EMPTY buffer could never dispatch")
+        if reg_arch_mng.commit_ports != config.commit_lanes:
+            raise ValueError(
+                f"Rob: {config.commit_lanes} commit lanes against a register "
+                f"architecture built with {reg_arch_mng.commit_ports} commit ports — a "
+                f"lane IS a port, one returning the physical register the other "
+                f"retires, so the two are one number and must be stated as one")
+
+        self.config       = config
+        self.reg_arch_mng = reg_arch_mng
+        self.label        = name
+
+        super().__init__()
+
+    @init
+    def com_declare(self):
+
+        self.depth        = self.config.rob_depth
+        self.lanes        = self.config.commit_lanes
+        self.idx_width    = ceil_log2(self.depth)
+        # One value more than the depth is representable, so a full buffer is
+        # not an empty one: 0..depth INCLUSIVE needs the extra bit.
+        self.cnt_width    = self.idx_width + 1
+        self.dest_operands = rob_dest_operands(self.config.isa)
+
+        self.table = build_rob_table(self.config, self.label)
+
+        self.alloc_ptr = reg(self.idx_width, f"{self.label}_alloc_ptr")
+        self.alloc_ptr.reset(0)
+        self.com_ptr   = reg(self.idx_width, f"{self.label}_com_ptr")
+        self.com_ptr.reset(0)
+        self.in_flight = reg(self.cnt_width, f"{self.label}_in_flight")
+        self.in_flight.reset(0)
+
+        # The rows commit reads, one per lane, materialised so the commit block
+        # reads a slot instead of folding the table once per field.
+        entry_cls, fields = rob_entry_shape(self.config)
+        self.com_row = entry_cls(HwComponentType.WIRE, (self.lanes,),
+                                 f"{self.label}_com_row", **fields)
+        self.commit_ok = [wire(1, f"{self.label}_commit_ok{lane}")
+                          for lane in range(self.lanes)]
+
+        # Where each front-end lane allocates. Built on the first free_slots
+        # call. ONE room bit for the cycle, not one per lane: the group lands
+        # whole or not at all, so there is only one answer to give.
+        self.group_ok = wire(1, f"{self.label}_group_ok")
+        self.free_idx = [wire(self.idx_width, f"{self.label}_free_idx{port}")
+                         for port in range(self.config.fe_lanes)]
+        self._free_built = False
+
+        # PORTS. Allocation and commit both move the count, so each states what
+        # it did and on_update_meta commits the one write — the Prf bargain,
+        # which is what makes their call order irrelevant.
+        self.alloc_cnt  = wire(self.cnt_width, f"{self.label}_alloc_cnt").default(0)
+        self.commit_cnt = wire(self.cnt_width, f"{self.label}_commit_cnt").default(0)
+
+    # --- occupancy ----------------------------------------------------------------
+    def lane_in_flight(self, lane: int):
+        """Lane `lane` of a commit group names a real instruction."""
+        return val(self.cnt_width, lane) < self.in_flight
+
+    def room_left(self):
+        """Entries the buffer still has. Both sides of the compare stay inside
+        the count's width, which `depth + a group` would not."""
+        return val(self.cnt_width, self.depth) - self.in_flight
+
+    def group_fits(self, wanted):
+        """The WHOLE dispatch group fits. A group lands together or not at all,
+        so this one answer serves every lane of it."""
+        return wanted <= self.room_left()
+
+    # --- dispatch -----------------------------------------------------------------
+    def free_slots(self, dispatch):
+        """A run from the allocation pointer, one entry per front-end lane.
+
+        Every lane that carries an instruction allocates, so the run compacts
+        by how many earlier lanes are valid — the ROB holds program order, and
+        a gap in it would be an instruction retiring out of turn.
+
+        ALL OR NOTHING: if the group does not fit whole, no lane of it lands.
+        That is one comparison for the cycle rather than one per lane, and it
+        is what lets the front end treat a bundle as a bundle — a partial
+        dispatch would leave the rest of the group to be re-formed behind it.
+        """
+        if not self._free_built:
+            wants = [to_ref(dispatch[port].valid)
+                     for port in range(self.config.fe_lanes)]
+            alloc = self.alloc_ptr
+            self.group_ok *= self.group_fits(sum_cnt(wants, width=self.cnt_width))
+            for port in range(self.config.fe_lanes):
+                offset = val(1, 0) if port == 0 else sum_cnt(wants[:port])
+                self.free_idx[port] *= alloc if port == 0 else alloc + offset
+            self._free_built = True
+
+        # The room bit is the SAME signal in every pair — that is the
+        # all-or-nothing, and it is why this needs no per-lane answer.
+        return [(self.group_ok, idx) for idx in self.free_idx]
+
+    def on_dispatch(self, dispatch):
+        """Allocate an entry for every lane carrying an instruction.
+
+        The group lands together or not at all (`free_slots`), so there is no
+        hole to guard against here: every lane sees the same answer, and a lane
+        carrying nothing simply takes nothing.
+        """
+        allocated = []
+        for port, (fits, idx) in enumerate(self.free_slots(dispatch)):
+            take = to_ref(dispatch[port].valid) & fits
+            allocated.append(take)
+            with zif(take):
+                self.write_entry(to_ref(idx), dispatch[port])
+
+        with priority(PRI_RENAME):
+            self.alloc_ptr |= self.alloc_ptr + sum_cnt(allocated)
+        # Sized to the count register, so the extension is stated here rather
+        # than left to the connector.
+        self.alloc_cnt *= sum_cnt(allocated, width=self.cnt_width)
+
+    def write_entry(self, idx, src_row):
+        """Fill one entry. Nothing has written back yet, whatever the bus says."""
+        with priority(PRI_RENAME):
+            self.table[idx] |= self.row_fields(src_row, wb_fin=0)
+
+    def row_fields(self, src_row, **overrides) -> dict:
+        """One row's fields by name, with some replaced — one write, so nothing
+        depends on the order two writes of equal priority are emitted in."""
+        entry_cls, fields = rob_entry_shape(self.config)
+        names  = [name for name, _ in entry_cls.__karray_fields__]
+        names += [name for name in fields if name not in names]
+        out = {name: to_ref(getattr(src_row, name))
+               for name in names if name not in overrides}
+        out.update(overrides)
+        return out
+
+    # --- writeback ----------------------------------------------------------------
+    def on_write_back(self, idx):
+        """An execution unit finished: that entry may now retire."""
+        self.table[idx] |= {"wb_fin": 1}
+
+    # --- commit -------------------------------------------------------------------
+    def build_commit(self, commit_meta):
+        """Retire the head group, inside the commit stage's pip block.
+
+        NOTHING RETIRES IN A SQUASHED CYCLE, and the arbiter is what says so:
+        whoever owns `commit_meta` binds the mispredict as its reset, which
+        clears the grant and leaves this block unfired. The ROB does not bind
+        it — an arb takes one reset, and the block that CREATED the arb is the
+        one that knows what else contends on it.
+        """
+        # TODO: provisional — the commit policy is being taken further by hand.
+        for lane in range(self.lanes):
+            self.com_row[lane] *= self.table[self.com_ptr + lane]
+
+        with pip(commit_meta, auto_req=True):
+            allow = None
+            for lane in range(self.lanes):
+                row = self.com_row[lane]
+                ok  = self.lane_in_flight(lane) & to_ref(row.wb_fin)
+                if allow is not None:
+                    ok = ok & allow
+                self.commit_ok[lane] *= ok
+                # A branch or a store retires as the LAST of its group: the
+                # store buffer pops once a cycle and so does the predictor.
+                allow = ok & ~to_ref(row.is_branch) & ~to_ref(row.is_store)
+
+                self._retire(lane, row)
+
+            self.com_ptr    |= self.com_ptr + sum_cnt(self.commit_ok)
+            self.commit_cnt *= sum_cnt(self.commit_ok, width=self.cnt_width)
+
+    def _retire(self, lane: int, row):
+        """One lane's architectural effect, under TWO different conditions.
+
+        ACTIVE says rename allocated a physical register for that destination,
+        so the register goes back to its pool — whether or not anything was
+        written into it. ACTIVE and REQUIRED together say the write has to
+        become architectural, which is the only case where the Arf takes the
+        value and the rename table stops pointing at the physical register.
+
+        The pair is not the same question, and freeing on the narrower one
+        would leak a register every time a claimed write was not required.
+        """
+        for reg_file in self._commit_classes():
+            claims = []
+            for atm_operand in self.dest_operands:
+                if atm_operand.reg_file is not reg_file:
+                    continue
+                claimed = self.commit_ok[lane] & to_ref(
+                    getattr(row, field_name(ACTIVE, atm_operand)))
+                writes  = claimed & to_ref(
+                    getattr(row, field_name(REQUIRED, atm_operand)))
+                pr_idx  = to_ref(getattr(row, field_name(PR_IDX, atm_operand)))
+                ar_idx  = self._arch_index(row, atm_operand)
+
+                with zif(writes):
+                    prf  = self.reg_arch_mng.prf(reg_file)
+                    data = to_ref(prf.on_get_entry(pr_idx).data)
+                    self.reg_arch_mng.arf(reg_file).write(ar_idx, data)
+                    self.reg_arch_mng.rt(reg_file).on_commit(ar_idx, pr_idx)
+                claims.append(claimed)
+
+            # ONE call per port per class: the port is a wire, and a second
+            # drive would be a second answer to "did this lane free one?".
+            self.reg_arch_mng.prf(reg_file).on_commit(lane, any_of(claims))
+
+    def _arch_index(self, row, atm_operand):
+        """Where this destination retires to. A one-register class stores no
+        index — there is one register and it is register 0."""
+        if atm_operand.reg_file.index_width:
+            return to_ref(getattr(row, field_name(AR_IDX, atm_operand)))
+        return val(1, 0)
+
+    def _commit_classes(self) -> tuple:
+        """The register classes commit touches, deduped by identity."""
+        classes = []
+        for atm_operand in self.dest_operands:
+            if not any(seen is atm_operand.reg_file for seen in classes):
+                classes.append(atm_operand.reg_file)
+        return tuple(classes)
+
+    # --- the cycle ----------------------------------------------------------------
+    def on_update_meta(self):
+        """Resolve allocation against commit into ONE write of the count."""
+        self.in_flight |= (self.in_flight
+                           + self.alloc_cnt - self.commit_cnt)
+
+    # --- squash -------------------------------------------------------------------
+    def on_mis_pred(self, rob_idx):
+        """A prediction was wrong: everything YOUNGER than that entry goes.
+
+        The branch itself stays — it still has to retire — so the tail lands one
+        past it and the count becomes the run from the head to it inclusive.
+        The head does not move.
+        """
+        with priority(PRI_MIS_PRED):
+            self.alloc_ptr |= to_ref(rob_idx) + 1
+            self.in_flight |= (to_ref(rob_idx) - self.com_ptr
+                               ).extend(self.cnt_width) + 1

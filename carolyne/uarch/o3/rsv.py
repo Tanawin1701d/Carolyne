@@ -172,7 +172,7 @@ class RsvBase(Module):
                 & to_ref(row.is_spec)
                 & ((to_ref(row.spec_tag) & fix_tag) != 0))
 
-    def write_entries(self, dispatch):
+    def on_dispatch(self, dispatch):
         """Take every dispatch lane aimed at this station, in one cycle.
 
         `dispatch` is a lanes-wide wire Karray of this station's shape plus
@@ -181,7 +181,7 @@ class RsvBase(Module):
         hands out a DIFFERENT one per port, so two lanes never collide.
         """
         raise NotImplementedError(
-            f"{type(self).__name__}.write_entries: where each lane lands is the "
+            f"{type(self).__name__}.on_dispatch: where each lane lands is the "
             f"station's own policy")
 
     def on_issue(self, idx, src_row, suc_tag=None):
