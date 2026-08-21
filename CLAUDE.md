@@ -550,6 +550,31 @@ in the issue cycle) use it, because layering a second write on a whole-row copy
 would put two writes at EQUAL priority and equal priority is not statement
 order. `rsv_helper.rsv_field_names()` is what makes that substitution possible.
 
+**`carolyne/uarch/o3/rob.py`** — `build_rob_table(config, name="rob")`
+(2026-08-19), the reorder buffer's entry table, built the way a station's is.
+`RobEntry` states the fixed half (`wb_fin`, `is_branch`, `is_store`, `pc`, the
+PC sized from `config.pc_width`); the builder adds one field group per
+DESTINATION atomic operand:
+
+| field            | width                            | what it is                |
+| ---------------- | -------------------------------- | ------------------------- |
+| `active_<n>`     | 1                                | this instruction writes it |
+| `required_<n>`   | 1                                | the write must land first  |
+| `pr_idx_<n>`     | `config.phy_idx_width(reg_file)`  | rename's physical register |
+| `ar_idx_<n>`     | `reg_file.index_width`            | the architectural register |
+
+Only DESTINATIONS: sources are a station's business, and what RETIRES is a
+write. The set is core-wide (`isa.used_atomic_operands()` filtered to dests),
+not per unit, since anything that retires passes through this one table — the
+opposite end of the same question `src_/dest_atomic_operands_for(unit)` answers
+for one FU. TWO index widths, from different places: `pr_idx` from the machine's
+physical file, `ar_idx` from the ISA's class, and commit is exactly the hop from
+one to the other. A one-register class (x86 FLAGS) gets NO `ar_idx` — its
+`index_width` is 0, there is nothing to choose, and a 0-bit field is not a legal
+width. A µtemp destination RAISES: it dies at the instruction boundary, so it
+has no architectural register to retire into. The table is
+`reset(wb_fin=0, active_<n>=0)`, so nothing powers up claiming a register.
+
 Agreed next steps: give `UopSeq` the cracker-sequence duties it still lacks
 (stamp first/last, validate µtemp def-before-use), settle how a matcher binds
 `FieldRef`s to bit segments, and add the remaining §6 deliverables to
