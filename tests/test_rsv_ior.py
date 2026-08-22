@@ -10,7 +10,7 @@ from kathryn import (Module, PipCon, build_flow, flow, gen_flow, init, reset,
                      set_top, wire)
 
 from carolyne.isa.riscv import Rv32i
-from carolyne.uarch.o3.config import CPUO3_Config, RsvSpec
+from carolyne.uarch.o3.config import CPUO3_Config, RsvSpec, RsvType
 from carolyne.uarch.o3.priority import PRI_MIS_PRED, PRI_RENAME, PRI_TRACK_ROLL
 from carolyne.uarch.o3.rsv import RsvBypass
 from carolyne.uarch.o3.rsv_helper import build_rsv_dispatch, rsv_id_width
@@ -18,8 +18,8 @@ from carolyne.uarch.o3.rsv_ior import RsvIOR
 
 ISA      = Rv32i()
 X        = ISA.reg_file("x")
-O3_SPEC  = RsvSpec(True,  4, (ISA.unit("alu"), ISA.unit("control")))
-IOR_SPEC = RsvSpec(False, 4, (ISA.unit("mem"), ISA.unit("system")))
+O3_SPEC  = RsvSpec(True,  4, (ISA.unit("alu"), ISA.unit("control")), RsvType.RSV_BRANCH)
+IOR_SPEC = RsvSpec(False, 4, (ISA.unit("mem"), ISA.unit("system")), RsvType.RSV_LD_ST)
 
 
 def _cfg(fe_lanes=2):
@@ -93,7 +93,7 @@ def test_an_in_order_station_needs_a_power_of_two():
     cfg = _cfg()
     reset()
     with pytest.raises(ValueError, match="power of two"):
-        RsvIOR(cfg, RsvSpec(False, 6, (ISA.unit("mem"),)), "bad")
+        RsvIOR(cfg, RsvSpec(False, 6, (ISA.unit("mem"),), RsvType.RSV_LD_ST), "bad")
 
 
 def test_more_write_ports_than_entries_is_refused():
@@ -120,4 +120,4 @@ def test_a_one_entry_in_order_station_is_refused_at_construction():
     cfg = _cfg()
     reset()
     with pytest.raises(ValueError, match="0 bits wide"):
-        RsvIOR(cfg, RsvSpec(False, 1, (ISA.unit("mem"),)), "bad")
+        RsvIOR(cfg, RsvSpec(False, 1, (ISA.unit("mem"),), RsvType.RSV_LD_ST), "bad")

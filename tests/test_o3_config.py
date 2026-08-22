@@ -5,7 +5,7 @@ import pytest
 
 from carolyne.isa import ExecUnit, Op
 from carolyne.isa.riscv import Rv32i, x_file
-from carolyne.uarch.o3.config import CPUO3_Config, RsvSpec
+from carolyne.uarch.o3.config import CPUO3_Config, RsvSpec, RsvType
 
 ISA   = Rv32i()
 X     = ISA.reg_file("x")
@@ -14,7 +14,7 @@ UNITS = ISA.exec_units                      # every unit RV32I declares
 
 def _cfg(**overrides):
     kwargs = dict(isa=ISA, fe_lanes=2, commit_lanes=2, phy_specs=((X, 64),),
-                  rsv_specs=(RsvSpec(True, 16, UNITS),), rob_depth=32,
+                  rsv_specs=(RsvSpec(True, 16, UNITS, RsvType.RSV_BRANCH),), rob_depth=32,
                   sptag_len=8)
     kwargs.update(overrides)
     return CPUO3_Config(**kwargs)
@@ -71,22 +71,62 @@ def test_every_op_the_isa_uses_must_reach_a_station():
     # ISA declares but no station feeds cannot execute anything.
     alu_only = tuple(u for u in UNITS if u.name == "alu")
     with pytest.raises(ValueError, match="no reservation station can issue op"):
-        _cfg(rsv_specs=(RsvSpec(True, 16, alu_only),))
+        _cfg(rsv_specs=(RsvSpec(True, 16, alu_only, RsvType.RSV_EXEC),))
     with pytest.raises(ValueError, match="does not declare"):
-        _cfg(rsv_specs=(RsvSpec(True, 16, (ExecUnit("crypto", {Op("AES")}),)),))
+        _cfg(rsv_specs=(RsvSpec(True, 16, (ExecUnit("crypto", {Op("AES")}),), RsvType.RSV_EXEC),))
     with pytest.raises(ValueError, match="nothing can execute"):
         _cfg(rsv_specs=())
 
 
 def test_a_station_is_checked_on_its_own_terms():
     with pytest.raises(ValueError, match="size must be >= 1"):
-        RsvSpec(True, 0, UNITS)
+        RsvSpec(True, 0, UNITS, RsvType.RSV_BRANCH)
     with pytest.raises(ValueError, match="names no exec unit"):
-        RsvSpec(True, 16, ())
+        RsvSpec(True, 16, (), RsvType.RSV_EXEC)
     with pytest.raises(TypeError, match="issue_o3 must be a bool"):
-        RsvSpec(1, 16, UNITS)
-    station = RsvSpec(False, 8, tuple(u for u in UNITS if u.name == "alu"))
+        RsvSpec(1, 16, UNITS, RsvType.RSV_BRANCH)
+    alu_only = tuple(u for u in UNITS if u.name == "alu")
+    station  = RsvSpec(False, 8, alu_only, RsvType.RSV_EXEC)
     assert station.label == "alu" and ISA.op("ADD") in station.ops
+
+
+def test_a_station_states_what_kind_it_is():
+    # Not derivable from the units: two machines may split one unit set
+    # differently, and a station feeding several kinds still has to say which
+    # shape its entries have. So it is required, with no default.
+    with pytest.raises(TypeError, match="rsv_type must be a RsvType"):
+        RsvSpec(True, 16, UNITS, "branch")
+    with pytest.raises(TypeError):
+        RsvSpec(True, 16, UNITS)                     # nothing to default to
+
+
+def test_the_kind_decides_the_added_entry_fields():
+    pc = ISA.pc_width
+    assert RsvSpec(True, 4, UNITS, RsvType.RSV_EXEC).entry_fields(pc) \
+        == (("pc", pc),)
+    assert RsvSpec(True, 4, UNITS, RsvType.RSV_BRANCH).entry_fields(pc) \
+        == (("pc", pc), ("npc", pc))
+    # A load/store station is handed no PC: the address is a value it computes.
+    assert RsvSpec(True, 4, UNITS, RsvType.RSV_LD_ST).entry_fields(pc) == ()
+
+
+def test_a_machines_own_entry_fields_are_checked_as_pairs():
+    def spec(extra):
+        return RsvSpec(True, 16, UNITS, RsvType.RSV_LD_ST, extra_fields=extra)
+
+    assert spec((("lsq_idx", 5),)).extra_fields == (("lsq_idx", 5),)
+    assert spec([["lsq_idx", 5]]).extra_fields == (("lsq_idx", 5),)   # normalized
+
+    with pytest.raises(TypeError, match=r"\(name, width\) pairs"):
+        spec(("lsq_idx",))
+    with pytest.raises(ValueError, match="is not an identifier"):
+        spec((("lsq idx", 5),))
+    with pytest.raises(TypeError, match="width must be an int"):
+        spec((("lsq_idx", "5"),))
+    with pytest.raises(ValueError, match="not a legal width"):
+        spec((("lsq_idx", 0),))
+    with pytest.raises(ValueError, match="two extra fields named 'lsq_idx'"):
+        spec((("lsq_idx", 5), ("lsq_idx", 5)))
 
 
 def test_the_config_is_checked_at_construction():

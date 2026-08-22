@@ -10,7 +10,7 @@ from kathryn import (HwComponentType, Module, build_flow, flow, gen_flow, init,
                      reset, set_top, wire, zif)
 
 from carolyne.isa.riscv import Rv32i
-from carolyne.uarch.o3.config import CPUO3_Config, RsvSpec
+from carolyne.uarch.o3.config import CPUO3_Config, RsvSpec, RsvType
 from carolyne.uarch.o3.rsv import RsvBase, RsvBypass
 from carolyne.uarch.o3.rsv_helper import rsv_entry_shape
 
@@ -23,7 +23,7 @@ MEM  = ISA.unit("mem")
 def _cfg():
     return CPUO3_Config(isa=ISA, fe_lanes=2, commit_lanes=2,
                         phy_specs=((X, 64),),
-                        rsv_specs=(RsvSpec(True, 8, ISA.exec_units),),
+                        rsv_specs=(RsvSpec(True, 8, ISA.exec_units, RsvType.RSV_BRANCH),),
                         rob_depth=32, sptag_len=4)
 
 
@@ -75,7 +75,7 @@ def _drive(cfg, spec, unit_cls=OldestFirst):
 
 def test_a_station_is_its_table_plus_the_entry_that_issued():
     cfg  = _cfg()
-    host = _drive(cfg, RsvSpec(True, 4, (ALU,)))
+    host = _drive(cfg, RsvSpec(True, 4, (ALU,), RsvType.RSV_EXEC))
     st   = host.station
 
     # The station holds the waiting entries and the one row the FU reads.
@@ -88,7 +88,7 @@ def test_only_an_arch_source_is_something_to_wait_for():
     # A µtemp/immediate source rides with the µop: no physical register, so
     # nothing to wake on and nothing for slot_ready to test.
     cfg  = _cfg()
-    host = _drive(cfg, RsvSpec(True, 4, (MEM,)))
+    host = _drive(cfg, RsvSpec(True, 4, (MEM,), RsvType.RSV_LD_ST))
     st   = host.station
 
     assert [a.name for a in st.atm_operands]  == ["src_1", "src_2", "src_3",
@@ -106,7 +106,7 @@ def test_the_base_refuses_to_guess_the_issue_policy():
     class Host(Module):
         @init
         def decl(self):
-            self.station = Bare(cfg, RsvSpec(True, 4, (ALU,)), "rsv_bare")
+            self.station = Bare(cfg, RsvSpec(True, 4, (ALU,), RsvType.RSV_EXEC), "rsv_bare")
 
     station = Host().station
     with pytest.raises(NotImplementedError, match="build_issue"):
@@ -116,11 +116,11 @@ def test_the_base_refuses_to_guess_the_issue_policy():
 def test_an_in_order_station_builds_the_same_way():
     # Only the entry class differs: in order, position IS the age order.
     cfg  = _cfg()
-    host = _drive(cfg, RsvSpec(False, 4, (ALU,)))
+    host = _drive(cfg, RsvSpec(False, 4, (ALU,), RsvType.RSV_EXEC))
     assert host.station.rsv_spec.issue_o3 is False
 
 
 def test_row_idxs_covers_the_table():
     cfg  = _cfg()
-    host = _drive(cfg, RsvSpec(True, 4, (ALU,)))
+    host = _drive(cfg, RsvSpec(True, 4, (ALU,), RsvType.RSV_EXEC))
     assert list(host.station.row_idxs()) == [0, 1, 2, 3]

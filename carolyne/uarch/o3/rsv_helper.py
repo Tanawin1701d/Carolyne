@@ -18,6 +18,11 @@
 # `rob_des_idx` names the ROB entry the µop belongs to, sized from the buffer's
 # depth — it rides in from dispatch and is what a writeback reports against.
 # `track` is an out-of-order station's age order, ceil_log2 of its own rows.
+#
+# The PC is NOT in the base: which stations carry one is a question of what
+# KIND of station it is (`RsvSpec.rsv_type`), so `pc`/`npc` arrive as added
+# fields from `rsv_spec.entry_fields()` along with whatever the machine put on
+# top. A load/store station carries neither.
 
 from kathryn import *
 
@@ -39,8 +44,6 @@ class RsvEntryBase(Karray):
     # which ROB entry this µop belongs to — what writeback marks finished and
     # what commit retires
     rob_des_idx = kaf()
-    # program counter
-    pc       = kaf()
 
 
 class RsvO3Entry(RsvEntryBase):
@@ -110,8 +113,7 @@ def rsv_entry_shape(config: CPUO3_Config, rsv_spec: RsvSpec) -> tuple:
 
     fields = {"spec_tag"   : config.sptag_len,
               "uop_idx"    : config.uop_idx_width,   # which µop of the ISA
-              "rob_des_idx": config.rob_idx_width,   # which ROB entry it is
-              "pc"         : config.pc_width}
+              "rob_des_idx": config.rob_idx_width}   # which ROB entry it is
 
     if rsv_spec.issue_o3:
         if rsv_spec.size < 2:
@@ -122,6 +124,17 @@ def rsv_entry_shape(config: CPUO3_Config, rsv_spec: RsvSpec) -> tuple:
 
     for atm_operand in station_atm_operands(config.isa, rsv_spec):
         fields.update(operand_fields(config, rsv_spec, atm_operand))
+
+    # The station KIND's fields and the machine's own, added last so a name
+    # colliding with anything already in the record is caught here — the spec
+    # can only check them against each other, never against an operand's.
+    declared = {name for name, _ in entry_cls.__karray_fields__}
+    for name, width in rsv_spec.entry_fields(config.pc_width):
+        if name in fields or name in declared:
+            raise ValueError(
+                f"reservation station '{rsv_spec.label}': entry field '{name}' is "
+                f"already in the record — a name is one set of bits")
+        fields[name] = kaf(width)
     return entry_cls, fields
 
 

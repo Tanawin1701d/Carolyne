@@ -504,10 +504,33 @@ number nobody chose — which is why every construction site names it. Checked
 against the ROB (`commit_lanes <= rob_depth`): a cycle cannot retire more
 instructions than the buffer can hold.
 
+Decision (2026-08-22): **`RsvSpec` states what KIND of station it is** —
+`rsv_type`, one of `RsvType.RSV_EXEC` / `RSV_BRANCH` / `RSV_LD_ST` — and the
+kind is what decides the extra fields its entries carry: an exec station its
+`pc` (auipc reads it), a branch station `pc` and `npc` (it has to compare
+against the next one), a load/store station NEITHER, since an address is a
+value it computes rather than one it is handed. Declared, not derived from the
+units: two machines may split one unit set differently, and a station feeding
+alu AND control still has to say which shape its entries have — which is
+exactly the case RV32I's tests hit, where one station feeds every unit.
+REQUIRED, no default, on the `commit_lanes` terms — even though defaulting to
+`RSV_EXEC` would have been behavior-preserving (its field set is exactly the
+`pc` the base used to carry unconditionally), which is what makes it a real
+choice rather than a free one; every construction site names it.
+`rsv_type_fields(rsv_type, pc_width)` is where the pairs are SIZED, because a
+`RsvSpec` is built standalone and never sees a config — the same reason the
+config derives rather than copies. The NAMES live in `_RSV_TYPE_FIELD_NAMES`
+separately, since a spec must check its own extras against them without a
+pc_width to hand; every kind's fields are PC-shaped today, which is what lets
+one width size them all. **`extra_fields`** is the machine's own `(name,
+width)` list on top, validated as pairs (identifier, width ≥ 1, unique, not
+shadowing the kind's) — the record-wide collision check belongs to
+`rsv_entry_shape`, which is the only place operand field names are known.
+
 **`carolyne/uarch/o3/rsv_helper.py`** — `build_rsv_table(config, rsv_spec, name="")`
 builds ONE reservation station's entry table (2026-08-19). `RsvEntryBase`
 states the shape every station has (`valid`, `is_spec`, `spec_tag`, `uop_idx`,
-`rob_des_idx`, `pc`) — `rob_des_idx` names the ROB entry the µop belongs to,
+`rob_des_idx`) — `rob_des_idx` names the ROB entry the µop belongs to,
 `ceil_log2(rob_depth)` wide, and is what a writeback reports against and what
 commit retires; `RsvO3Entry` adds the age track and `RsvIOREntry` adds nothing, since
 position in an in-order station IS the order. The builder adds the part that
@@ -527,9 +550,15 @@ value rides with the µop (RV32I's immediates are exactly this, via
 from `config.phy_idx_width(reg_file)`, `data` from the class width. A µtemp
 DESTINATION *raises* — the config sizes a physical file per register CLASS, so
 there is no index width for one, and x86's AGU will surface that gap the day it
-lands. Decision: the signature takes the **config**, not just the `RsvSpec` —
-`spec_tag`, `pc` and `uop_idx` cannot be sized from a spec that holds only
-size + units. `uop_idx` is `CPUO3_Config.uop_idx_width` =
+lands. Decision (2026-08-22): the **PC is not in the base**. Which stations carry one
+is a question of what KIND of station it is, so `pc`/`npc` arrive as ADDED
+fields from `rsv_spec.entry_fields(config.pc_width)` — see `RsvType` below —
+and a load/store station carries neither. They are added LAST, after the
+operand groups, so a name colliding with anything already in the record is
+caught here; the spec can only check its extras against its own kind's, never
+against an operand's. Decision: the signature takes the **config**, not just
+the `RsvSpec` — `spec_tag`, `pc` and `uop_idx` cannot be sized from a spec that
+holds only size + units. `uop_idx` is `CPUO3_Config.uop_idx_width` =
 `ceil_log2(len(isa.uops))` — it names WHICH µop of the ISA's vocabulary the
 entry holds, so one index means the same µop anywhere in the core. It is NOT
 the ROB index (that counts in-flight instructions and is narrower: 6 bits vs 5

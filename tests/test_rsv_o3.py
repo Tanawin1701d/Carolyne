@@ -10,7 +10,7 @@ from kathryn import (Module, PipCon, build_flow, flow, gen_flow, init, reset,
                      set_top, wire)
 
 from carolyne.isa.riscv import Rv32i
-from carolyne.uarch.o3.config import CPUO3_Config, RsvSpec
+from carolyne.uarch.o3.config import CPUO3_Config, RsvSpec, RsvType
 from carolyne.uarch.o3.priority import PRI_MIS_PRED, PRI_RENAME, PRI_TRACK_ROLL
 from carolyne.uarch.o3.rsv import RsvBypass
 from carolyne.uarch.o3.rsv_helper import build_rsv_dispatch, rsv_id_width
@@ -18,8 +18,8 @@ from carolyne.uarch.o3.rsv_o3 import RsvO3
 
 ISA      = Rv32i()
 X        = ISA.reg_file("x")
-O3_SPEC  = RsvSpec(True,  4, (ISA.unit("alu"), ISA.unit("control")))
-IOR_SPEC = RsvSpec(False, 4, (ISA.unit("mem"), ISA.unit("system")))
+O3_SPEC  = RsvSpec(True,  4, (ISA.unit("alu"), ISA.unit("control")), RsvType.RSV_BRANCH)
+IOR_SPEC = RsvSpec(False, 4, (ISA.unit("mem"), ISA.unit("system")), RsvType.RSV_LD_ST)
 
 
 def _cfg(fe_lanes=2):
@@ -155,7 +155,7 @@ def test_more_lanes_than_entries_is_safe_out_of_order():
     # allocation pointer plus an offset. This one does not: port k's fold drops
     # what earlier lanes took, so with more lanes than rows the later folds
     # simply find nothing free and those ports accept nothing.
-    small = RsvSpec(True, 2, (ISA.unit("alu"), ISA.unit("control")))
+    small = RsvSpec(True, 2, (ISA.unit("alu"), ISA.unit("control")), RsvType.RSV_BRANCH)
     host  = _drive(RsvO3, small, fe_lanes=4)
     assert host.station.size == 2 and host.station.write_ports == 4
     assert len(host.station.free_slots(host.dispatch)) == 4

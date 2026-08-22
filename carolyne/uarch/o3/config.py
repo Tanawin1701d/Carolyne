@@ -14,8 +14,12 @@
 # rename can never allocate.
 #
 # `rsv_specs` is the execution side: one entry per reservation station, naming
-# the units it feeds. Between them they must cover every op the ISA's
-# instructions use.
+# the units it feeds and what KIND of station it is. Between them they must
+# cover every op the ISA's instructions use. The kind decides the extra entry
+# fields (`RsvType` / `rsv_type_fields`): an exec station carries its pc, a
+# branch station its pc and the next one, a load/store station neither — an
+# address is a value it computes, not one it is handed. A machine may add more
+# through `extra_fields`.
 #
 # `fe_lanes` and `commit_lanes` are the machine's two widths: how many µops may
 # arrive per cycle and how many instructions may retire. Both are CEILINGS the
@@ -33,6 +37,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from enum import Enum
 from typing import Tuple
 
 from ...isa import ExecUnit, IsaBase, RegFile
@@ -44,11 +49,51 @@ from ..common import ceil_log2
 PhySpecs = Tuple[Tuple[RegFile, int], ...]
 
 
+# What KIND of station this is, which is what decides the extra fields its
+# entries carry. A machine STATES it rather than deriving it from the units:
+# two machines may split one unit set differently, and a station feeding
+# several kinds of unit still has to say which shape its entries have.
+class RsvType(Enum):
+    RSV_EXEC   = "exec"      # plain execution
+    RSV_BRANCH = "branch"    # resolves control flow
+    RSV_LD_ST  = "ld_st"     # memory
+
+    def __str__(self) -> str:
+        return self.value
+
+
+# What each kind adds to an entry, by NAME. Names live here rather than beside
+# the widths because a RsvSpec never sees a config and must still check its own
+# extras against them; every one of them is PC-shaped today, which is what lets
+# rsv_type_fields size them all from pc_width.
+_RSV_TYPE_FIELD_NAMES = {
+    RsvType.RSV_EXEC  : ("pc",),
+    RsvType.RSV_BRANCH: ("pc", "npc"),
+    RsvType.RSV_LD_ST : (),
+}
+
+
+def rsv_type_fields(rsv_type: RsvType, pc_width: int) -> Tuple[Tuple[str, int], ...]:
+    """The (name, width) pairs one station KIND adds to its entries.
+
+    Sized here rather than on the spec, because a RsvSpec is built standalone
+    and never sees the config — the widths are resolved where the machine is.
+    """
+    if not isinstance(rsv_type, RsvType):
+        raise TypeError(
+            f"rsv_type must be a RsvType, got {type(rsv_type).__name__} "
+            f"({', '.join(t.name for t in RsvType)})")
+    return tuple((name, pc_width) for name in _RSV_TYPE_FIELD_NAMES[rsv_type])
+
+
 @dataclass(frozen=True)
 class RsvSpec:
-    issue_o3  : bool                    # out-of-order issue, or in-order from this station
-    size      : int                     # entries
-    exec_unit : Tuple[ExecUnit, ...]    # the units this station feeds
+    issue_o3     : bool                    # out-of-order issue, or in-order from this station
+    size         : int                     # entries
+    exec_unit    : Tuple[ExecUnit, ...]    # the units this station feeds
+    rsv_type     : RsvType                 # what kind of station it is
+    extra_fields : Tuple[Tuple[str, int], ...] = ()   # (name, width) pairs this
+                                                      # machine adds beyond the kind's
 
     def __post_init__(self) -> None:
         if not isinstance(self.issue_o3, bool):
@@ -66,6 +111,58 @@ class RsvSpec:
             if not isinstance(unit, ExecUnit):
                 raise TypeError(
                     f"RsvSpec: exec_unit must hold ExecUnit, got {type(unit).__name__}")
+        if not isinstance(self.rsv_type, RsvType):
+            raise TypeError(
+                f"RsvSpec '{self.label}': rsv_type must be a RsvType, got "
+                f"{type(self.rsv_type).__name__} "
+                f"({', '.join(t.name for t in RsvType)})")
+        self._check_extra_fields()
+
+    # --- construction checks --------------------------------------------------
+    def _check_extra_fields(self) -> None:
+        """The machine's own entry fields: well-formed pairs, unique among
+        themselves, and not colliding with the ones this kind already adds.
+
+        Only the NAMES can be checked here — a spec never sees the record, so
+        a collision with an operand's field is rsv_helper's to catch.
+        """
+        of_kind = set(_RSV_TYPE_FIELD_NAMES[self.rsv_type])
+        seen    = set()
+        fields  = []
+        for entry in self.extra_fields:
+            if not (isinstance(entry, (tuple, list)) and len(entry) == 2):
+                raise TypeError(
+                    f"RsvSpec '{self.label}': extra_fields holds (name, width) pairs, "
+                    f"got {entry!r}")
+            name, width = entry
+            if not isinstance(name, str) or not name.isidentifier():
+                raise ValueError(
+                    f"RsvSpec '{self.label}': extra field name {name!r} is not an "
+                    f"identifier — it becomes a field name in the entry record")
+            if isinstance(width, bool) or not isinstance(width, int):
+                raise TypeError(
+                    f"RsvSpec '{self.label}': extra field '{name}' width must be an "
+                    f"int, got {type(width).__name__}")
+            if width < 1:
+                raise ValueError(
+                    f"RsvSpec '{self.label}': extra field '{name}' is {width} bits — "
+                    f"a field with nothing to store is not a legal width")
+            if name in of_kind:
+                raise ValueError(
+                    f"RsvSpec '{self.label}': extra field '{name}' is already added by "
+                    f"station kind {self.rsv_type.name}")
+            if name in seen:
+                raise ValueError(
+                    f"RsvSpec '{self.label}': two extra fields named '{name}' — a name "
+                    f"is one set of bits")
+            seen.add(name)
+            fields.append((name, width))
+        object.__setattr__(self, "extra_fields", tuple(fields))
+
+    def entry_fields(self, pc_width: int) -> Tuple[Tuple[str, int], ...]:
+        """Every ADDED field this station's entries carry: its kind's, then
+        whatever this machine put on top."""
+        return rsv_type_fields(self.rsv_type, pc_width) + self.extra_fields
 
     @property
     def label(self) -> str:

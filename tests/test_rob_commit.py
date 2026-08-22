@@ -10,7 +10,7 @@ from kathryn import (Module, PipCon, build_flow, flow, gen_flow, init, reset,
                      set_top, wire, zif)
 
 from carolyne.isa.riscv import Rv32i
-from carolyne.uarch.o3.config import CPUO3_Config, RsvSpec
+from carolyne.uarch.o3.config import CPUO3_Config, RsvSpec, RsvType
 from carolyne.uarch.o3.reg_arch_mng import RegArchMng
 from carolyne.uarch.o3.rob import Rob
 from carolyne.uarch.o3.rob_helper import build_rob_dispatch
@@ -21,7 +21,7 @@ X   = ISA.reg_file("x")
 
 def _cfg(**overrides):
     kwargs = dict(isa=ISA, fe_lanes=2, commit_lanes=2, phy_specs=((X, 64),),
-                  rsv_specs=(RsvSpec(True, 8, ISA.exec_units),),
+                  rsv_specs=(RsvSpec(True, 8, ISA.exec_units, RsvType.RSV_BRANCH),),
                   rob_depth=8, sptag_len=4)
     kwargs.update(overrides)
     return CPUO3_Config(**kwargs)
