@@ -18,19 +18,28 @@ ARCH, TEMP = TargetKind.ARCH, TargetKind.TEMP
 ADD  = Op("ADD")
 LOAD = Op("LOAD")
 
-ALU = ExecUnit("alu", {ADD})
-MEM = ExecUnit("mem", {LOAD})
-
 X     = RegFile("x", 32, 32, const_regs={0: 0})
 FLAGS = RegFile("flags", 6, 1)
+
+# The cores are SHARED constants, the way a per-ISA package shares them: a unit
+# declares the slots it has, and IsaBase holds every µop to that declaration —
+# which it can only do if the µop names the same instances.
+AOPR_SRC   = AtomicOperand(SRC,  "src_1",  reg_file=X)
+AOPR_SRC_2 = AtomicOperand(SRC,  "src_2",  reg_file=X)   # declared, never filled
+AOPR_DEST  = AtomicOperand(DEST, "dest_1", reg_file=X)
+
+ALU = ExecUnit("alu", {ADD},  src_operands=(AOPR_SRC,), dest_operands=(AOPR_DEST,))
+MEM = ExecUnit("mem", {LOAD}, src_operands=(AOPR_SRC,), dest_operands=(AOPR_DEST,))
 
 
 def _mop(op, opcode, reg_file=X):
     # One encoding → one µop sequence. (Field binding is still preliminary:
     # the matcher is a single InstrFieldMatch on the opcode bits.)
+    src  = AOPR_SRC  if reg_file is X else AtomicOperand(SRC,  reg_file=reg_file)
+    dest = AOPR_DEST if reg_file is X else AtomicOperand(DEST, reg_file=reg_file)
     uop = Uop(op,
-              srcs=(Operand(AtomicOperand(SRC, reg_file=reg_file), ARCH, FieldRef("rs1")),),
-              dests=(Operand(AtomicOperand(DEST, reg_file=reg_file), ARCH, FieldRef("rd")),))
+              srcs=(Operand(src, ARCH, FieldRef("rs1")),),
+              dests=(Operand(dest, ARCH, FieldRef("rd")),))
     return Mop(matcher_field=InstrFieldMatch("opcode", ((0, 7),)),
                uop_seq=(UopSeq(uops=(uop,), matcher_field=InstrFieldMatch(opcode, ((0, 7),))),))
 
@@ -45,7 +54,16 @@ def _walk(mops):
     """
     uops     = tuple(u for mop in mops for seq in mop.uop_seq for u in seq.uops)
     operands = tuple(o for u in uops for o in u.srcs + u.dests)
-    return uops, operands, tuple(o.atomic for o in operands)
+    # Deduped by identity: shared constants are declared ONCE, which is the
+    # shape a real package has (riscv/rv32i.py) and what IsaBase demands.
+    return uops, operands, _once(o.atomic for o in operands)
+
+
+def _once(items):
+    seen = {}
+    for item in items:
+        seen.setdefault(id(item), item)
+    return tuple(seen.values())
 
 
 def _isa(**overrides):
@@ -67,7 +85,9 @@ def test_isa_holds_the_vocabularies():
     assert isa.used_reg_files() == (X,)
     # Two mops, one µop each, two operands per µop, one core per operand.
     assert len(isa.used_uops()) == 2
-    assert len(isa.used_operands()) == 4 and len(isa.used_atomic_operands()) == 4
+    # Four slots, but the two mops SHARE the cores under them — which is what
+    # lets a unit declare the slots it has.
+    assert len(isa.used_operands()) == 4 and len(isa.used_atomic_operands()) == 2
     # Routing is read out of the unit set, not stamped into the µops.
     assert isa.units_for(ADD) == (ALU,)
     with pytest.raises(ValueError):
@@ -110,7 +130,8 @@ def test_the_addressing_scalars_are_held_to_each_other():
 def test_an_op_may_be_claimed_by_several_units():
     # Two ALUs is a machine-configuration choice, not a description error:
     # the elaborator picks which one issues a given µop.
-    alu2 = ExecUnit("alu2", {ADD})
+    alu2 = ExecUnit("alu2", {ADD}, src_operands=(AOPR_SRC,),
+                    dest_operands=(AOPR_DEST,))
     isa  = _isa(exec_units=(ALU, alu2, MEM))
     assert [u.name for u in isa.units_for(ADD)] == ["alu", "alu2"]
 
@@ -187,7 +208,8 @@ def test_every_declared_op_needs_a_unit_that_executes_it():
 def test_a_unit_may_list_ops_this_isa_never_uses():
     # The reverse direction is allowed on purpose, so one ExecUnit definition
     # can be shared across ISAs.
-    big_alu = ExecUnit("alu", {ADD, Op("SUB"), Op("XOR")})
+    big_alu = ExecUnit("alu", {ADD, Op("SUB"), Op("XOR")},
+                       src_operands=(AOPR_SRC,), dest_operands=(AOPR_DEST,))
     isa = _isa(exec_units=(big_alu, MEM))
     assert isa.used_ops() == {ADD, LOAD}
 
@@ -279,13 +301,18 @@ def test_the_two_halves_are_disjoint():
         assert not srcs & dests
 
 
-def test_the_op_half_of_the_walk_matches_by_value():
-    # Ops are the one link that is not identity (op.py), so a unit assembled
-    # from a fresh Op("ADD") reaches the same cores as ALU does.
-    isa  = _isa()
-    alu2 = ExecUnit("alu2", {Op("ADD")})
-    assert isa.src_atomic_operands_for(alu2)  == isa.src_atomic_operands_for(ALU)
-    assert isa.dest_atomic_operands_for(alu2) == isa.dest_atomic_operands_for(ALU)
+def test_a_units_port_shape_is_what_it_declares():
+    # DECLARED, not derived from the µops that happen to reach it: a port shape
+    # is a fact about the unit, and deriving it would make it depend on which
+    # mops exist. A unit that declares slots no instruction uses keeps them —
+    # that is the ISA saying the port is there.
+    wide = ExecUnit("alu", {ADD}, src_operands=(AOPR_SRC, AOPR_SRC_2),
+                    dest_operands=(AOPR_DEST,))
+    isa  = _isa(exec_units=(wide, MEM),
+                atomic_operands=(AOPR_SRC, AOPR_SRC_2, AOPR_DEST))
+
+    assert isa.src_atomic_operands_for(wide) == (AOPR_SRC, AOPR_SRC_2)
+    assert AOPR_SRC_2 not in isa.used_atomic_operands()   # no µop fills it
 
 
 def test_a_unit_that_runs_nothing_the_mops_reach_has_no_cores():
@@ -303,3 +330,50 @@ def test_the_unit_query_wants_a_unit_not_its_name():
         isa.src_atomic_operands_for("alu")
     with pytest.raises(TypeError, match="self.unit"):
         isa.dest_atomic_operands_for("alu")
+
+
+def test_a_uop_may_not_ask_a_unit_for_a_slot_it_has_not_got():
+    # The check the declared port shape buys: an instruction that fills a slot
+    # its unit never declared would size a read port that does not exist.
+    narrow = ExecUnit("alu", {ADD}, dest_operands=(AOPR_DEST,))   # no sources
+    with pytest.raises(ValueError, match="does not declare"):
+        _isa(exec_units=(narrow, MEM))
+
+
+def test_every_unit_claiming_an_op_must_cover_it():
+    # Which unit issues a µop is the elaborator's routing choice, so the µop
+    # has to run on ANY unit claiming its op — not merely on one of them.
+    covered   = ExecUnit("alu",  {ADD}, src_operands=(AOPR_SRC,),
+                         dest_operands=(AOPR_DEST,))
+    uncovered = ExecUnit("alu2", {ADD}, dest_operands=(AOPR_DEST,))
+    with pytest.raises(ValueError, match="'alu2' does not declare"):
+        _isa(exec_units=(covered, uncovered, MEM))
+
+
+def test_a_unit_states_the_direction_of_each_slot():
+    # A source slot is one the unit READS; putting a destination there is a
+    # description error, not a shape the elaborator should try to build.
+    with pytest.raises(ValueError, match="those are the slots the unit reads"):
+        ExecUnit("alu", {ADD}, src_operands=(AOPR_DEST,))
+    with pytest.raises(ValueError, match="those are the slots the unit writes"):
+        ExecUnit("alu", {ADD}, dest_operands=(AOPR_SRC,))
+
+
+def test_a_unit_may_ask_for_facilities_beyond_its_operands():
+    # `needs` is what a stage body wants from the generator's context — a
+    # memory port, a redirect, a trap. Requests, not hardware.
+    mem = ExecUnit("mem", {LOAD}, src_operands=(AOPR_SRC,),
+                   dest_operands=(AOPR_DEST,), needs=("mem",))
+    assert mem.needs == ("mem",)
+    with pytest.raises(ValueError, match="facility names"):
+        ExecUnit("mem", {LOAD}, needs=(3,))
+
+
+def test_a_unit_without_semantics_is_still_a_description():
+    # Only a generator building a real function unit demands them — the same
+    # bargain AtomicOperand makes with its name.
+    isa = _isa()
+    assert len(ALU.stages()) == 1               # one stage by default
+    with pytest.raises(NotImplementedError, match="build_exec"):
+        ALU.build_exec(None)
+    assert isa.unit("alu") is ALU               # and the ISA still builds

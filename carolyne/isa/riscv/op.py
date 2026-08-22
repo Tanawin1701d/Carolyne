@@ -23,6 +23,7 @@ from typing import Tuple
 
 from ..exec_unit import ExecUnit
 from ..op import Op
+from .operand import AOPR_DEST_1, AOPR_SRC_1, AOPR_SRC_2, AOPR_SRC_3
 
 # --- integer ALU ------------------------------------------------------------
 # `src2` is rs2 for the R-type form and the immediate for the I-type one: the
@@ -96,7 +97,14 @@ def exec_units() -> Tuple[ExecUnit, ...]:
     second load/store port) is expressed here and nowhere else.
     """
     return (ExecUnit("alu",     {ADD, SUB, AND, OR, XOR,
-                                 SLL, SRL, SRA, SLT, SLTU, MOV_IMM, AUIPC}),
-            ExecUnit("mem",     {*LOADS, *STORES}),
-            ExecUnit("control", {*BRANCHES, JMP, JMP_INDIRECT}),
+                                 SLL, SRL, SRA, SLT, SLTU, MOV_IMM, AUIPC},
+                     src_operands=(AOPR_SRC_1, AOPR_SRC_2),
+                     dest_operands=(AOPR_DEST_1,)),
+            ExecUnit("mem",     {*LOADS, *STORES},
+                     src_operands=(AOPR_SRC_1, AOPR_SRC_2, AOPR_SRC_3),
+                     dest_operands=(AOPR_DEST_1,)),
+            ExecUnit("control", {*BRANCHES, JMP, JMP_INDIRECT},
+                     src_operands=(AOPR_SRC_1, AOPR_SRC_2, AOPR_SRC_3),
+                     dest_operands=(AOPR_DEST_1,)),
+            # ecall/ebreak/fence name no operand at all.
             ExecUnit("system",  {FENCE, TRAP}))

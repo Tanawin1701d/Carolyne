@@ -97,6 +97,7 @@ class IsaBase:
         self._reject_duplicates()
         self._reject_undeclared()
         self._reject_unrunnable_ops()
+        self._reject_uncovered_operands()
 
     # --- construction checks --------------------------------------------------
     def _check_addressing(self) -> None:
@@ -268,25 +269,46 @@ class IsaBase:
         return tuple(unit for unit in self.exec_units if unit.has(op))
 
     def src_atomic_operands_for(self, unit: ExecUnit) -> Tuple[AtomicOperand, ...]:
-        """The cores this exec unit READS — one per distinct source slot of
-        the µops it executes; their count sizes its read ports."""
-        return self._atomic_operands_for(unit, SRC_ROLES)
+        """The slots this exec unit READS — its declared port shape, which is
+        what a read port is sized from.
+
+        DECLARED, not derived from the µops that happen to reach the unit: a
+        port shape is a fact about the unit, and deriving it would make it
+        depend on which mops exist. `_reject_uncovered_operands` is what holds
+        the µops to it.
+        """
+        self._check_unit(unit, "src_atomic_operands_for")
+        return unit.src_operands
 
     def dest_atomic_operands_for(self, unit: ExecUnit) -> Tuple[AtomicOperand, ...]:
-        """The cores this exec unit WRITES — the write-port side of the same
-        walk, disjoint from the src half. Both dest roles come back; read
-        `core.is_write_required` to tell DEST_W_REQ from a plain DEST."""
-        return self._atomic_operands_for(unit, DEST_ROLES)
+        """The slots this exec unit WRITES — the write-port side of the same
+        declaration. Both dest roles come back; read `is_write_required` to
+        tell DEST_W_REQ from a plain DEST."""
+        self._check_unit(unit, "dest_atomic_operands_for")
+        return unit.dest_operands
 
-    def _atomic_operands_for(self, unit  : ExecUnit,
-                                   roles : Tuple[OperandRole, ...]) -> Tuple[AtomicOperand, ...]:
-
+    def _check_unit(self, unit, where: str) -> None:
         if not isinstance(unit, ExecUnit):
             raise TypeError(
-                f"IsaBase '{self.name}': an exec-unit query wants an ExecUnit, got "
+                f"IsaBase '{self.name}': {where} wants an ExecUnit, got "
                 f"{type(unit).__name__} (self.unit(name) is the text→unit door)")
 
-        runs  = (uop for uop in self._uops() if unit.has(uop.op))       # µops it executes
-        slots = (opr for uop in runs for opr in uop.srcs + uop.dests)   # their operand slots
-        return _by_identity(opr.atomic for opr in slots                 # the cores under
-                            if opr.role in roles)                       # the asked-for half
+    def _reject_uncovered_operands(self) -> None:
+        """No µop may ask a unit for a slot the unit has not got.
+
+        Every unit executing the µop's op must cover it: which unit issues a
+        µop is the elaborator's routing choice, so a µop has to run on ANY of
+        them. This is the check the declared port shape buys — without it, a
+        unit's shape and the instructions using it could drift apart silently.
+        """
+        for uop in self._uops():
+            for unit in self.units_for(uop.op):
+                for operand in uop.srcs + uop.dests:
+                    if unit.covers(operand.atomic):
+                        continue
+                    named = operand.atomic.name or f"<{operand.role} slot>"
+                    raise ValueError(
+                        f"IsaBase '{self.name}': µop '{uop.op.name}' fills a "
+                        f"{operand.role} slot '{named}' that exec unit "
+                        f"'{unit.name}' does not declare — a unit states the slots "
+                        f"it has, and an instruction may not ask for another")

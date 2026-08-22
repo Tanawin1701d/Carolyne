@@ -162,11 +162,29 @@ Immediates are deliberately NOT an `Operand` target — the µop record carries
   match; identity semantics stay with `Intermediate`. v0.1 carries the name
   only — the object exists so latency/arity/FU hooks have a home when a
   consumer needs them.
-- **`ExecUnit(name, ops)`** — one execution-unit class; `ops` is a frozenset
-  of `Op`s (non-`Op` members raise, never promoted from strings — a stray
-  `"ADD"` would compare unequal to everyone else's `Op("ADD")`).
-  `unit.op("ADD")` is the one sanctioned text→`Op` door, for encoding-table
-  rows. Latency/ports deferred until the issue-port design consumes them.
+- **`ExecUnitBase(name, ops, src_operands=(), dest_operands=(), needs=())`** —
+  one execution-unit class; `ops` is a frozenset of `Op`s (non-`Op` members
+  raise, never promoted from strings — a stray `"ADD"` would compare unequal to
+  everyone else's `Op("ADD")`). `unit.op("ADD")` is the one sanctioned text→`Op`
+  door, for encoding-table rows. Decision (2026-08-19): the unit DECLARES its
+  operand slots — its PORT SHAPE, what a read/write port is sized from — where
+  `src_/dest_atomic_operands_for(unit)` used to DERIVE them by walking the
+  mops. Deriving made a unit's shape depend on which mops happened to exist;
+  declaring makes it a statement, and `IsaBase._reject_uncovered_operands` then
+  holds every µop to it: a µop may not fill a slot its unit has not got, and
+  EVERY unit claiming the op must cover it, since routing is the elaborator's
+  choice. Covering is by IDENTITY, the discipline the layer already runs on —
+  LIMIT, and it will matter for x86: a µtemp core built per crack cannot be
+  declared in advance, so µtemp slots will need a name-and-shape rule when
+  cracking lands. Decision: `stages()` is the pipeline the unit IS — one
+  callable per stage, defaulting to a single `build_exec` — and `build_exec`
+  raises `NotImplementedError`, so a unit with no semantics is still a legal
+  description object and only a generator building a real function unit demands
+  one (the bargain `AtomicOperand` makes with its name). `needs` names the
+  facilities a stage body wants beyond its operands (`"mem"`, `"redirect"`,
+  `"trap"`) as REQUESTS, so a generator builds the right context or refuses
+  early. `ExecUnit` is an alias of the base, the name a unit with no semantics
+  is built under.
 - **No catalog ships in code.** The §1.2 op/unit table is spec text; every
   ISA/machine declares its own `Op`s and `ExecUnit`s (see the header block
   of `tests/test_uop.py`). Reason: importable `ALU`/`ADD` constants would
@@ -666,6 +684,42 @@ walk `rename_ports` and to feed `master_rt` from the last lane's row rather
 than the commit row. `Rt.on_rename` has the same confusion between
 `temp_commit` and `temp_dispatch` and is NOT yet fixed — nothing calls it, and
 it is a bigger repair than a bounds correction.
+
+NEXT UP — the function unit, designed 2026-08-19, step 1 (the declared port
+shape above) done:
+
+2. **`carolyne/contract/`** finally gets its first type: the CONTEXT a stage
+   body is written against. Kathryn-free, because Kathryn signals support
+   Python operators — an ISA writes `a + b` with no import, and everything
+   else arrives as a context method: `ctx.src(name)` / `ctx.write(name, v)` /
+   `ctx.keep(name, v)` / `ctx.kept(name)` / `ctx.imm()`, plus the flow four
+   `when` / `until` / `while_` (zif / scwait / cwhile). RV32I's ALU semantic
+   written against it and tested with a FAKE context in pure Python — no
+   arena, no Kathryn, which is the cheapest possible test of an ISA's
+   arithmetic.
+3. **`carolyne/uarch/o3/fu.py`** — the real context and the stage skeleton.
+   Each stage of `unit.stages()` is a `pip` block chained by `zync` into the
+   next, so a stage that waits simply does not reach its zync and the
+   back-pressure runs up to the station, which already stalls on the unit's
+   arb. That makes VARIABLE latency natural and keeps ONE completion point
+   (the last stage), so two results can never collide on the writeback port.
+   The engine threads the µop record down the stage registers — `rob_des_idx`,
+   `pr_idx_<dest>`, and per stage `is_spec`/`spec_tag` — and owns writeback:
+   `Prf.on_wb`, `Rob.on_write_back`, the bypass broadcast.
+4. **Speculation is the engine's, never the ISA's.** `on_mis_pred(fix_tag)`
+   calls `stage_arb[k].flush()` INSIDE a `zif` on that stage's own tag — the
+   flush binds the arb reset and drives its wire in whatever scope it is
+   called from, so the kill is selective. Per-stage tags are what make it
+   selective: a pipeline can hold an OLDER instruction the branch never
+   covered, and a blanket flush would kill it too. Clearing the grant is
+   enough to suppress writeback, so the pip's own state IS the valid bit —
+   no second `valid` to disagree with it. `set_reset` is set-once per arb, so
+   every condition that ever kills a stage must be OR-ed into that one call.
+   `on_suc_pred` masks the tag out per stage, the `RsvBase`/`Rt`/`Mpft` idiom.
+5. **`mem` / `redirect` / `trap`** last, and BLOCKED on one question: what
+   happens to an outstanding external request when the kill lands. Wait and
+   discard, tag-and-match, or a cancel line the facility honours — a decision
+   for whoever owns the `mem` contract.
 
 Agreed next steps: give `UopSeq` the cracker-sequence duties it still lacks
 (stamp first/last, validate µtemp def-before-use), settle how a matcher binds
