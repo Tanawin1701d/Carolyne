@@ -20,9 +20,9 @@ def test_a_core_may_carry_one_target_or_both():
     temp_only = AtomicOperand(SRC, intermediate=addr)
     either    = AtomicOperand(SRC, reg_file=x, intermediate=addr)
 
-    assert reg_only.has_arch and not reg_only.has_temp
-    assert temp_only.has_temp and not temp_only.has_arch
-    assert either.has_arch and either.has_temp
+    assert reg_only.has_arch and not reg_only.has_imm
+    assert temp_only.has_imm and not temp_only.has_arch
+    assert either.has_arch and either.has_imm
     assert either.target_for(ARCH) is x and either.target_for(TEMP) is addr
 
 
@@ -90,7 +90,7 @@ def test_cores_are_shared_across_the_rv32i_table():
     from carolyne.isa.riscv import OPR_IMMS, OPR_IMM_I, OPR_RD, OPR_RS1, OPR_RS2
 
     shared = OPR_RS2.atomic
-    assert OPR_IMM_I.atomic is shared and shared.has_arch and shared.has_temp
+    assert OPR_IMM_I.atomic is shared and shared.has_arch and shared.has_imm
     assert OPR_RS2.target_kind is ARCH and OPR_IMM_I.target_kind is TEMP
     assert OPR_RS2.target is not OPR_IMM_I.target        # one core, two answers
 

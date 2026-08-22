@@ -113,7 +113,9 @@ class AtomicOperand:
         return self.reg_file is not None
 
     @property
-    def has_temp(self) -> bool:
+    def has_imm(self) -> bool:
+        """The slot may name the core's `intermediate` — which is how an
+        immediate reaches a µop (RV32I's ImmTarget)."""
         return self.intermediate is not None
 
     @property

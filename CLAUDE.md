@@ -93,8 +93,18 @@ one file and was folded in the same day; don't recreate it.
   it is real: a core no longer states WHICH value a slot names, only the menu,
   so the check that a slot targets what it should moved to `Operand`, where the
   selection is. `target_for(kind)` performs the selection (one place maps kind
-  → field) and *raises* if the core does not carry it; `has_arch`/`has_temp`
-  say what is on offer. Decision: it carries **no `width`, `is_arch`,
+  → field) and *raises* if the core does not carry it; `has_arch`/`has_imm`
+  say what is on offer. Decision (2026-08-22): the second is **`has_imm`**, not
+  `has_temp` — it is asked at the point where a consumer wants to know whether
+  a slot carries an immediate (`decode_helper`'s `data_<n>`), and that is what
+  a `TargetKind.TEMP` target means in every ISA written so far. Deliberately a
+  RENAME OF THE PROPERTY ONLY: the field stays `intermediate`, the type
+  `Intermediate`, the selector `TargetKind.TEMP`, because the µtemp concept is
+  what x86 cracking runs on (AGU→addr→LOAD→ADD→STORE) and retiring it would
+  retire that. COST, and it comes due at x86 bring-up: a real µtemp answers
+  `has_imm` true while carrying no immediate at all, so a consumer that must
+  tell the two apart cannot use this predicate — it is the `Uop.imm` gap
+  wearing the name of one of its two meanings. Decision: it carries **no `width`, `is_arch`,
   `is_intermediate`** (ambiguous with two candidates — only the selection
   answers them) and **no `is_const`/`is_decoded`** (facts about the *index*,
   which the core has not got). It owns `OperandRole`
@@ -756,6 +766,43 @@ ROB: an arb takes one reset, and the block that created the arb is the one that
 knows what else contends on it. `on_mis_pred(rob_idx)` then rolls the TAIL back to one past the
 branch (the branch still retires) and recomputes the count as the run from the
 head to it inclusive; the head does not move.
+
+**`carolyne/uarch/o3/decode_helper.py`** — `build_decode_table(config,
+name="decode")` (2026-08-22), the decoded-µop record, **one row per
+`fe_lanes`**, built on the same terms as the ROB's table and a station's.
+`DecodeEntryBase` states the fixed half (`valid`, `pc`, `npc`, `uop_idx`) and
+the builder adds one field group per atomic operand:
+
+| core                | fields                                            |
+| ------------------- | ------------------------------------------------- |
+| src                 | `active_<n>`, `valid_<n>`                         |
+| src, arch class     | + `ar_idx_<n>`                                    |
+| src, µtemp target   | + `data_<n>`                                      |
+| dest                | `active_<n>`, `required_<n>`, `ar_idx_<n>`        |
+
+The operand set is **CORE-WIDE and BOTH DIRECTIONS** (`used_atomic_operands()`,
+srcs then dests) where the ROB's is dests-only and a station's is per-unit: a
+decoded µop has not been routed anywhere yet, so the record must hold whatever
+it turns out to be. **NO `pr_idx` anywhere** — decode is BEFORE rename, so
+`ar_idx` is what rename READS and `pr_idx` is what it ANSWERS; a physical index
+in a pre-rename record would be a field nothing can fill. `active_<n>` is the
+generalization of the ROB's bit to sources: the record has a slot for every
+operand the ISA declares and a given µop fills only some, so `active` is what
+says which. `valid_<n>` on a source means the value is ALREADY IN HAND — rename
+has nothing to look up and the entry reaches its station already woken — which
+is what an immediate is; it feeds the station's `valid_<n>` directly. Decision:
+the kinds are asked for **conditionally**, because `operand_field` RAISES for
+`ar_idx` on a core with no arch class rather than returning 0 (that is
+`field_width`'s µtemp refusal, and it is what a 0-width `ar_idx` on a
+one-register class is NOT — that one is skipped silently). So `ar_idx` rides on
+`has_arch` and `data` on `has_imm`, which for RV32I gives src_1 no `data` (rs1
+is always a register), src_2 both (rs2 OR the immediate), and src_3 no `ar_idx`
+(the immediate alone). LIMIT, the open `Uop.imm` gap read from the hardware
+side: `data` is built for anything that MAY name a µtemp, and a real x86 µtemp
+is not known at decode but produced by an earlier µop of the same crack — the
+description cannot yet tell it from an immediate, so `valid_<n>` is what the
+decoder has to answer honestly per slot. The table is
+`reset(valid=0, active_<n>=0)`: a lane powers up empty with no slot claimed.
 
 FOUND ON THE WAY: `Rt.on_normal_flow` walked `sptag_len` rows of
 `temp_dispatch`, which is `(rename_ports, amount)` — out of bounds whenever the
