@@ -37,7 +37,8 @@ from ..reg import RegFile                 # the CLASS, for the field annotations
 from ..uop import Uop
 from .field_match import ILEN_BYTES, PC_ALIGN, PC_WIDTH
 from .mop import MOP_TABLE
-from .op import OPS, exec_units
+from .exec_unit import exec_units
+from .op import OPS
 from .operand import (AOPR_DEST_1, AOPR_SRC_1, AOPR_SRC_2, AOPR_SRC_3,
                       OPR_IMMS, OPR_REGS)
 from .reg import RegFile as X_FILE        # the INSTANCE operand.py's rules target

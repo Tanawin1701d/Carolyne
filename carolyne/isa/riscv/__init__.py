@@ -2,7 +2,9 @@
 #
 # It supplies the deliverables of uop_contract.md §6 that have types today:
 #   reg.py     — architectural register classes (§6.1); x only, PC is not one
-#   op.py      — op vocabulary + the machine's execution units (§1.2)
+#   op.py      — the op vocabulary alone (§1.2)
+#   exec_unit.py — the machine's execution units, and AluUnit: what the
+#                integer ops COMPUTE, written against isa/exec_context.py
 #   field_match.py — where each encoding field lives in the 32-bit word
 #                (§6.2), the six base formats as unions of those fields, and
 #                the addressing group PC_WIDTH / PC_ALIGN / ILEN_BYTES that
@@ -34,18 +36,19 @@
 
 from __future__ import annotations
 
+from .exec_unit import AluUnit, exec_units
 from .field_match import ILEN_BYTES, PC_ALIGN, PC_WIDTH
 from .operand import (OPR_IMM_B, OPR_IMM_I, OPR_IMM_J, OPR_IMM_S, OPR_IMM_U,
                       OPR_IMM_SHAMT, OPR_IMMS, OPR_RD, OPR_REGS, OPR_RS1,
                       OPR_RS2)
 from .mop import MOP_TABLE
-from .op import OPS, exec_units
+from .op import OPS
 from .reg import ImmTarget, RegFile, X_LEN, x_file
 from .rv32i import Rv32i
 from .uop import UOPS
 
 __all__ = [
-    "Rv32i", "MOP_TABLE", "OPS", "exec_units",
+    "Rv32i", "MOP_TABLE", "OPS", "exec_units", "AluUnit",
     "PC_WIDTH", "PC_ALIGN", "ILEN_BYTES",
     "RegFile", "ImmTarget", "X_LEN", "x_file",
     "OPR_RD", "OPR_RS1", "OPR_RS2", "OPR_REGS",

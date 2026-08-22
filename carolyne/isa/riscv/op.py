@@ -1,15 +1,12 @@
-# The op vocabulary RV32I speaks, and the execution units this machine
-# provides for it (uop_contract.md §1.2). No catalog ships with the isa
-# layer, so a description declares its own ops — see exec_unit.py's header
-# for why. Names follow the §1.2 table so two ISAs that mean the same thing
-# spell it the same way.
+# The op vocabulary RV32I speaks (uop_contract.md §1.2). No catalog ships with
+# the isa layer, so a description declares its own ops — see exec_unit.py's
+# header for why. Names follow the §1.2 table so two ISAs that mean the same
+# thing spell it the same way.
 #
-# The unit split is a MACHINE choice, not an ISA one: one unit per §1.2 row is
-# the plain default, and this file is where an issue-port / unit-count config
-# knob will sit. MULDIV is absent — the M extension is not RV32I.
-#
-# The Ops are module CONSTANTS (value-equal, so sharing couples nothing) while
-# `exec_units()` is a function, since the unit set is the configuration knob.
+# The Ops are module CONSTANTS: value-equal, so sharing one couples nothing.
+# Which UNITS execute them, and what they compute, is the sibling
+# `exec_unit.py` — this file is the vocabulary alone, and importing it costs
+# nothing else.
 #
 # Memory width/sign and branch condition are DISTINCT OPS, not sub-fields of
 # one LOAD/STORE/BR_COND kind: lb/lh/lw/lbu/lhu, sb/sh/sw and
@@ -19,11 +16,7 @@
 
 from __future__ import annotations
 
-from typing import Tuple
-
-from ..exec_unit import ExecUnit
 from ..op import Op
-from .operand import AOPR_DEST_1, AOPR_SRC_1, AOPR_SRC_2, AOPR_SRC_3
 
 # --- integer ALU ------------------------------------------------------------
 # `src2` is rs2 for the R-type form and the immediate for the I-type one: the
@@ -88,23 +81,3 @@ OPS = (ADD, SUB, AND, OR, XOR, SLL, SRL, SRA, SLT, SLTU, MOV_IMM, AUIPC,
        *LOADS, *STORES,
        *BRANCHES, JMP, JMP_INDIRECT,
        FENCE, TRAP)
-
-
-def exec_units() -> Tuple[ExecUnit, ...]:
-    """The units this machine provides for the vocabulary above.
-
-    One unit per §1.2 row is the plain default; a wider machine (two ALUs, a
-    second load/store port) is expressed here and nowhere else.
-    """
-    return (ExecUnit("alu",     {ADD, SUB, AND, OR, XOR,
-                                 SLL, SRL, SRA, SLT, SLTU, MOV_IMM, AUIPC},
-                     src_operands=(AOPR_SRC_1, AOPR_SRC_2),
-                     dest_operands=(AOPR_DEST_1,)),
-            ExecUnit("mem",     {*LOADS, *STORES},
-                     src_operands=(AOPR_SRC_1, AOPR_SRC_2, AOPR_SRC_3),
-                     dest_operands=(AOPR_DEST_1,)),
-            ExecUnit("control", {*BRANCHES, JMP, JMP_INDIRECT},
-                     src_operands=(AOPR_SRC_1, AOPR_SRC_2, AOPR_SRC_3),
-                     dest_operands=(AOPR_DEST_1,)),
-            # ecall/ebreak/fence name no operand at all.
-            ExecUnit("system",  {FENCE, TRAP}))

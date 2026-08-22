@@ -6,10 +6,9 @@
 # `const_regs` — rename bypasses reads of it and discards writes to it.
 #
 # PC is NOT a register class: it is front-end / ROB state, not something the
-# engine renames through a PRF port. Consequence, still an open contract
-# question: the pc-relative µops (auipc, the jumps' link value) need the
-# instruction's own PC as an input and nothing in this layer can state that —
-# see the GAPS block in rv32i.py.
+# engine renames through a PRF port. Consequence: the pc-relative µops (auipc,
+# the jumps' link value) never name PC as an operand — the µop record carries
+# it, and a stage body reads it as ctx.pc() (isa/exec_context.py).
 #
 # `RegFile` below is a module-level SHARED INSTANCE with `x_file()` as its
 # builder, because IsaBase matches register files by identity and the operand

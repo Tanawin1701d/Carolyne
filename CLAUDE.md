@@ -50,8 +50,7 @@ contract bug — fix the contract, not the engine.
 | path                          | contents                                              |
 | ----------------------------- | ----------------------------------------------------- |
 | `docs/design/uop_contract.md` | normative ISA↔µarch boundary spec                     |
-| `carolyne/isa/`               | description types + per-ISA packages (riscv, x86mini) |
-| `carolyne/contract/`          | placeholder for the µop-record side (not built yet)   |
+| `carolyne/isa/`               | description types + `ExecContext` + per-ISA packages   |
 | `carolyne/uarch/`             | generic OoO engine, Kathryn code lives here           |
 | `examples/regfile_demo.py`    | smallest end-to-end Kathryn flow (CPU-flavored)       |
 | `generated/`                  | emitted Verilog (gitignored)                          |
@@ -59,7 +58,11 @@ contract bug — fix the contract, not the engine.
 
 Rules: `isa` never imports `uarch` or `kathryn`. `uarch` may import the
 description types but must never name a specific ISA. Per-ISA packages
-contain description data only — no hardware code.
+contain description data only — no hardware code. There is no `contract`
+package: the ISA↔µarch boundary is a DOCUMENT, and the one interface it needs
+in code (`ExecContext`) lives in `isa/` because that is who writes bodies
+against it. A `carolyne/contract/` existed on 2026-08-22 holding exactly that
+one file and was folded in the same day; don't recreate it.
 
 ## 4. What exists so far (`carolyne/isa/`)
 
@@ -318,15 +321,17 @@ Immediates are deliberately NOT an `Operand` target — the µop record carries
 TEMPLATE skeleton: `reg.py` (`x_file()` → x0..x31, x0 via `const_regs`;
 **PC is deliberately not a register class** — it is front-end/ROB state, not
 something the engine renames through a PRF port, so a 1-entry `pc` file was
-drafted and deleted), `op.py` (its own op vocabulary + `exec_units()` — no
-shipped catalog), `field_match.py` (32-bit field positions, the addressing group
+drafted and deleted), `op.py` (its own op vocabulary — no
+shipped catalog), `exec_unit.py` (`exec_units()` + `AluUnit`, the units the
+machine provides and what the ALU computes), `field_match.py` (32-bit field positions, the addressing group
 `PC_WIDTH = X_LEN` / `PC_ALIGN = 4` / `ILEN_BYTES = 4` that `Rv32i` names as its
 three scalar defaults,
 and `FORMATS` = the six base formats R/I/S/B/U/J as `union`s of those fields,
 each tiling the word exactly once — declared but not yet consumed, since a
 `Mop` has no format slot), `uop.py` (`UOP_*` + `UOPS`), `mop.py` (`MOP_*` +
 `MOP_TABLE` → 11 opcode-group `Mop`s, exhaustive over `UOPS`), `rv32i.py`
-(`Rv32i`, an `IsaBase` **subclass** supplying every vocabulary as a field
+(`Rv32i`, an `IsaBase` **subclass** — op.py also holds the ALU's semantics,
+`AluUnit`, see the `ExecContext` entry below — supplying every vocabulary as a field
 default — `Rv32i()` is the whole description, and `Rv32i(name=...)` varies one
 part without a builder signature for the rest; it stays DATA, no method
 override, so every inherited cross-check still runs. An `rv32i()` factory stood
@@ -361,12 +366,13 @@ mechanism is pinned meanwhile by the x86 shape in `test_uop.py`. Its KNOWN GAPS
 blocks are the real output — bringing up RV32I is what surfaced them, and
 each is contract-side, fixable without touching `uarch`:
 `Uop` has no `imm` (so immediates ride in `srcs`, which contract §2 says they
-should not); since PC is not a reg file, auipc and the jal/jalr link value have
-**no way to name the instruction's own PC** as an input, and the contract needs
-to say it is read from the µop record; and a matcher **discriminates but does
+should not); and a matcher **discriminates but does
 not extract** — nothing says where each segment of a scrambled immediate lands
 in the assembled value, so a decoder can now pick the instruction and still not
-build its immediate. Two former gaps are closed and *used*: `FUNCT3_7 = FUNCT3
+build its immediate. Three former gaps are closed and *used*: the instruction's
+own PC — which no operand can name, since PC is not a reg file — is read off
+the µop record as `ExecContext.pc()` (2026-08-22; `AluUnit`'s AUIPC uses it,
+the jumps' link value will), `FUNCT3_7 = FUNCT3
 | FUNCT7` spans both fields, and **every matcher in the package now states its
 value** — `FM.val(...)` beside the field, opcode values on the eleven `Mop`
 groups and funct values on the 37 templates that name a field (LUI/AUIPC/JAL
@@ -389,13 +395,87 @@ current `mop.py` is the from-scratch redesign — the encoding side of the
 contract (§1.3) is still open; don't restore the old one from git.
 
 A `PhyOperand` (the post-rename record slot: role, slot, class, physical index
-width, const-bypass value) was built in `carolyne/contract/` on 2026-08-15 and
-removed the same day — the hardware-plane side stays empty until the elaborator
-that consumes it exists. Don't restore it from git. What it surfaced is worth
+width, const-bypass value) was built on 2026-08-15 and
+removed the same day — a record type waits for the elaborator that consumes
+it. Don't restore it from git. What it surfaced is worth
 keeping: a physical index is a run-time value, so the map across the boundary
 runs **one-way**, reading an `Operand`; and it could not tell RV32I's
 `ImmTarget` from a real µtemp, which is the same open gap as `Uop` having no
 `imm`.
+
+**`carolyne/isa/exec_context.py`** — **`ExecContext`** (2026-08-22): the
+interface a unit's stage body (`build_exec`, each entry of `stages()`) is
+written against, FU-plan step 2. Decision: it lives in **`isa/`**, not a
+`contract` package of its own — the ISA layer is who WRITES bodies against it,
+`uarch` only implements it, so declaring it here keeps the dependency arrow the
+layout already has (uarch reads the description, never the reverse) rather than
+adding a third package that one file would live in alone. It is the layer's one
+asymmetry — every other module here is frozen DATA and this is an interface —
+but it is still elaboration-plane by §2's test: it holds no runtime value, only
+the rules for reaching one. Exported from `carolyne.isa` beside the description
+types. Decision: a `runtime_checkable` **`Protocol`**, not an ABC — conformance
+is structural, so neither a per-ISA package nor a test double imports anything
+to comply, and the module itself imports nothing AT ALL (the type hints are
+`Any`; the values are opaque on purpose), so it adds no edge inside `isa`
+either and a plain same-package import needs no `TYPE_CHECKING` guard. The surface is
+`src`/`write`/`keep`/`kept` plus the flow three
+`when`/`until`/`while_` (zif/scwait/cwhile), and TWO additions: **`op_is(op)`**, because one
+unit serves every kind it declares so a body must branch on the record's kind
+(Ops compare by value, so the description's constant is the key), and
+**`pc()`**, because the record carries the µop's own PC (the RSV entry already
+stores it) and that is the one PC-relative input no operand can name. `pc()`
+is what closes the auipc/link-value gap in the contract direction.
+Decision (2026-08-22): **no `imm()`**. One was drafted and cut the same day —
+an immediate operand FILLS A SOURCE SLOT (`ImmTarget`; `OPR_IMM_*` select
+`AOPR_SRC_2`/`_3`), so `ctx.src("src_2")` already reaches it and a second
+accessor would be a second way to read one value, backed by nothing while
+`Uop` has no `imm` field. The interface FOLLOWS that question rather than
+leading it: the day contract §2's own immediate field lands, the accessor
+arrives with it and the `OPR_IMM_*` operands leave `srcs` together. Meanwhile
+a body reads its immediate by slot name, which is what RV32I's LUI
+(`out(MOV_IMM, b)`) and every I-type shape already do. Three
+ground rules, stated in the module header because every body leans on them:
+values are OPAQUE (Python operators only — ints under a fake, Kathryn signals
+under the real one, and one body must mean the same thing both ways, so sign
+handling is structural: flip-the-sign-bit compares, XOR-subtract sign-fill);
+a WRITE TRUNCATES to the destination's width (what a write port does — `a - b`
+wraps identically in both worlds); and the BODY ALWAYS EXECUTES (`when`
+guards the effects, never the Python code, so a body may not branch in Python
+on a runtime value — elaboration runs every block whatever the values).
+**`AluUnit`** (`riscv/exec_unit.py`) is RV32I's first semantics, an
+`ExecUnitBase` subclass. Decision (2026-08-22): it and `exec_units()` live in
+their own module, the `riscv/` half of the `isa/exec_unit.py` pairing every
+other file in this package already has (`op`, `operand`, `reg`, `mop`, `uop`,
+`field_match`). They move TOGETHER, which is what makes the split legal: the
+factory needs the class and the class needs the ops, so moving the class alone
+would have op.py import the new module while the new module imports op.py — a
+cycle. Moving both leaves the dependency one-way, and `op.py` falls to a SINGLE
+import (`..op.Op`), no longer reaching operand.py or reg.py for the unit
+declarations — the op vocabulary is now standalone, which is what it always
+claimed to be. Ops are referenced `O.ADD` through `from . import op as O`, the
+spelling `uop.py` already uses. All twelve ops write ONE destination through a
+local `out(op, value)` helper, so the body is a list of guarded results and the
+op-guards are mutually exclusive by construction — which is why it states NO
+priority: the "equal priority is not statement order" trap needs two drivers
+that can be live at once, and `op_is` guarantees they cannot. `ctx.src("src_1")`
+is safe for the same reason the port shape is declared: `_reject_uncovered_operands`
+has already held every ALU µop to the two slots the unit declares, so a name the
+body reads is a name the record has. MOV_IMM passes src_2 through (the assembled
+U-imm rides there, UOP_LUI), AUIPC is `ctx.pc() + b`. LIMIT: sign-fill written
+structurally (`msk = (a & sign) >> sh; ((a >> sh) ^ msk) - msk`) costs a SECOND
+barrel shifter where a hand-written SRA muxes the fill bit into one — the price
+of a body that means the same thing on ints and on signals, and revisable if the
+FPGA numbers say so. mem/control now declare
+`needs=("mem",)`/`needs=("redirect",)` — requests recorded ahead of the step-5
+facility contracts; system stays plain until trap policy exists. Checked against
+Kathryn's DSL: `- ^ & | << >> <` all exist on a signal and take an int operand,
+and `__lt__` maps to `LogicOp::RelationLe`, which emits `<` — "Le" is *less*,
+"Leq" is less-or-equal, so SLT/SLTU are not silently off by the equal case. The FAKE
+context lives in `tests/test_alu_semantics.py`, deliberately unshipped: a test
+double is usage documentation, and the test file demonstrates all three ground
+rules (a `when(False)` block still runs, an unfilled slot reads like an idle
+wire, truncation makes wraparound come out right) with zero Kathryn — the
+cheapest possible test of an ISA's arithmetic.
 
 **`carolyne/uarch/o3/config.py`** — `CPUO3_Config` is the ISA plus the numbers
 the ISA does not decide, and it never copies a fact out of the description (no
@@ -685,18 +765,10 @@ than the commit row. `Rt.on_rename` has the same confusion between
 `temp_commit` and `temp_dispatch` and is NOT yet fixed — nothing calls it, and
 it is a bigger repair than a bounds correction.
 
-NEXT UP — the function unit, designed 2026-08-19, step 1 (the declared port
-shape above) done:
+NEXT UP — the function unit, designed 2026-08-19. Step 1 (the declared port
+shape above) and step 2 (`ExecContext` + `AluUnit` + the fake-context test,
+2026-08-22 — see the `exec_context.py` entry above) are done:
 
-2. **`carolyne/contract/`** finally gets its first type: the CONTEXT a stage
-   body is written against. Kathryn-free, because Kathryn signals support
-   Python operators — an ISA writes `a + b` with no import, and everything
-   else arrives as a context method: `ctx.src(name)` / `ctx.write(name, v)` /
-   `ctx.keep(name, v)` / `ctx.kept(name)` / `ctx.imm()`, plus the flow four
-   `when` / `until` / `while_` (zif / scwait / cwhile). RV32I's ALU semantic
-   written against it and tested with a FAKE context in pure Python — no
-   arena, no Kathryn, which is the cheapest possible test of an ISA's
-   arithmetic.
 3. **`carolyne/uarch/o3/fu.py`** — the real context and the stage skeleton.
    Each stage of `unit.stages()` is a `pip` block chained by `zync` into the
    next, so a stage that waits simply does not reach its zync and the

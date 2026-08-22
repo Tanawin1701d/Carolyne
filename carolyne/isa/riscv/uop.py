@@ -26,14 +26,16 @@
 # an operand and rides in its own record field, so the ≤3 src cap does not
 # budget for one. RV32I still fits (store and branch are widest, at 3).
 #
+# The instruction's own PC is never among the srcs: no operand can name it
+# (reg.py: PC is not a register class), and none needs to — the µop record
+# carries it and a stage body reads it as ctx.pc() (isa/exec_context.py), which
+# is how auipc, jal and jalr get their pc-relative input.
+#
 # KNOWN GAPS carried from the layer below:
 # - A value says WHICH BITS but not where each segment lands in an assembled
 #   field, so the funct matchers here are complete but the immediate
 #   *extractors* still are not (field_match.py). Discriminating works;
 #   building the immediate value does not.
-# - auipc, jal and jalr need the instruction's own PC as an input, which no
-#   operand can name (reg.py: PC is not a register class). Their `srcs` are
-#   the encoding's operands only.
 # - The branch/jump redirect is not expressed: the control FU takes it from
 #   the op plus the immediate, and no dest names it.
 
