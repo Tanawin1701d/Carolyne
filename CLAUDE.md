@@ -767,6 +767,26 @@ knows what else contends on it. `on_mis_pred(rob_idx)` then rolls the TAIL back 
 branch (the branch still retires) and recomputes the count as the run from the
 head to it inclusive; the head does not move.
 
+**`carolyne/uarch/o3/fetch_helper.py`** — `build_fetch_table(config,
+name="fetch")` (2026-08-22), the fetched-instruction record, one row per
+`fe_lanes`, with `fetch_entry_shape()` beside it. `FetchDT` moved here out of
+`fetch.py`, which now holds the Fetch MODULE only — the same table/module split
+`rsv_helper`/`rsv` and `rob_helper`/`rob` already have, so a record can be
+sized and probed without elaborating the stage that owns it. It is the ONE
+place raw ISA bits are legal: `instr` is the encoded word memory returned, and
+decode is what turns it into a `uop_idx` — nothing downstream of decode may
+carry it (§2). Decision: **ONE array of `fe_lanes` rows**, where `fetch.py`
+built a LIST of `fe_lanes` arrays of one row each. Statically indexed either
+way, so the registers are identical; one array is what `FetchDT`'s own comment
+already documented (`FetchDT(..., (lanes,), "fetch", ...)`) and what every
+other record in the core is. Decision: both fields declared **`kaf()` with no
+width**, where they were `kaf(32)` — a default that suits RV32I is a silent
+wrong answer for a 64-bit ISA, so the instantiation must state them, the same
+bargain `IsaBase.pc_width` makes. NOT here: a `valid` bit. A lane's occupancy
+is the fetch stage's `pip` grant, and a field beside it would be a second
+answer to one question — the same reason the FU plan gives for a stage's grant
+BEING its valid bit.
+
 **`carolyne/uarch/o3/decode_helper.py`** — `build_decode_table(config,
 name="decode")` (2026-08-22), the decoded-µop record, **one row per
 `fe_lanes`**, built on the same terms as the ROB's table and a station's.

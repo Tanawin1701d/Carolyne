@@ -4,18 +4,8 @@ from kathryn import *
 
 from carolyne.uarch.o3.config import CPUO3_Config
 from carolyne.uarch.o3.easy_mem import EasyMem
+from carolyne.uarch.o3.fetch_helper import build_fetch_table
 
-
-class FetchDT(Karray):
-    # it is per lane Karray
-    #
-    # The widths are DEFAULTS. Both are settable at instantiation, so one
-    # record class serves any ISA:
-    #
-    #   self.fetch = FetchDT(HwComponentType.REG, (lanes,), "fetch",
-    #                        pc=isa.pc_width, instr=isa.ilen_bytes * 8)
-    pc    = kaf(32)
-    instr = kaf(32)
 
 class Fetch(Module):
 
@@ -39,11 +29,7 @@ class Fetch(Module):
         self.pc          = reg(pc_width, "pc")
         self.mem_req     = [ self.simple_mem.read_sync(i, self.pc + (i * pc_align))
                              for i in range(lanes)]
-        self.fetch_stages = [ FetchDT(HwComponentType.REG, (1,),
-                                     "fetchDT{}".format(i),
-                                     pc=pc_width,
-                                     instr=self.config.instr_width)
-                             for i in range(lanes)]
+        self.fetch       = build_fetch_table(self.config, "fetch")
         self.fetch_meta  = PipCon()
 
     # retrieve data you want
@@ -69,6 +55,6 @@ class Fetch(Module):
                 pc_align = self.config.isa.pc_align
                 # actual hardware transfer
                 for i in range(lanes):
-                    self.fetch_stages[i][0].pc    |= self.pc + (i * pc_align)
-                    self.fetch_stages[i][0].instr |= self.mem_req[i][1]
+                    self.fetch[i].pc    |= self.pc + (i * pc_align)
+                    self.fetch[i].instr |= self.mem_req[i][1]
                 self.pc |= self.pc + lanes * pc_align
