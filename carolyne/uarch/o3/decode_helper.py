@@ -11,14 +11,14 @@
 # core-wide: decode happens before a µop is routed anywhere, so the record must
 # be able to carry ANY µop the ISA declares.
 #
-#   src   active_<n>    this µop fills that slot at all
-#         valid_<n>     its value is already in hand, so rename has nothing to
-#                       look up and it reaches its station already woken
-#         ar_idx_<n>    the architectural register the decoder extracted
-#         data_<n>      the value itself
-#   dest  active_<n>    this µop writes that slot
-#         required_<n>  the write must land before the instruction retires
-#         ar_idx_<n>    the architectural register rename will map
+#   src   active_<n>       this µop fills that slot at all
+#         valid_<n>        its value is already in hand, so rename has nothing
+#                          to look up and it reaches its station already woken
+#         ar_idx_<n>       the architectural register the decoder extracted
+#         data_<n>         the value itself
+#   dest  active_<n>       this µop writes that slot
+#         wb_required_<n>  the writeback must land before the instruction retires
+#         ar_idx_<n>       the architectural register rename will map
 #
 # NO pr_idx anywhere: decode is BEFORE rename, so a physical index does not
 # exist yet — ar_idx is what rename reads and pr_idx is what it answers.
@@ -36,7 +36,7 @@ from kathryn import *
 
 from carolyne.isa import AtomicOperand, IsaBase
 from carolyne.uarch.o3.config import CPUO3_Config
-from carolyne.uarch.o3.operand_field import (ACTIVE, AR_IDX, DATA, REQUIRED,
+from carolyne.uarch.o3.operand_field import (ACTIVE, AR_IDX, DATA, WB_REQUIRED,
                                              VALID, field_name,
                                              operand_fields as build_fields,
                                              require_named)
@@ -76,7 +76,7 @@ def decode_operand_fields(config: CPUO3_Config, atm_operand: AtomicOperand) -> d
     if atm_operand.is_src:
         kinds = (ACTIVE, VALID)
     else:
-        kinds = (ACTIVE, REQUIRED)
+        kinds = (ACTIVE, WB_REQUIRED)
 
     if atm_operand.has_arch:
         kinds += (AR_IDX,)

@@ -9,11 +9,11 @@
 # operand — sources are the station's business, not the ROB's, because what
 # retires is a WRITE:
 #
-#   active_<n>     this instruction actually writes that destination
-#   required_<n>   the write must have landed before it may retire
-#   pr_idx_<n>     the physical register rename gave it
-#   ar_idx_<n>     the architectural register it belongs to, which is what
-#                  commit writes into the ARF and clears from the RAT
+#   active_<n>       this instruction actually writes that destination
+#   wb_required_<n>  the writeback must have landed before it may retire
+#   pr_idx_<n>       the physical register rename gave it
+#   ar_idx_<n>       the architectural register it belongs to, which is what
+#                    commit writes into the ARF and clears from the RAT
 #
 # A one-register class (x86 FLAGS) gets NO ar_idx: index_width is 0 there, so
 # there is nothing to choose and the elaborator wires the single register.
@@ -22,7 +22,7 @@ from kathryn import *
 
 from carolyne.isa import AtomicOperand, IsaBase
 from carolyne.uarch.o3.config import CPUO3_Config
-from carolyne.uarch.o3.operand_field import (ACTIVE, AR_IDX, PR_IDX, REQUIRED,
+from carolyne.uarch.o3.operand_field import (ACTIVE, AR_IDX, PR_IDX, WB_REQUIRED,
                                              field_name,
                                              operand_fields as build_fields,
                                              require_named)
@@ -60,7 +60,7 @@ def rob_operand_fields(config: CPUO3_Config, atm_operand: AtomicOperand) -> dict
     there is no index to choose. The names and widths themselves are
     operand_field's.
     """
-    return build_fields(config, atm_operand, (ACTIVE, REQUIRED, PR_IDX, AR_IDX),
+    return build_fields(config, atm_operand, (ACTIVE, WB_REQUIRED, PR_IDX, AR_IDX),
                         "ROB")
 
 

@@ -5,12 +5,12 @@
 # per operand, and what differs between them is only WHICH kinds each keeps,
 # never what a kind is called or how wide it is:
 #
-#   valid_<n>     1   a source's value has landed and the entry may issue
-#   data_<n>      w   the value itself, the class width or the µtemp's
-#   pr_idx_<n>    w   the physical register rename gave it
-#   ar_idx_<n>    w   the architectural register it belongs to
-#   required_<n>  1   the write must land before the instruction retires
-#   active_<n>    1   this instruction really writes that destination
+#   valid_<n>        1   a source's value has landed and the entry may issue
+#   data_<n>         w   the value itself, the class width or the µtemp's
+#   pr_idx_<n>       w   the physical register rename gave it
+#   ar_idx_<n>       w   the architectural register it belongs to
+#   wb_required_<n>  1   the WRITEBACK must land before the instruction retires
+#   active_<n>       1   this instruction really writes that destination
 #
 # A caller names the kinds its record carries and this module answers with the
 # field names and widths, so two records cannot drift apart or disagree about a
@@ -22,17 +22,17 @@ from kathryn import kaf
 from carolyne.isa import AtomicOperand
 from carolyne.uarch.o3.config import CPUO3_Config
 
-VALID    = "valid"
-DATA     = "data"
-PR_IDX   = "pr_idx"
-AR_IDX   = "ar_idx"
-REQUIRED = "required"
-ACTIVE   = "active"
+VALID       = "valid"
+DATA        = "data"
+PR_IDX      = "pr_idx"
+AR_IDX      = "ar_idx"
+WB_REQUIRED = "wb_required"
+ACTIVE      = "active"
 
 # The kinds that name a REGISTER, and therefore need an architectural class.
 _INDEX_KINDS = (PR_IDX, AR_IDX)
 # The kinds that are one bit of state about the operand.
-_FLAG_KINDS  = (VALID, REQUIRED, ACTIVE)
+_FLAG_KINDS  = (VALID, WB_REQUIRED, ACTIVE)
 
 
 def field_name(kind: str, atm_operand: AtomicOperand) -> str:

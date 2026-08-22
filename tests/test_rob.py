@@ -59,7 +59,7 @@ def test_a_rob_entry_is_the_machine_shape_plus_the_isa_destinations():
         assert _has_field(host.table, field), field
 
     # The ISA half: one group per DESTINATION core. RV32I writes one register.
-    for field in ("active_dest_1", "required_dest_1", "pr_idx_dest_1",
+    for field in ("active_dest_1", "wb_required_dest_1", "pr_idx_dest_1",
                   "ar_idx_dest_1"):
         assert _has_field(host.table, field), field
 
@@ -82,7 +82,7 @@ def test_the_two_indexes_are_sized_from_different_things():
 
     assert fields["pr_idx_dest_1"].width == cfg.phy_idx_width(X) == 6
     assert fields["ar_idx_dest_1"].width == X.index_width == 5
-    assert fields["active_dest_1"].width == fields["required_dest_1"].width == 1
+    assert fields["active_dest_1"].width == fields["wb_required_dest_1"].width == 1
 
 
 def test_the_pc_follows_the_config():
@@ -114,7 +114,7 @@ def test_a_one_register_class_has_no_architectural_index_to_store():
 
     fields = rob_operand_fields(cfg, core)
     assert sorted(fields) == ["active_flags_out", "pr_idx_flags_out",
-                              "required_flags_out"]
+                              "wb_required_flags_out"]
 
     host = _build(cfg, "rob_flags")
     assert _has_field(host.table, "pr_idx_flags_out")

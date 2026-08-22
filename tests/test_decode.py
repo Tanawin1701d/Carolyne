@@ -64,7 +64,7 @@ def test_a_decode_entry_is_the_machine_shape_plus_every_isa_operand():
     for field in ("active_src_1", "valid_src_1", "ar_idx_src_1",
                   "active_src_2", "valid_src_2", "ar_idx_src_2", "data_src_2",
                   "active_src_3", "valid_src_3", "data_src_3",
-                  "active_dest_1", "required_dest_1", "ar_idx_dest_1"):
+                  "active_dest_1", "wb_required_dest_1", "ar_idx_dest_1"):
         assert _has_field(host.table, field), field
 
 
@@ -127,7 +127,7 @@ def test_the_widths_come_from_the_isa_and_the_config():
     assert fields["ar_idx_src_1"].width == X.index_width == 5
     assert fields["data_src_3"].width == 32                 # the µtemp's width
     assert fields["active_src_1"].width == fields["valid_src_1"].width == 1
-    assert fields["required_dest_1"].width == 1
+    assert fields["wb_required_dest_1"].width == 1
 
 
 def test_a_one_register_class_has_no_architectural_index_to_store():
@@ -151,7 +151,7 @@ def test_a_one_register_class_has_no_architectural_index_to_store():
 
     fields = decode_operand_fields(cfg, core)
     assert "ar_idx_flags_out" not in fields
-    assert "active_flags_out" in fields and "required_flags_out" in fields
+    assert "active_flags_out" in fields and "wb_required_flags_out" in fields
 
 
 def test_an_unnamed_operand_cannot_name_its_fields():

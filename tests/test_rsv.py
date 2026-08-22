@@ -73,7 +73,7 @@ def test_a_station_table_is_the_isa_operands_plus_the_machine_shape():
                   "pr_idx_dest_1"):
         assert _has_field(host.table, field), field
     # A plain DEST always writes, so it carries no runtime bit.
-    assert not _has_field(host.table, "required_dest_1")
+    assert not _has_field(host.table, "wb_required_dest_1")
     # src_3 is the immediate, which no ALU µop reads.
     assert not _has_field(host.table, "data_src_3")
 
@@ -118,7 +118,7 @@ def test_a_utemp_source_carries_only_its_data():
 
 def test_only_a_write_required_dest_carries_the_required_bit():
     # A plain DEST always writes, so it needs no runtime bit; DEST_W_REQ is the
-    # conditional one, and required_<name> is what makes it conditional.
+    # conditional one, and wb_required_<name> is what makes it conditional.
     cfg  = _cfg()
     spec = RsvSpec(True, 16, (ALU,), RsvType.RSV_EXEC)
 
@@ -129,7 +129,7 @@ def test_only_a_write_required_dest_carries_the_required_bit():
 
     assert sorted(operand_fields(cfg, spec, plain)) == ["pr_idx_d_plain"]
     assert sorted(operand_fields(cfg, spec, w_req)) == ["pr_idx_d_req",
-                                                       "required_d_req"]
+                                                       "wb_required_d_req"]
 
 
 def test_the_index_and_data_widths_come_from_the_machine_and_the_class():

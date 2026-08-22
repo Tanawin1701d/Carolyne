@@ -112,14 +112,14 @@ one file and was folded in the same day; don't recreate it.
   runs `operand` → `atomic_operand` one-way. Decision (2026-08-19): a **`name`**
   joined, optional and defaulting to `""`, validated as a Python identifier —
   it is the STEM of every hardware field a consumer builds for that slot
-  (`valid_<name>`, `pr_idx_<name>`, `data_<name>`, `required_<name>`), so a
+  (`valid_<name>`, `pr_idx_<name>`, `data_<name>`, `wb_required_<name>`), so a
   core with no name simply cannot be turned into hardware and the block that
   needs one says so (`rsv.station_cores`). Optional, not required: 58
   construction sites exist and a core is a legal description object without a
   name; `IsaBase` enforces uniqueness across the ISA for the ones that have
   one. Decision (2026-08-19): **`DEST_W_REQ`** is the third role — a
   destination whose write is REQUIRED before the instruction retires, which a
-  reservation station tracks with a `required_` bit where a plain `DEST`
+  reservation station tracks with a `wb_required_` bit where a plain `DEST`
   carries only its index. Two roles are now destinations, so `SRC_ROLES` /
   `DEST_ROLES` live beside the enum and every consumer tests MEMBERSHIP rather
   than `role is DEST` (`Uop`'s position check, `IsaBase`'s per-unit queries);
@@ -542,7 +542,7 @@ read or write, named after the core —
 | src on a register class | `valid_<n>`, `pr_idx_<n>`, `data_<n>`   |
 | src on a µtemp only     | `data_<n>` only                         |
 | `DEST`                  | `pr_idx_<n>`                            |
-| `DEST_W_REQ`            | `required_<n>`, `pr_idx_<n>`            |
+| `DEST_W_REQ`            | `wb_required_<n>`, `pr_idx_<n>`         |
 
 A µtemp source gets data ALONE because there is no PRF entry to wake on — the
 value rides with the µop (RV32I's immediates are exactly this, via
@@ -710,10 +710,19 @@ order. `rsv_helper.rsv_field_names()` is what makes that substitution possible.
 operand's hardware fields are named and sized. Both records carry a group per
 operand and they differ only in WHICH kinds they keep, never in what a kind is
 called or how wide it is, so the vocabulary (`VALID`, `DATA`, `PR_IDX`,
-`AR_IDX`, `REQUIRED`, `ACTIVE`) and the width rules live here and a caller
+`AR_IDX`, `WB_REQUIRED`, `ACTIVE`) and the width rules live here and a caller
 passes the kinds it wants: a station's source is `(VALID, PR_IDX, DATA)` — or
-`(DATA,)` on a µtemp — its destination `(REQUIRED, PR_IDX)` or `(PR_IDX,)`, and
-the ROB's `(ACTIVE, REQUIRED, PR_IDX, AR_IDX)`. A width of ZERO means "nothing
+`(DATA,)` on a µtemp — its destination `(WB_REQUIRED, PR_IDX)` or `(PR_IDX,)`,
+and the ROB's `(ACTIVE, WB_REQUIRED, PR_IDX, AR_IDX)`. Decision (2026-08-22):
+**`WB_REQUIRED = "wb_required"`**, renamed from `REQUIRED = "required"` —
+"required" alone never said required for WHAT, and what the bit tracks is the
+WRITEBACK landing before the instruction may retire. The VALUE moved with the
+constant, so the generated fields are `wb_required_<n>`: the value's only job
+is to be the field-name stem, so a `WB_REQUIRED = "required"` would leave the
+misleading name exactly where it costs most — in the emitted Verilog and the
+waveform — and would make this the one constant here whose name and value
+disagree. `wb_` is already the prefix `RobEntry.wb_fin` established for
+writeback state. A width of ZERO means "nothing
 to store", which is what drops `ar_idx` on a one-register class. `field_name()`
 is the single spelling, and the CONSUMERS use it too — `RsvBase.slot_ready` and
 `on_bypass`, `RsvO3._folded`, the ROB's reset — so a record and the logic
@@ -727,12 +736,12 @@ are here for the same reason: one message, `where` naming the caller, the way
 PC sized from `config.pc_width`); the builder adds one field group per
 DESTINATION atomic operand:
 
-| field            | width                            | what it is                |
-| ---------------- | -------------------------------- | ------------------------- |
-| `active_<n>`     | 1                                | this instruction writes it |
-| `required_<n>`   | 1                                | the write must land first  |
-| `pr_idx_<n>`     | `config.phy_idx_width(reg_file)`  | rename's physical register |
-| `ar_idx_<n>`     | `reg_file.index_width`            | the architectural register |
+| field             | width                            | what it is                 |
+| ----------------- | -------------------------------- | -------------------------- |
+| `active_<n>`      | 1                                | this instruction writes it |
+| `wb_required_<n>` | 1                                | the writeback must land first |
+| `pr_idx_<n>`      | `config.phy_idx_width(reg_file)` | rename's physical register |
+| `ar_idx_<n>`      | `reg_file.index_width`           | the architectural register |
 
 Only DESTINATIONS: sources are a station's business, and what RETIRES is a
 write. The set is core-wide (`isa.used_atomic_operands()` filtered to dests),
@@ -827,7 +836,7 @@ the builder adds one field group per atomic operand:
 | src                 | `active_<n>`, `valid_<n>`                         |
 | src, arch class     | + `ar_idx_<n>`                                    |
 | src, µtemp target   | + `data_<n>`                                      |
-| dest                | `active_<n>`, `required_<n>`, `ar_idx_<n>`        |
+| dest                | `active_<n>`, `wb_required_<n>`, `ar_idx_<n>`      |
 
 The operand set is **CORE-WIDE and BOTH DIRECTIONS** (`used_atomic_operands()`,
 srcs then dests) where the ROB's is dests-only and a station's is per-unit: a

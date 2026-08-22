@@ -29,7 +29,7 @@ from .reg import Intermediate, RegFile
 #
 # DEST_W_REQ is a destination whose write is REQUIRED — the µop must produce it
 # before the instruction can retire, so a reservation station carries a
-# `required_<name>` bit for it where a plain DEST carries only its index.
+# `wb_required_<name>` bit for it where a plain DEST carries only its index.
 class OperandRole(Enum):
     SRC        = "src"
     DEST       = "dest"

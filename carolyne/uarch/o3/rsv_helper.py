@@ -10,8 +10,8 @@
 #   src on a register class   valid_<n>  pr_idx_<n>  data_<n>
 #   src on a µtemp only       data_<n>              (no PRF entry to wake on:
 #                                                    the value rides with the µop)
-#   dest                                 pr_idx_<n>
-#   dest, write required      required_<n>  pr_idx_<n>
+#   dest                                       pr_idx_<n>
+#   dest, writeback required  wb_required_<n>  pr_idx_<n>
 #
 # `uop_idx` names one µop of the ISA's vocabulary, so it is sized from the
 # template count and means the same µop anywhere in the CPU core.
@@ -29,7 +29,7 @@ from kathryn import *
 from carolyne.isa import AtomicOperand, IsaBase
 from carolyne.uarch.common import ceil_log2
 from carolyne.uarch.o3.config import CPUO3_Config, RsvSpec
-from carolyne.uarch.o3.operand_field import (DATA, PR_IDX, REQUIRED, VALID,
+from carolyne.uarch.o3.operand_field import (DATA, PR_IDX, WB_REQUIRED, VALID,
                                              operand_fields as build_fields,
                                              require_named)
 
@@ -96,7 +96,7 @@ def operand_fields(config: CPUO3_Config,
     if atm_operand.is_src:
         kinds = (VALID, PR_IDX, DATA) if atm_operand.has_arch else (DATA,)
     elif atm_operand.is_write_required:
-        kinds = (REQUIRED, PR_IDX)
+        kinds = (WB_REQUIRED, PR_IDX)
     else:
         kinds = (PR_IDX,)
 

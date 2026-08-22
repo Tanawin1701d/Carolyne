@@ -33,7 +33,7 @@ from kathryn.signal import to_ref
 
 from carolyne.uarch.common import ceil_log2
 from carolyne.uarch.o3.config import CPUO3_Config
-from carolyne.uarch.o3.operand_field import (ACTIVE, AR_IDX, PR_IDX, REQUIRED,
+from carolyne.uarch.o3.operand_field import (ACTIVE, AR_IDX, PR_IDX, WB_REQUIRED,
                                              field_name)
 from carolyne.uarch.o3.priority import PRI_MIS_PRED, PRI_RENAME
 from carolyne.uarch.o3.reg_arch_mng import RegArchMng
@@ -237,7 +237,7 @@ class Rob(Module):
 
         ACTIVE says rename allocated a physical register for that destination,
         so the register goes back to its pool — whether or not anything was
-        written into it. ACTIVE and REQUIRED together say the write has to
+        written into it. ACTIVE and WB_REQUIRED together say the write has to
         become architectural, which is the only case where the Arf takes the
         value and the rename table stops pointing at the physical register.
 
@@ -252,7 +252,7 @@ class Rob(Module):
                 claimed = self.commit_ok[lane] & to_ref(
                     getattr(row, field_name(ACTIVE, atm_operand)))
                 writes  = claimed & to_ref(
-                    getattr(row, field_name(REQUIRED, atm_operand)))
+                    getattr(row, field_name(WB_REQUIRED, atm_operand)))
                 pr_idx  = to_ref(getattr(row, field_name(PR_IDX, atm_operand)))
                 ar_idx  = self._arch_index(row, atm_operand)
 
