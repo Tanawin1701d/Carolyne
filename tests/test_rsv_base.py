@@ -6,13 +6,13 @@
 # gen_flow()/build_flow() — that is where a bad assignment actually fails.
 
 import pytest
-from kathryn import (HwComponentType, Module, build_flow, flow, gen_flow, init,
-                     reset, set_top, wire, zif)
+from kathryn import (Module, build_flow, flow, gen_flow, init, reset, set_top,
+                     wire, zif)
 
 from carolyne.isa.riscv import Rv32i
 from carolyne.uarch.o3.config import CPUO3_Config, RsvSpec, RsvType
+from carolyne.uarch.o3.dispatch_helper import build_dispatch
 from carolyne.uarch.o3.rsv import RsvBase, RsvBypass
-from carolyne.uarch.o3.rsv_helper import rsv_entry_shape
 
 ISA  = Rv32i()
 X    = ISA.reg_file("x")
@@ -45,9 +45,10 @@ def _drive(cfg, spec, unit_cls=OldestFirst):
         @init
         def decl(self):
             self.station = unit_cls(cfg, spec, "rsv_test")
-            entry_cls, fields = rsv_entry_shape(cfg, spec)
-            self.dispatch = entry_cls(HwComponentType.WIRE, (1,), "dispatch",
-                                      **fields)
+            # The core-wide bus, not a row of this station's shape: a k2k copy
+            # pairs the fields by name and width, so a station takes the ones
+            # it keeps and the rest of the lane goes nowhere.
+            self.dispatch = build_dispatch(cfg, 1, "dispatch")
             self.disp_en  = wire(1).mark_input("disp_en")
             self.disp_idx = wire(2).mark_input("disp_idx")
             self.issue_en = wire(1).mark_input("issue_en")

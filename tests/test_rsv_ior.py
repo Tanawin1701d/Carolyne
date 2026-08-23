@@ -13,7 +13,8 @@ from carolyne.isa.riscv import Rv32i
 from carolyne.uarch.o3.config import CPUO3_Config, RsvSpec, RsvType
 from carolyne.uarch.o3.priority import PRI_MIS_PRED, PRI_RENAME, PRI_TRACK_ROLL
 from carolyne.uarch.o3.rsv import RsvBypass
-from carolyne.uarch.o3.rsv_helper import build_rsv_dispatch, rsv_id_width
+from carolyne.uarch.o3.dispatch_helper import build_dispatch
+from carolyne.uarch.o3.rsv_helper import rsv_id_width
 from carolyne.uarch.o3.rsv_ior import RsvIOR
 
 ISA      = Rv32i()
@@ -37,7 +38,7 @@ def _drive(station_cls, spec, rsv_idx=0, fe_lanes=2):
         @init
         def decl(self):
             self.station  = station_cls(cfg, spec, "rsv_test", rsv_idx)
-            self.dispatch = build_rsv_dispatch(cfg, spec, cfg.fe_lanes, "disp")
+            self.dispatch = build_dispatch(cfg, cfg.fe_lanes, "disp")
             self.exec_arb = PipCon(name="exec_unit")
             self.fix_tag  = wire(cfg.sptag_len).mark_input("fix_tag")
             self.suc_tag  = wire(cfg.sptag_len).mark_input("suc_tag")

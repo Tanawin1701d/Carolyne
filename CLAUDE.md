@@ -596,11 +596,10 @@ of the C++ original; the age-track maintenance lands with the o3 subclass.
 **MANY WRITERS, ONE ISSUE** is the shape of both. There is one write port per
 `fe_lanes`, since every front-end lane may dispatch in the same cycle and any
 of them may be aimed at this station; issue stays single, one entry per cycle
-to one unit. A lane says who it is for: `rsv_helper.build_rsv_dispatch()` gives
-the bus an **added** `rsv_id` field — added, not stored, because the station
-answers it on the way in and has nothing to remember afterwards — and
-`lane_targets_me()` is the check. `free_slots()` hands each port a DIFFERENT
-entry, which is what lets two lanes land in one cycle.
+to one unit. A lane says who it is for: the bus carries `rsv_id` and
+`lane_targets_me()` is the check — the station answers it on the way in and
+stores nothing, so no entry has an `rsv_id` field. `free_slots()` hands each
+port a DIFFERENT entry, which is what lets two lanes land in one cycle.
 
 **`RsvO3`** issues the OLDEST ready entry. Decision, and the deliberate
 departure from the original: age is the STATION's own business — it keeps a
@@ -695,6 +694,26 @@ survivors with its negation instead of writing the predicate a second time.
 NOT shared: the free-slot fold. An in-order table is contiguous by
 construction, so `RsvIOR` COMPUTES its slot from the pointer where `RsvO3`
 searches for one; a reduce there would be looking for something already known.
+
+Decision (2026-08-23): a dispatch lane is the **CORE-WIDE bus**
+(`dispatch_helper`), not a row of the station's own shape —
+`rsv_helper.build_rsv_dispatch()`, which built `lanes` rows of
+`rsv_entry_shape` plus an added `rsv_id`, is DELETED. One bus per station only
+worked while the bus was shaped per reader; now that `DispatchBase` declares
+the machine half, a lane holds whatever the µop turns out to be and every
+station reads the same rows. And `rsv.py` needed NO CHANGE for it:
+`write_entry` stays the whole-row `|= src_row` it was, because Kathryn's k2k
+assign pairs fields by NAME AND WIDTH and skips the destination fields with no
+match (§6) — a station takes the fields it keeps out of a wider lane, and the
+rest of the bus goes nowhere. The skipped ones are exactly `track` /
+`is_lower_track`, which no front end could answer and `RsvO3.write_entry`
+substitutes. An adapter WAS built the same day and reverted whole: a
+`disp_fields` intersection, a `lane_fields` copy beside `row_fields`, a
+`SELF_WRITTEN` tuple and a `_dispatch_filled` refusal that held every entry
+field to "the bus, the station, or the machine fills this". It restated in
+Python what k2k already does in the arena, and it put a list of `RsvO3Entry`'s
+field names on `RsvBase`. Don't restore it from git — `rsv.py` is shape-blind
+on purpose.
 
 Shared additions on `RsvBase`: `rsv_idx` + `try_write_entry(target_idx, ...)`
 (the C++ `RSV_IDX` / `tryWriteEntry`, for a dispatch bus that names one
@@ -824,6 +843,49 @@ bargain `IsaBase.pc_width` makes. NOT here: a `valid` bit. A lane's occupancy
 is the fetch stage's `pip` grant, and a field beside it would be a second
 answer to one question — the same reason the FU plan gives for a stage's grant
 BEING its valid bit.
+
+**`carolyne/uarch/o3/dispatch_helper.py`** — `build_dispatch(config,
+lanes=None, name="dispatch")` (2026-08-22), the bus from rename to the back
+end, one WIRE row per `fe_lanes`, carrying a field group per atomic operand.
+Core-wide (`isa.used_atomic_operands()`, srcs then dests), because a lane is
+SHAPED before it is ROUTED and has to hold whatever the µop turns out to be.
+Decision: which kinds a group carries is **DECLARED from the operand's role and
+target**, not gathered from what the ROB and the stations want between them:
+
+| operand              | kinds                                       |
+| -------------------- | ------------------------------------------- |
+| src, register class  | `valid` `data` `pr_idx` `ar_idx` `active`   |
+| src, immediate only  | `valid` `data` `active`                     |
+| dest, register class | `pr_idx` `ar_idx` `active` `wb_required`    |
+| dest, µtemp only     | `active` `wb_required`                      |
+
+A SOURCE never carries `wb_required` — it is a destination's promise that the
+writeback lands before the instruction retires, and a source writes nothing. A
+DESTINATION never carries `valid` or `data` — it waits on nothing, and at
+dispatch its value does not exist yet because the FU has not run. The
+index rule is `operand_field`'s, not a choice made here: `pr_idx`/`ar_idx` name
+a register OF A CLASS, so an operand that only ever names a µtemp carries
+neither, and a one-register class still drops `ar_idx` on the 0-width rule.
+`SRC_KINDS`/`DEST_KINDS` are the two tuples and `dispatch_operand_kinds()` is
+the one place the target narrows them. Decision (2026-08-23): `DispatchBase`
+now DECLARES the machine half beside the operand groups — `valid`, `is_spec` +
+`spec_tag`, `uop_idx`, `rob_des_idx`, `rsv_id`, `is_branch` + `is_store`,
+`pc` + `npc`. It is the UNION of what the readers keep, not a copy of any one
+of them, because a lane is shaped before it is routed and the same row is read
+by the ROB (`is_branch`/`is_store`/`pc`), by a station (`is_spec`/`spec_tag`/
+`uop_idx`/`rob_des_idx`, plus `pc`/`npc` if its KIND carries them) and by every
+station at once (`rsv_id` — the field that lets each take only the lanes naming
+it). `valid` IS declared here where `FetchDT` refuses one: a wire bus has no
+`pip` grant to read occupancy off, so the row has to say so itself. Widths come
+from the config exactly as the readers' do (`sptag_len`, `uop_idx_width`,
+`rob_idx_width`, `pc_width`) and `rsv_id` from `rsv_helper.rsv_id_width` —
+imported rather than restated, so the width a station compares against and the
+width a lane carries are one number. The stations read THIS bus as of the same
+day (`rsv.py`), which is what retired `build_rsv_dispatch`. STILL not here: any
+pooling against `rsv_entry_shape`/`rob_entry_shape`. A version that pooled both halves was
+built and reverted on 2026-08-22; don't restore it from the scratchpad — the
+declaration above is the union written down, which is a statement, where
+pooling made the bus's shape depend on which readers happened to exist.
 
 **`carolyne/uarch/o3/decode_helper.py`** — `build_decode_table(config,
 name="decode")` (2026-08-22), the decoded-µop record, **one row per
@@ -966,6 +1028,14 @@ elaboration from a `RegFile` in `uarch`.
   every time (`self.table[idx] |= {...}`) and keep a cached handle for READS
   only. An element accepts a `{field_name: source}` dict, which is what lets a
   loop over ISA-derived field names write without naming them statically.
+- **A k2k assign pairs fields by NAME AND WIDTH**, and a destination field
+  with no match in the source is SKIPPED, with a `UserWarning` naming the
+  fields it dropped. So `wide_row |= narrow_row` and `narrow_row |= wide_row`
+  both build, copying the overlap — which is what lets one core-wide dispatch
+  lane land in a reservation station's narrower entry without an adapter. The
+  warning is the only signal that something did not copy, so a field the
+  destination MUST have written needs a value stated explicitly (an override in
+  the same assign, never a second write at equal priority).
 - **A `pip` / `zync` block must be built in an UNCONDITIONAL scope.** Nesting one
   inside a `zif` panics at the block's exit with "zero-cond-if sub blocks must
   have BasicNodeFlow join policy" — a conditional block joins differently from

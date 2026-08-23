@@ -38,8 +38,8 @@ from carolyne.isa import AtomicOperand, IsaBase
 from carolyne.uarch.o3.config import CPUO3_Config
 from carolyne.uarch.o3.operand_field import (ACTIVE, AR_IDX, DATA, WB_REQUIRED,
                                              VALID, field_name,
-                                             operand_fields as build_fields,
-                                             require_named)
+                                             named_atomic_operands,
+                                             operand_fields as build_fields)
 
 
 class DecodeEntryBase(Karray):
@@ -54,16 +54,9 @@ def decode_atm_operands(isa: IsaBase) -> tuple:
     """Every atomic operand the ISA's µops fill, sources then destinations.
 
     Core-wide, not per unit: a decoded µop has not been routed to a station
-    yet, so the record has to hold whatever it turns out to be. Deduped by
-    identity already (IsaBase does it), and held to non-empty names, since a
-    name becomes a field name.
+    yet, so the record has to hold whatever it turns out to be.
     """
-    where = f"decode of ISA '{isa.name}'"
-    srcs, dests = [], []
-    for atm_operand in isa.used_atomic_operands():
-        require_named(atm_operand, where)
-        (srcs if atm_operand.is_src else dests).append(atm_operand)
-    return tuple(srcs) + tuple(dests)
+    return named_atomic_operands(isa, f"decode of ISA '{isa.name}'")
 
 
 def decode_operand_fields(config: CPUO3_Config, atm_operand: AtomicOperand) -> dict:

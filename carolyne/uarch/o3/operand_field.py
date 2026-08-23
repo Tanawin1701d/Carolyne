@@ -19,7 +19,7 @@
 
 from kathryn import kaf
 
-from carolyne.isa import AtomicOperand
+from carolyne.isa import AtomicOperand, IsaBase
 from carolyne.uarch.o3.config import CPUO3_Config
 
 VALID       = "valid"
@@ -51,6 +51,21 @@ def require_named(atm_operand: AtomicOperand, where: str) -> str:
             f"{where}: a {atm_operand.role} operand core has no name, so its fields "
             f"cannot be named — name the cores the ISA declares")
     return atm_operand.name
+
+
+def named_atomic_operands(isa: IsaBase, where: str) -> tuple:
+    """Every atomic operand the ISA's µops fill, sources then destinations.
+
+    Core-wide, which is what a record built before a µop is routed needs: it
+    has to hold whatever the µop turns out to be. Deduped by identity already
+    (IsaBase does it), and held to non-empty names here, since a name is the
+    stem of every field built for the operand.
+    """
+    srcs, dests = [], []
+    for atm_operand in isa.used_atomic_operands():
+        require_named(atm_operand, where)
+        (srcs if atm_operand.is_src else dests).append(atm_operand)
+    return tuple(srcs) + tuple(dests)
 
 
 def operand_fields(config      : CPUO3_Config,
