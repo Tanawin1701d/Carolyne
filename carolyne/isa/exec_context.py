@@ -39,17 +39,18 @@ from typing import Any, ContextManager, Protocol, runtime_checkable
 @runtime_checkable
 class ExecContext(Protocol):
     # --- the µop record, read ------------------------------------------------
-    def op_is(self, op: Any) -> Any:
-        """A condition: the record's kind is this Op. One unit serves every op
-        it declares, so a body branches on the kind through `when(op_is(...))`;
-        Ops compare by value, so the description's constant is the key."""
+    def uop_is(self, uop: Any) -> Any:
+        """A condition: the record holds this µop. One unit serves every µop it
+        declares, so a body branches through `when(uop_is(...))`; the key is
+        the description's own template constant, which the record names as its
+        `uop_idx`."""
         ...
 
     def src(self, name: str) -> Any:
         """The value in that source slot — an IMMEDIATE included: an immediate
         operand fills a source slot like any other (RV32I's ImmTarget), so
         there is no separate accessor for one. A slot the µop did not fill
-        reads like an idle wire — some value; the op's guard keeps it out of
+        reads like an idle wire — some value; the µop's guard keeps it out of
         the result."""
         ...
 

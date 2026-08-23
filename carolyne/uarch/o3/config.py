@@ -15,7 +15,7 @@
 #
 # `rsv_specs` is the execution side: one entry per reservation station, naming
 # the units it feeds and what KIND of station it is. Between them they must
-# cover every op the ISA's instructions use. The kind decides the extra entry
+# cover every µop the ISA's instructions use. The kind decides the extra entry
 # fields (`RsvType` / `rsv_type_fields`): an exec station carries its pc, a
 # branch station its pc and the next one, a load/store station neither — an
 # address is a value it computes, not one it is handed. A machine may add more
@@ -40,7 +40,7 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Tuple
 
-from ...isa import ExecUnit, IsaBase, RegFile
+from ...isa import ExecUnit, IsaBase, RegFile, Uop
 from ..common import ceil_log2
 
 # The map from a register class to its physical file size. A dict is impossible
@@ -170,9 +170,15 @@ class RsvSpec:
         return "/".join(unit.name for unit in self.exec_unit)
 
     @property
-    def ops(self) -> frozenset:
-        """Every op issuable from this station."""
-        return frozenset(op for unit in self.exec_unit for op in unit.ops)
+    def uops(self) -> Tuple[Uop, ...]:
+        """Every µop issuable from this station, deduped by identity — the
+        discipline the description layer runs on, and a Uop is unhashable
+        anyway (it reaches a RegFile, which holds a dict)."""
+        found = {}
+        for unit in self.exec_unit:
+            for uop in unit.uops:
+                found.setdefault(id(uop), uop)
+        return tuple(found.values())
 
 
 @dataclass(frozen=True)
@@ -266,13 +272,14 @@ class CPUO3_Config:
                         f"unit '{unit.name}', which ISA '{self.isa.name}' does not "
                         f"declare")
 
-        # The machine-level counterpart of IsaBase's unrunnable-op check: a unit
-        # the ISA declares but no station feeds cannot execute anything.
-        issuable = frozenset(op for spec in self.rsv_specs for op in spec.ops)
-        stranded = sorted(op.name for op in self.isa.used_ops() if op not in issuable)
+        # The machine-level counterpart of IsaBase's unrunnable-µop check: a
+        # unit the ISA declares but no station feeds cannot execute anything.
+        issuable = {id(uop) for spec in self.rsv_specs for uop in spec.uops}
+        stranded = sorted(uop.name for uop in self.isa.used_uops()
+                          if id(uop) not in issuable)
         if stranded:
             raise ValueError(
-                f"CPUO3_Config: no reservation station can issue op(s) "
+                f"CPUO3_Config: no reservation station can issue µop(s) "
                 f"{', '.join(stranded)} — the ISA's instructions use them")
 
     # --- derived from the ISA -------------------------------------------------

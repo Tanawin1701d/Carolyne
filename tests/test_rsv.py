@@ -11,7 +11,7 @@ import pytest
 from kathryn import Module, _session, init, reset
 
 from carolyne.isa import (AtomicOperand, ExecUnit, FieldRef, InstrFieldMatch,
-                          Intermediate, IsaBase, Mop, Op, Operand, OperandRole,
+                          Intermediate, IsaBase, Mop, Operand, OperandRole,
                           TargetKind, Uop, UopSeq)
 from carolyne.isa.riscv import Rv32i
 from carolyne.uarch.o3.config import CPUO3_Config, RsvSpec, RsvType
@@ -191,13 +191,12 @@ def test_an_unnamed_atomic_operand_cannot_name_its_fields():
     dest    = AtomicOperand(OperandRole.DEST, "d", reg_file=X)
     src_opr = Operand(unnamed, TargetKind.ARCH, FieldRef("rs1"))
     dst_opr = Operand(dest,    TargetKind.ARCH, FieldRef("rd"))
-    op      = Op("ADD")
-    unit    = ExecUnit("alu", {op}, src_operands=(unnamed,),
+    uop     = Uop("ADD", srcs=(src_opr,), dests=(dst_opr,))
+    unit    = ExecUnit("alu", (uop,), src_operands=(unnamed,),
                        dest_operands=(dest,))
-    uop     = Uop(op, srcs=(src_opr,), dests=(dst_opr,))
     isa     = IsaBase(name="toy", pc_width=32, pc_align=4, ilen_bytes=4,
                       reg_files=(X,), atomic_operands=(unnamed, dest),
-                      operands=(src_opr, dst_opr), ops=(op,), exec_units=(unit,),
+                      operands=(src_opr, dst_opr), exec_units=(unit,),
                       uops=(uop,),
                       mops=(Mop(matcher_field=InstrFieldMatch("opcode", ((0, 7),)),
                                 uop_seq=(UopSeq(uops=(uop,)),)),))

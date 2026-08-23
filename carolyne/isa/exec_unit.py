@@ -1,12 +1,17 @@
 # ExecUnitBase — one execution-unit class of the engine (uop_contract.md §1.2):
-# a named unit, the operation kinds it executes, the operand slots it reads and
-# writes, and — for an ISA that supplies them — what it COMPUTES.
+# a named unit, the µops it executes, the operand slots it reads and writes,
+# and — for an ISA that supplies them — what it COMPUTES.
 #
 # The unit set IS the kind→FU map (no global registry, and a µop template does
 # not name its unit); a custom function unit is just another unit an ISA
-# declares. An Op may sit in several units; which one claims it is a machine
+# declares. One µop may sit in several units; which one claims it is a machine
 # configuration choice, resolved at elaboration. No standard catalog ships
-# here: every ISA/machine declares the ops and units it needs.
+# here: every ISA/machine declares the µops and units it needs.
+#
+# `uops` is a TUPLE matched by IDENTITY, not a frozenset: a Uop reaches a
+# RegFile, which holds a dict, so it is unhashable — and identity is the
+# discipline the whole description layer runs on, so a unit lists the same
+# template constants the ISA declares.
 #
 # THE OPERAND SLOTS ARE DECLARED, not derived from the µops that happen to
 # reach the unit. They are the unit's PORT SHAPE — what the elaborator sizes
@@ -28,17 +33,17 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import FrozenSet, Iterable, Tuple
+from typing import Iterable, Tuple
 
 from .atomic_operand import DEST_ROLES, SRC_ROLES, AtomicOperand
 from .exec_context import ExecContext
-from .op import Op
+from .uop import Uop
 
 
 @dataclass(frozen=True)
 class ExecUnitBase:
     name          : str                        # unit class name, e.g. "alu", "mem"
-    ops           : FrozenSet[Op]              # operation kinds this unit executes
+    uops          : Tuple[Uop, ...]            # the µop templates this unit executes
     src_operands  : Tuple[AtomicOperand, ...] = ()   # the slots it READS
     dest_operands : Tuple[AtomicOperand, ...] = ()   # the slots it WRITES
     needs         : Tuple[str, ...] = ()       # facilities a stage body asks for,
@@ -47,13 +52,10 @@ class ExecUnitBase:
     def __post_init__(self) -> None:
         if not self.name:
             raise ValueError("ExecUnitBase needs a non-empty name")
-        object.__setattr__(self, "ops", frozenset(self.ops))   # accept any iterable
-        if not self.ops:
-            raise ValueError(f"ExecUnit '{self.name}': needs at least one op")
-        for op in self.ops:
-            if not isinstance(op, Op):
-                raise TypeError(
-                    f"ExecUnit '{self.name}': ops must be Op objects, got {op!r}")
+        object.__setattr__(self, "uops", tuple(self.uops))     # accept any sequence
+        if not self.uops:
+            raise ValueError(f"ExecUnit '{self.name}': needs at least one µop")
+        self._check_uops()
 
         self._check_operands("src_operands",  SRC_ROLES,  "reads")
         self._check_operands("dest_operands", DEST_ROLES, "writes")
@@ -66,6 +68,28 @@ class ExecUnitBase:
                     f"got {facility!r}")
 
     # --- construction checks --------------------------------------------------
+    def _check_uops(self) -> None:
+        """The µops this unit runs: the right type, listed once, named apart.
+
+        By INSTANCE for the duplicate, by NAME for the collision — a name is
+        how a body and an encoding table reach a template, so two of them
+        cannot share one.
+        """
+        seen_names = set()
+        for pos, uop in enumerate(self.uops):
+            if not isinstance(uop, Uop):
+                raise TypeError(
+                    f"ExecUnit '{self.name}': uops must be Uop objects, got "
+                    f"{type(uop).__name__}")
+            if any(other is uop for other in self.uops[:pos]):
+                raise ValueError(
+                    f"ExecUnit '{self.name}': lists µop '{uop.name}' twice")
+            if uop.name in seen_names:
+                raise ValueError(
+                    f"ExecUnit '{self.name}': two µops named '{uop.name}' — a name is "
+                    f"how a stage body and an encoding table reach one")
+            seen_names.add(uop.name)
+
     def _check_operands(self, field: str, roles: tuple, verb: str) -> None:
         """One side of the port shape: the right type, and the right direction."""
         members = tuple(getattr(self, field))
@@ -103,21 +127,23 @@ class ExecUnitBase:
         description layer runs on."""
         return any(mine is atm_operand for mine in self.operands())
 
-    # --- ops ------------------------------------------------------------------
-    def has(self, op: Op) -> bool:
-        return op in self.ops
+    # --- µops -----------------------------------------------------------------
+    def has(self, uop: Uop) -> bool:
+        """This unit runs that µop — by IDENTITY, like every other membership
+        question in this layer."""
+        return any(mine is uop for mine in self.uops)
 
-    def op(self, name: str) -> Op:
-        """Look an op of this unit up by name (encoding tables carry text)."""
-        for candidate in self.ops:
+    def uop(self, name: str) -> Uop:
+        """Look a µop of this unit up by name (encoding tables carry text)."""
+        for candidate in self.uops:
             if candidate.name == name:
                 return candidate
         raise ValueError(
-            f"ExecUnit '{self.name}': no op named '{name}' "
-            f"(has: {', '.join(sorted(o.name for o in self.ops))})")
+            f"ExecUnit '{self.name}': no µop named '{name}' "
+            f"(has: {', '.join(self.uop_names())})")
 
-    def op_names(self) -> Iterable[str]:
-        return sorted(o.name for o in self.ops)
+    def uop_names(self) -> Iterable[str]:
+        return sorted(u.name for u in self.uops)
 
     # --- what the unit computes -----------------------------------------------
     def stages(self):

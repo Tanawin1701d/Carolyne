@@ -1,5 +1,5 @@
 # The RV32I package as usage documentation for a per-ISA description: it
-# declares its own register classes, ops, units and mop table, and hands the
+# declares its own register classes, µops, units and mop table, and hands the
 # lot to IsaBase — which is what actually validates it. These tests pin the
 # invariants a hand-written ISA package can get wrong, not the RISC-V spec.
 
@@ -10,24 +10,24 @@ from carolyne.isa import (
     OperandRole, TargetKind)
 from carolyne.isa.riscv import (
     ILEN_BYTES, ImmTarget, MOP_TABLE, OPR_IMMS, OPR_RD, OPR_RS1, OPR_RS2,
-    RegFile, Rv32i, UOPS, X_LEN, field_match as FM, op as O, uop as U, x_file,
+    RegFile, Rv32i, UOPS, X_LEN, field_match as FM, uop as U, x_file,
 )
 
 
-def _uops(isa, op=None):
-    """Every µop of the table, optionally only those naming one op."""
+def _uops(isa, want=None):
+    """Every µop of the table, optionally only one template of it."""
     return [uop
             for mop in isa.mops for seq in mop.uop_seq for uop in seq.uops
-            if op is None or uop.op is op]
+            if want is None or uop is want]
 
 
 def test_rv32i_builds_and_passes_the_container_checks():
-    # Construction IS the test: IsaBase rejects an undeclared op, an
-    # undeclared reg file, or an op no unit executes.
+    # Construction IS the test: IsaBase rejects an undeclared µop, an
+    # undeclared reg file, or a µop no unit executes.
     isa = Rv32i()
     assert isinstance(isa, IsaBase) and isa.name == "rv32i"
     assert isa.reg_file("x").amount == 32 and isa.reg_file("x").is_const(0)
-    assert isa.used_ops() <= set(isa.ops)
+    assert set(map(id, isa.used_uops())) <= set(map(id, isa.uops))
     assert [r.name for r in isa.used_reg_files()] == ["x"]
 
 
@@ -51,32 +51,34 @@ def test_rv32i_is_a_subclass_supplying_defaults_not_a_factory():
     assert Rv32i().operands is isa.operands and Rv32i().uops is isa.uops
 
 
-def test_every_declared_op_is_actually_used_by_the_table():
+def test_every_declared_uop_is_actually_used_by_the_table():
     # The container allows declaring more than the mops use; for a real ISA
-    # an unused op means a missing instruction, so pin the stronger property.
+    # an unused template means a missing instruction, so pin the stronger
+    # property.
     isa = Rv32i()
-    assert set(isa.ops) == isa.used_ops()
+    assert set(map(id, isa.uops)) == set(map(id, isa.used_uops()))
 
 
-def test_memory_width_and_branch_condition_are_ops_not_sub_fields():
+def test_memory_width_and_branch_condition_are_uops_not_sub_fields():
     # lb/lh/lw/lbu/lhu, sb/sh/sw and the six branches are distinct kinds, so
     # the µop record needs no size/sign field and no cond-kind field
-    # (op.py header). auipc is likewise its own op, not an ADD.
+    # (uop.py header). auipc is likewise its own µop, not an ADD.
     isa = Rv32i()
-    assert {o.name for o in O.LOADS}    == {"LB", "LH", "LW", "LBU", "LHU"}
-    assert {o.name for o in O.STORES}   == {"SB", "SH", "SW"}
-    assert {o.name for o in O.BRANCHES} == {"BEQ", "BNE", "BLT", "BGE", "BLTU", "BGEU"}
-    for op in O.LOADS + O.STORES + O.BRANCHES + (O.AUIPC,):
-        assert op in isa.used_ops(), op.name
+    assert {u.name for u in U.LOADS}    == {"LB", "LH", "LW", "LBU", "LHU"}
+    assert {u.name for u in U.STORES}   == {"SB", "SH", "SW"}
+    assert {u.name for u in U.BRANCHES} == {"BEQ", "BNE", "BLT", "BGE", "BLTU", "BGEU"}
+    used = set(map(id, isa.used_uops()))
+    for uop in U.LOADS + U.STORES + U.BRANCHES + (U.UOP_AUIPC,):
+        assert id(uop) in used, uop.name
 
 
-def test_unit_routing_covers_every_op():
+def test_unit_routing_covers_every_uop():
     isa = Rv32i()
-    for op in isa.ops:
-        assert isa.units_for(op), f"no unit executes {op.name}"
-    assert [u.name for u in isa.units_for(O.LW)] == ["mem"]
-    assert [u.name for u in isa.units_for(O.BEQ)] == ["control"]
-    assert [u.name for u in isa.units_for(O.AUIPC)] == ["alu"]
+    for uop in isa.uops:
+        assert isa.units_for(uop), f"no unit executes {uop.name}"
+    assert [u.name for u in isa.units_for(U.UOP_LW)]    == ["mem"]
+    assert [u.name for u in isa.units_for(U.UOP_BEQ)]   == ["control"]
+    assert [u.name for u in isa.units_for(U.UOP_AUIPC)] == ["alu"]
 
 
 def test_x0_is_declared_not_special_cased():
@@ -138,7 +140,7 @@ def test_immediates_ride_in_srcs_for_now():
                 if any(o.target is ImmTarget for o in uop.srcs)]
     assert len(with_imm) == 27                  # every instruction but the R-type
     assert max(len(uop.srcs) for uop in _uops(isa)) == 3
-    sw, = _uops(isa, O.SW)
+    sw, = _uops(isa, U.UOP_SW)
     assert [o.matcher.name for o in sw.srcs] == ["rs1", "rs2", "imm_s"]
 
 
@@ -160,11 +162,11 @@ def test_load_and_store_are_single_uops():
     # RV32I addressing is base+imm only: the address is not a value a second
     # µop consumes, so no AGU µop and no address µtemp.
     isa = Rv32i()
-    lw, = _uops(isa, O.LW)
+    lw, = _uops(isa, U.UOP_LW)
     assert [o.matcher.name for o in lw.srcs] == ["rs1", "imm_i"]
     assert lw.dests[0].index.name == "rd"
 
-    sw, = _uops(isa, O.SW)
+    sw, = _uops(isa, U.UOP_SW)
     assert [o.matcher.name for o in sw.srcs] == ["rs1", "rs2", "imm_s"]
     assert sw.dests == ()
 
@@ -175,10 +177,10 @@ def test_every_rv32i_instruction_is_one_uop():
     isa = Rv32i()
     assert all(len(seq.uops) == 1 for mop in isa.mops for seq in mop.uop_seq)
 
-    j, = _uops(isa, O.JMP)
+    j, = _uops(isa, U.UOP_JAL)
     assert j.dests[0].index.name == "rd"            # rd = pc + ilen, in the jump µop
 
-    jr, = _uops(isa, O.JMP_INDIRECT)
+    jr, = _uops(isa, U.UOP_JALR)
     assert jr.srcs[0].index.name == "rs1" and jr.dests[0].index.name == "rd"
 
 
@@ -194,8 +196,8 @@ def test_pc_is_not_a_register_class_but_still_has_a_width():
     # without these three — declared, and named from field_match.py.
     assert (isa.pc_width, isa.pc_align, isa.ilen_bytes) == (X_LEN, 4, 4)
     assert isa.pc_align_bits == 2                   # the two always-zero low bits
-    auipc, = _uops(isa, O.AUIPC)
-    beq,   = _uops(isa, O.BEQ)
+    auipc, = _uops(isa, U.UOP_AUIPC)
+    beq,   = _uops(isa, U.UOP_BEQ)
     # auipc is rd = pc + imm, but only the imm is nameable — see GAPS.
     assert [o.matcher.name for o in auipc.srcs] == ["imm_u"]
     assert beq.dests == ()                          # target is the control FU's
@@ -216,7 +218,7 @@ def test_the_mop_table_wraps_every_uop_template_exactly_once():
     for template in UOPS:
         assert sum(u is template for u in table) == 1, template.op.name
     for uop in table:
-        assert any(uop is template for template in UOPS), uop.op.name
+        assert any(uop is template for template in UOPS), uop.name
 
 
 def test_every_matcher_in_the_table_states_a_value():
@@ -229,12 +231,12 @@ def test_every_matcher_in_the_table_states_a_value():
         for seq in mop.uop_seq:
             for uop in seq.uops:
                 if uop.matcher_field is None:
-                    assert uop.matcher_value is None, uop.op.name
+                    assert uop.matcher_value is None, uop.name
                 else:
-                    assert uop.matcher_value is not None, uop.op.name
+                    assert uop.matcher_value is not None, uop.name
 
-    no_funct = [u.op.name for u in UOPS if u.matcher_field is None]
-    assert no_funct == ["MOV_IMM", "AUIPC", "JMP"]          # lui, auipc, jal
+    no_funct = [u.name for u in UOPS if u.matcher_field is None]
+    assert no_funct == ["LUI", "AUIPC", "JAL"]              # opcode alone
 
     # Every opcode in the table is distinct — 11 groups, 11 patterns.
     opcodes = [m.matcher_value.match_value for m in isa.mops]
@@ -243,7 +245,7 @@ def test_every_matcher_in_the_table_states_a_value():
 
     # ecall vs ebreak: identical but for the imm value, which now separates them.
     ecall, ebreak = U.UOP_ECALL, U.UOP_EBREAK
-    assert ecall.op is ebreak.op and ecall.matcher_field is ebreak.matcher_field
+    assert ecall.srcs == ebreak.srcs and ecall.matcher_field is ebreak.matcher_field
     assert ecall.matcher_value.match_value == (0b000000000000,)
     assert ebreak.matcher_value.match_value == (0b000000000001,)
     assert ecall != ebreak

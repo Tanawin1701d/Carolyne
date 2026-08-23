@@ -108,9 +108,9 @@ def test_value_union_runs_in_step_with_the_field_union():
 def test_the_holder_of_both_halves_checks_the_pairing():
     # Neither type can validate the other — a field does not know what values
     # test it, a value does not know its segments — so the holder does it.
-    from carolyne.isa import Mop, Op, Uop, UopSeq
+    from carolyne.isa import Mop, Uop, UopSeq
 
-    funct3, add = InstrFieldMatch("funct3", ((12, 15),)), Op("ADD")
+    funct3, add = InstrFieldMatch("funct3", ((12, 15),)), "ADD"
     uop = Uop(add, matcher_field=funct3, matcher_value=InstrValueMatch((0b000,)))
     assert uop.matcher_value.match_value == (0,)
 

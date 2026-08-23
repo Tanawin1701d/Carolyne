@@ -5,8 +5,8 @@
 # `Rv32i` is a SUBCLASS of IsaBase supplying every vocabulary as a field
 # DEFAULT, so `Rv32i()` is the whole description and `Rv32i(name=...)` varies
 # one part of it. It stays DATA — field defaults only, no override of
-# __post_init__ / op() / units_for() — so every inherited cross-check still
-# runs. All eleven fields are redeclared because a dataclass picks up a default
+# __post_init__ / uop() / units_for() — so every inherited cross-check still
+# runs. All ten fields are redeclared because a dataclass picks up a default
 # only through an ANNOTATED assignment; that is why the RegFile CLASS and this
 # ISA's one RegFile INSTANCE both appear below, the latter aliased X_FILE.
 #
@@ -31,14 +31,12 @@ from ..atomic_operand import AtomicOperand
 from ..exec_unit import ExecUnit
 from ..isa import IsaBase
 from ..mop import Mop
-from ..op import Op
 from ..operand import Operand
 from ..reg import RegFile                 # the CLASS, for the field annotations
 from ..uop import Uop
 from .field_match import ILEN_BYTES, PC_ALIGN, PC_WIDTH
 from .mop import MOP_TABLE
 from .exec_unit import exec_units
-from .op import OPS
 from .operand import (AOPR_DEST_1, AOPR_SRC_1, AOPR_SRC_2, AOPR_SRC_3,
                       OPR_IMMS, OPR_REGS)
 from .reg import RegFile as X_FILE        # the INSTANCE operand.py's rules target
@@ -61,7 +59,6 @@ class Rv32i(IsaBase):
     atomic_operands : Tuple[AtomicOperand, ...] = (AOPR_SRC_1, AOPR_SRC_2,
                                                    AOPR_SRC_3, AOPR_DEST_1)
     operands        : Tuple[Operand, ...]       = OPR_REGS + OPR_IMMS
-    ops             : Tuple[Op, ...]            = OPS
     exec_units      : Tuple[ExecUnit, ...]      = EXEC_UNITS
     uops            : Tuple[Uop, ...]           = UOPS
     mops            : Tuple[Mop, ...]           = MOP_TABLE

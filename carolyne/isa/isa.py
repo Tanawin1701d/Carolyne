@@ -1,8 +1,8 @@
 # IsaBase — the whole description of one ISA, and the single object a
 # generator is handed (uop_contract.md §6). It owns the vocabularies that
 # everything else in this layer refers to: the architectural register classes,
-# the operand cores and the slot rules built on them, the µop templates, the
-# ops the ISA speaks, the execution units the machine provides for them, and
+# the operand cores and the slot rules built on them, the µop templates the
+# ISA speaks, the execution units the machine provides for them, and
 # the mops binding encodings to µop sequences — plus the three addressing
 # scalars (pc_width, pc_align, ilen_bytes) saying where an instruction sits
 # and how long it is. The PC is not a register class (§4.3), but its width is
@@ -12,16 +12,16 @@
 # Every vocabulary is DECLARED, never derived from the mops, and the container
 # holds the mops to it one link at a time: a mop's µops must be declared, their
 # operands must be declared, and those operands' cores must be declared. Ops
-# match by VALUE (op.py); reg files, cores, operands and µops match by IDENTITY
+# reg files, cores, operands, µops and units all match by IDENTITY
 # — they are unhashable anyway, and a package shares its constants so that one
 # rule is one object. Declared-but-unused is legal throughout: a unit may list
-# ops this ISA never uses, and a rule may be written before a crack uses it.
+# µops this ISA never uses, and a rule may be written before a crack uses it.
 # LIMIT: the reg-file check walks what operands SELECT, not what their cores
 # offer, so a candidate no operand ever selects need not be declared.
 #
 # Named *Base* because a per-ISA package may subclass it for description
 # fields this container does not model (mini-x86 prefix/ModRM tables). A
-# subclass stays frozen=True and stays DATA: overriding op() / units_for() /
+# subclass stays frozen=True and stays DATA: overriding uop() / units_for() /
 # __post_init__ would put ISA-specific behavior on the elaborator's path.
 #
 # NOT here: the reset vector (machine configuration, not an ISA fact) and the
@@ -35,7 +35,6 @@ from .atomic_operand import (AtomicOperand, DEST_ROLES, OperandRole,
                              SRC_ROLES)
 from .exec_unit import ExecUnit
 from .mop import Mop
-from .op import Op
 from .operand import Operand
 from .reg import RegFile
 from .uop import Uop
@@ -45,16 +44,15 @@ from .uop import Uop
 _VOCABULARIES = (("reg_files",       RegFile),
                  ("atomic_operands", AtomicOperand),
                  ("operands",        Operand),
-                 ("ops",             Op),
                  ("exec_units",      ExecUnit),
                  ("uops",            Uop),
                  ("mops",            Mop))
 
 # How a duplicate is spotted. These three are looked up by name, so a repeated
-# NAME is the bug; the next three have no name to key on, so a repeated
-# INSTANCE is. (mops are in neither: nothing keys on them yet.)
-_NAMED     = ("reg_files", "ops", "exec_units")
-_ANONYMOUS = ("atomic_operands", "operands", "uops")
+# NAME is the bug; the next two have no name to key on, so a repeated INSTANCE
+# is. (mops are in neither: nothing keys on them yet.)
+_NAMED     = ("reg_files", "exec_units", "uops")
+_ANONYMOUS = ("atomic_operands", "operands")
 
 
 def _by_identity(items) -> Tuple:
@@ -84,8 +82,7 @@ class IsaBase:
     reg_files       : Tuple[RegFile, ...]       # architectural register classes
     atomic_operands : Tuple[AtomicOperand, ...] # the value/direction cores
     operands        : Tuple[Operand, ...]       # cores + encoding side: the slot rules
-    ops             : Tuple[Op, ...]            # the op vocabulary this ISA speaks
-    exec_units      : Tuple[ExecUnit, ...]      # units the machine provides for them
+    exec_units      : Tuple[ExecUnit, ...]      # units the machine provides
     uops            : Tuple[Uop, ...]           # the µop templates instructions crack to
     mops            : Tuple[Mop, ...]           # encoding → µop-sequence bindings
 
@@ -96,7 +93,7 @@ class IsaBase:
         self._normalize()
         self._reject_duplicates()
         self._reject_undeclared()
-        self._reject_unrunnable_ops()
+        self._reject_unrunnable_uops()
         self._reject_uncovered_operands()
 
     # --- construction checks --------------------------------------------------
@@ -169,7 +166,7 @@ class IsaBase:
         """Everything the mops reach must have been written down: the chain
         mop -> µop -> operand -> core, plus the reg files those select."""
         checks = (("uops",            self.used_uops(),
-                   lambda m: f"µop '{m.op.name}'"),
+                   lambda m: f"µop '{m.name}'"),
                   ("operands",        self.used_operands(),
                    lambda m: f"{m.role} operand on '{_label(m.target)}'"),
                   ("atomic_operands", self.used_atomic_operands(),
@@ -185,21 +182,13 @@ class IsaBase:
                         f"the ISA does not declare in {field} (matched by identity — "
                         f"declare the same instance the mops use)")
 
-        # Ops are the exception: they match by VALUE (op.py), so two files
-        # naming ADD name the same op and a fresh instance is no error.
-        declared_ops = frozenset(self.ops)
-        for op in self.used_ops():
-            if op not in declared_ops:
+    def _reject_unrunnable_uops(self) -> None:
+        for uop in self.uops:
+            if not any(unit.has(uop) for unit in self.exec_units):
                 raise ValueError(
-                    f"IsaBase '{self.name}': a mop uses op '{op.name}', "
-                    f"which the ISA does not declare in ops")
-
-    def _reject_unrunnable_ops(self) -> None:
-        for op in self.ops:
-            if not any(unit.has(op) for unit in self.exec_units):
-                raise ValueError(
-                    f"IsaBase '{self.name}': no exec unit executes op '{op.name}' "
-                    f"(units: {', '.join(u.name for u in self.exec_units)})")
+                    f"IsaBase '{self.name}': no exec unit executes µop '{uop.name}' "
+                    f"(units: {', '.join(u.name for u in self.exec_units)}; a unit lists "
+                    f"the same template instances the ISA declares)")
 
     # --- derived facts --------------------------------------------------------
     @property
@@ -234,18 +223,14 @@ class IsaBase:
         the elaborator builds one PRF per instance."""
         return _by_identity(o.target for o in self.used_operands() if o.is_arch)
 
-    def used_ops(self) -> frozenset:
-        """Every op named by a µop of some mop. A set, since ops match by value."""
-        return frozenset(uop.op for uop in self._uops())
-
-    def op(self, name: str) -> Op:
-        """Look an op up by name (encoding tables carry text)."""
-        for candidate in self.ops:
+    def uop(self, name: str) -> Uop:
+        """Look a µop template up by name (encoding tables carry text)."""
+        for candidate in self.uops:
             if candidate.name == name:
                 return candidate
         raise ValueError(
-            f"IsaBase '{self.name}': no op named '{name}' "
-            f"(has: {', '.join(sorted(o.name for o in self.ops))})")
+            f"IsaBase '{self.name}': no µop named '{name}' "
+            f"(has: {', '.join(sorted(u.name for u in self.uops))})")
 
     def unit(self, name: str) -> ExecUnit:
         for candidate in self.exec_units:
@@ -263,10 +248,10 @@ class IsaBase:
             f"IsaBase '{self.name}': no register file named '{name}' "
             f"(has: {', '.join(sorted(r.name for r in self.reg_files))})")
 
-    def units_for(self, op: Op) -> Tuple[ExecUnit, ...]:
-        """Units that can execute this op — the kind→FU map, read out. More
+    def units_for(self, uop: Uop) -> Tuple[ExecUnit, ...]:
+        """Units that can execute this µop — the kind→FU map, read out. More
         than one is legal: picking one is the elaborator's choice."""
-        return tuple(unit for unit in self.exec_units if unit.has(op))
+        return tuple(unit for unit in self.exec_units if unit.has(uop))
 
     def src_atomic_operands_for(self, unit: ExecUnit) -> Tuple[AtomicOperand, ...]:
         """The slots this exec unit READS — its declared port shape, which is
@@ -296,19 +281,19 @@ class IsaBase:
     def _reject_uncovered_operands(self) -> None:
         """No µop may ask a unit for a slot the unit has not got.
 
-        Every unit executing the µop's op must cover it: which unit issues a
-        µop is the elaborator's routing choice, so a µop has to run on ANY of
-        them. This is the check the declared port shape buys — without it, a
-        unit's shape and the instructions using it could drift apart silently.
+        Every unit listing the µop must cover it: which unit issues a µop is
+        the elaborator's routing choice, so a µop has to run on ANY of them.
+        This is the check the declared port shape buys — without it, a unit's
+        shape and the instructions using it could drift apart silently.
         """
         for uop in self._uops():
-            for unit in self.units_for(uop.op):
+            for unit in self.units_for(uop):
                 for operand in uop.srcs + uop.dests:
                     if unit.covers(operand.atomic):
                         continue
                     named = operand.atomic.name or f"<{operand.role} slot>"
                     raise ValueError(
-                        f"IsaBase '{self.name}': µop '{uop.op.name}' fills a "
+                        f"IsaBase '{self.name}': µop '{uop.name}' fills a "
                         f"{operand.role} slot '{named}' that exec unit "
                         f"'{unit.name}' does not declare — a unit states the slots "
                         f"it has, and an instruction may not ask for another")

@@ -2,9 +2,8 @@
 #
 # It supplies the deliverables of uop_contract.md §6 that have types today:
 #   reg.py     — architectural register classes (§6.1); x only, PC is not one
-#   op.py      — the op vocabulary alone (§1.2)
 #   exec_unit.py — the machine's execution units, and AluUnit: what the
-#                integer ops COMPUTE, written against isa/exec_context.py
+#                integer µops COMPUTE, written against isa/exec_context.py
 #   field_match.py — where each encoding field lives in the 32-bit word
 #                (§6.2), the six base formats as unions of those fields, and
 #                the addressing group PC_WIDTH / PC_ALIGN / ILEN_BYTES that
@@ -12,7 +11,8 @@
 #                a fixed-length ISA does not need)
 #   operand.py — the rd/rs1/rs2 index rules and the six immediate rules,
 #                bound to those field positions (OPR_* constants)
-#   uop.py     — one µop template per instruction of the RV32I listing (§6.4)
+#   uop.py     — one µop template per instruction of the RV32I listing (§6.4),
+#                each naming itself: there is no op vocabulary beside it
 #   mop.py     — MOP_TABLE, the Mop groups binding encodings to those templates
 #   rv32i.py   — the IsaBase assembly
 # Not supplied: the trap policy (§6.5), which has no type yet.
@@ -42,16 +42,15 @@ from .operand import (OPR_IMM_B, OPR_IMM_I, OPR_IMM_J, OPR_IMM_S, OPR_IMM_U,
                       OPR_IMM_SHAMT, OPR_IMMS, OPR_RD, OPR_REGS, OPR_RS1,
                       OPR_RS2)
 from .mop import MOP_TABLE
-from .op import OPS
 from .reg import ImmTarget, RegFile, X_LEN, x_file
 from .rv32i import Rv32i
-from .uop import UOPS
+from .uop import BRANCHES, LOADS, STORES, UOPS
 
 __all__ = [
-    "Rv32i", "MOP_TABLE", "OPS", "exec_units", "AluUnit",
+    "Rv32i", "MOP_TABLE", "exec_units", "AluUnit",
     "PC_WIDTH", "PC_ALIGN", "ILEN_BYTES",
     "RegFile", "ImmTarget", "X_LEN", "x_file",
     "OPR_RD", "OPR_RS1", "OPR_RS2", "OPR_REGS",
     "OPR_IMM_I", "OPR_IMM_S", "OPR_IMM_B", "OPR_IMM_U", "OPR_IMM_J",
-    "OPR_IMM_SHAMT", "OPR_IMMS", "UOPS",
+    "OPR_IMM_SHAMT", "OPR_IMMS", "UOPS", "LOADS", "STORES", "BRANCHES",
 ]

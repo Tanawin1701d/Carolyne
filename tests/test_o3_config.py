@@ -3,7 +3,7 @@
 
 import pytest
 
-from carolyne.isa import ExecUnit, Op
+from carolyne.isa import ExecUnit, Uop
 from carolyne.isa.riscv import Rv32i, x_file
 from carolyne.uarch.o3.config import CPUO3_Config, RsvSpec, RsvType
 
@@ -67,13 +67,14 @@ def test_rename_must_have_a_spare_physical_register():
 
 
 def test_every_op_the_isa_uses_must_reach_a_station():
-    # The machine-level counterpart of IsaBase's unrunnable-op check: a unit the
+    # The machine-level counterpart of IsaBase's unrunnable-µop check: a unit the
     # ISA declares but no station feeds cannot execute anything.
     alu_only = tuple(u for u in UNITS if u.name == "alu")
-    with pytest.raises(ValueError, match="no reservation station can issue op"):
+    with pytest.raises(ValueError, match="no reservation station can issue"):
         _cfg(rsv_specs=(RsvSpec(True, 16, alu_only, RsvType.RSV_EXEC),))
     with pytest.raises(ValueError, match="does not declare"):
-        _cfg(rsv_specs=(RsvSpec(True, 16, (ExecUnit("crypto", {Op("AES")}),), RsvType.RSV_EXEC),))
+        _cfg(rsv_specs=(RsvSpec(True, 16, (ExecUnit("crypto", (Uop("AES"),)),),
+                                RsvType.RSV_EXEC),))
     with pytest.raises(ValueError, match="nothing can execute"):
         _cfg(rsv_specs=())
 
@@ -87,7 +88,8 @@ def test_a_station_is_checked_on_its_own_terms():
         RsvSpec(1, 16, UNITS, RsvType.RSV_BRANCH)
     alu_only = tuple(u for u in UNITS if u.name == "alu")
     station  = RsvSpec(False, 8, alu_only, RsvType.RSV_EXEC)
-    assert station.label == "alu" and ISA.op("ADD") in station.ops
+    assert station.label == "alu"
+    assert any(u is ISA.uop("ADD") for u in station.uops)
 
 
 def test_a_station_states_what_kind_it_is():

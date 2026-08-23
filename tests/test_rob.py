@@ -10,7 +10,7 @@ import pytest
 from kathryn import Module, _session, init, reset
 
 from carolyne.isa import (AtomicOperand, ExecUnit, FieldRef, InstrFieldMatch,
-                          Intermediate, IsaBase, Mop, Op, Operand, OperandRole,
+                          Intermediate, IsaBase, Mop, Operand, OperandRole,
                           RegFile, TargetKind, Uop, UopSeq)
 from carolyne.isa.riscv import Rv32i
 from carolyne.uarch.o3.config import CPUO3_Config, RsvSpec, RsvType
@@ -99,12 +99,11 @@ def test_a_one_register_class_has_no_architectural_index_to_store():
 
     core = AtomicOperand(OperandRole.DEST_W_REQ, "flags_out", reg_file=flags)
     opr  = Operand(core, TargetKind.ARCH)          # no index: one register
-    op   = Op("ADD")
-    unit = ExecUnit("alu", {op}, dest_operands=(core,))
-    uop  = Uop(op, dests=(opr,))
+    uop  = Uop("ADD", dests=(opr,))
+    unit = ExecUnit("alu", (uop,), dest_operands=(core,))
     isa  = IsaBase(name="toy", pc_width=32, pc_align=4, ilen_bytes=4,
                    reg_files=(flags,), atomic_operands=(core,), operands=(opr,),
-                   ops=(op,), exec_units=(unit,), uops=(uop,),
+                   exec_units=(unit,), uops=(uop,),
                    mops=(Mop(matcher_field=InstrFieldMatch("opcode", ((0, 7),)),
                              uop_seq=(UopSeq(uops=(uop,)),)),))
     cfg  = CPUO3_Config(isa=isa, fe_lanes=1, commit_lanes=1,
@@ -133,12 +132,11 @@ def test_a_utemp_destination_has_nothing_to_retire():
 def test_an_unnamed_destination_cannot_name_its_fields():
     unnamed = AtomicOperand(OperandRole.DEST, reg_file=X)
     opr     = Operand(unnamed, TargetKind.ARCH, FieldRef("rd"))
-    op      = Op("ADD")
-    unit    = ExecUnit("alu", {op}, dest_operands=(unnamed,))
-    uop     = Uop(op, dests=(opr,))
+    uop     = Uop("ADD", dests=(opr,))
+    unit    = ExecUnit("alu", (uop,), dest_operands=(unnamed,))
     isa     = IsaBase(name="toy", pc_width=32, pc_align=4, ilen_bytes=4,
                       reg_files=(X,), atomic_operands=(unnamed,), operands=(opr,),
-                      ops=(op,), exec_units=(unit,), uops=(uop,),
+                      exec_units=(unit,), uops=(uop,),
                       mops=(Mop(matcher_field=InstrFieldMatch("opcode", ((0, 7),)),
                                 uop_seq=(UopSeq(uops=(uop,)),)),))
     with pytest.raises(ValueError, match="no name"):

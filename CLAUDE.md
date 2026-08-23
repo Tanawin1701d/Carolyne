@@ -167,25 +167,36 @@ one file and was folded in the same day; don't recreate it.
 Immediates are deliberately NOT an `Operand` target — the µop record carries
 `imm` as its own field (contract §2).
 
-- **`Op(name)`** — one operation kind, a first-class object rather than a
-  bare string (still not an enum: a custom-FU op must be as first-class as
-  `ADD`). Decision: **standalone**, not owned by a unit — the same `Op` may
-  sit in several `ExecUnit`s. Value equality on the name (`Op("ADD") ==
-  Op("ADD")`), so two description files naming the same op build µops that
-  match; identity semantics stay with `Intermediate`. v0.1 carries the name
-  only — the object exists so latency/arity/FU hooks have a home when a
-  consumer needs them.
-- **`ExecUnitBase(name, ops, src_operands=(), dest_operands=(), needs=())`** —
-  one execution-unit class; `ops` is a frozenset of `Op`s (non-`Op` members
-  raise, never promoted from strings — a stray `"ADD"` would compare unequal to
-  everyone else's `Op("ADD")`). `unit.op("ADD")` is the one sanctioned text→`Op`
-  door, for encoding-table rows. Decision (2026-08-19): the unit DECLARES its
+- **No `Op` type.** One existed until 2026-08-23 — a frozen `name` and
+  nothing else, value-equal, standalone so several units could list it — and
+  was removed: **the µop template IS the kind**, and `Uop` now carries the
+  name. Two reasons, one from each plane. From the HARDWARE side: no record
+  ever carried an op index. The kind field every record has is `uop_idx`
+  (`ceil_log2(len(isa.uops))`), so `ExecContext.op_is()` had nothing to compare
+  against and the generator would have had to build a uop→op decoder to
+  implement it. From the DESCRIPTION side: an `Op` said only what a `Uop.name`
+  says, so the vocabulary was written down twice and `IsaBase` had to
+  cross-check the halves. COST, and it is real: an operation encoded twice is
+  now two templates, so RV32I's ALU lists 21 (`ADD` *and* `ADDI`, `SLL` *and*
+  `SLLI`) where it declared 12 ops, and a stage body guards on both — which
+  `AluUnit`'s `out((UOP_ADD, UOP_ADDI), a + b)` does with one OR-ed guard per
+  result. Bought with it: `uop_is` is a compare against the field the record
+  already has. Don't restore `Op` from git.
+- **`ExecUnitBase(name, uops, src_operands=(), dest_operands=(), needs=())`** —
+  one execution-unit class; `uops` is a TUPLE of the `Uop` templates it runs,
+  matched by IDENTITY (non-`Uop` members raise, never promoted from strings).
+  A tuple, not a frozenset, because a `Uop` reaches a `RegFile`, which holds a
+  dict, so it is unhashable — the same bargain `IsaBase` already makes for
+  cores, operands and reg files. Listed once by instance and named apart:
+  `unit.uop("ADD")` is the one sanctioned text→template door, for
+  encoding-table rows, and it hands back the INSTANCE, which is what identity
+  membership needs. Decision (2026-08-19): the unit DECLARES its
   operand slots — its PORT SHAPE, what a read/write port is sized from — where
   `src_/dest_atomic_operands_for(unit)` used to DERIVE them by walking the
   mops. Deriving made a unit's shape depend on which mops happened to exist;
   declaring makes it a statement, and `IsaBase._reject_uncovered_operands` then
   holds every µop to it: a µop may not fill a slot its unit has not got, and
-  EVERY unit claiming the op must cover it, since routing is the elaborator's
+  EVERY unit listing the µop must cover it, since routing is the elaborator's
   choice. Covering is by IDENTITY, the discipline the layer already runs on —
   LIMIT, and it will matter for x86: a µtemp core built per crack cannot be
   declared in advance, so µtemp slots will need a name-and-shape rule when
@@ -199,24 +210,29 @@ Immediates are deliberately NOT an `Operand` target — the µop record carries
   early. `ExecUnit` is an alias of the base, the name a unit with no semantics
   is built under.
 - **No catalog ships in code.** The §1.2 op/unit table is spec text; every
-  ISA/machine declares its own `Op`s and `ExecUnit`s (see the header block
+  ISA/machine declares its own `Uop`s and `ExecUnit`s (see the header block
   of `tests/test_uop.py`). Reason: importable `ALU`/`ADD` constants would
-  make the natives privileged over an op a custom FU declares — the exact
+  make the natives privileged over a µop a custom FU declares — the exact
   distinction this layer refuses to make — and nothing consumes such a list
   yet. `STANDARD_UNITS`/`STANDARD_OPS` existed briefly on 2026-08-14 and
   were deleted; don't restore them from git.
-- **`Uop(op, srcs, dests, imm)`** — one µop template. Decision: the template
-  names **only its `Op`**, no unit — which FU executes a kind is a machine
-  configuration question answered by the unit set (`ExecUnit.ops` read the
-  other way round), and an op two units both list is a routing choice, not
-  an error. Cost of dropping `unit`: a bogus op survives construction — it is
-  `IsaBase` that refuses it. Operand counts are capped at the record shape
+- **`Uop(name, srcs, dests, matcher_field, matcher_value)`** — one µop
+  template, and since 2026-08-23 the KIND itself: `name` is what this operation
+  IS (`"ADD"`, `"ADDI"`), required, non-empty, held unique across the ISA by
+  `IsaBase`, and the hardware plane speaks the same vocabulary as `uop_idx`.
+  Decision: the template names **only itself**, no unit — which FU executes a
+  kind is a machine configuration question answered by the unit set
+  (`ExecUnit.uops` read the other way round), and a µop two units both list is
+  a routing choice, not an error. Cost of dropping `unit`: a bogus µop survives
+  construction — it is `IsaBase` that refuses it. Templates match by IDENTITY
+  everywhere (a re-spelt `Uop("ADD")` is a DIFFERENT µop), which is why a
+  package shares template constants the way it shares operand ones. Operand counts are capped at the record shape
   (≤3 src, ≤2 dest, §2). `imm` is `int`
   (cracker-baked constant, x86 push→ESP−4) or `FieldRef` (extracted field).
   No first/last bound on the type — that comes from position in the cracker
   sequence (later); mem/br sub-fields deferred until FU semantics land. An
   instruction family sharing one shape is a factory function in the per-ISA
-  package, not a multi-op field (a multi-op `ops` was tried and reverted: the
+  package, not a multi-op field (a multi-op `ops` field was tried and reverted: the
   record carries exactly one `kind`, so a family would be an unbound template
   every consumer must handle).
 
@@ -258,30 +274,33 @@ Immediates are deliberately NOT an `Operand` target — the µop record carries
   (`InstrFieldMatch` only): it says where an index or immediate is READ from
   and tests nothing.
 - **`IsaBase(name, pc_width, pc_align, ilen_bytes, reg_files, atomic_operands,
-  operands, ops, exec_units, uops, mops)`** (`isa.py`) — the
-  whole ISA, the object a generator is handed. Decision: `ops` and
+  operands, exec_units, uops, mops)`** (`isa.py`) — the
+  whole ISA, the object a generator is handed. There is no `ops` vocabulary:
+  the µops ARE it (2026-08-23). Decision: `uops` and
   `reg_files` are **declared, not derived** from the mops — deriving would
-  make a typo self-consistent. It cross-checks at construction: every op and
-  every reg file a mop's µops use must be declared, and every declared op
+  make a typo self-consistent. It cross-checks at construction: every µop and
+  every reg file a mop's µops use must be declared, and every declared µop
   must be executable by ≥1 unit; the reverse (a unit listing unused ops, a
   declared-but-unused reg file) is allowed, so unit definitions can be shared
   and a class can be declared before a crack touches it. Reg files match by
   **identity** — one PRF per instance, and `RegFile` holds a dict so it is
-  unhashable anyway. Names unique per vocabulary. Lookups: `op(name)`,
-  `unit(name)`, `reg_file(name)`, `units_for(op)` (the kind→FU map read out),
-  `used_ops()`, `used_reg_files()`, `used_uops()`, `used_operands()`,
+  unhashable anyway. Names unique per vocabulary — µops joined the NAME-keyed
+  half when they took their names, so a duplicated template reads as
+  "duplicate uops name 'ADD'". Lookups: `uop(name)`,
+  `unit(name)`, `reg_file(name)`, `units_for(uop)` (the kind→FU map read out),
+  `used_reg_files()`, `used_uops()`, `used_operands()`,
   `used_atomic_operands()`. Decision (2026-08-19): **`src_atomic_operands_for(unit)`
   / `dest_atomic_operands_for(unit)`** read `units_for()` the long way round —
-  unit → its ops → the µops some mop cracks to → their slots → the cores —
+  unit → the µops some mop cracks to → their slots → the cores —
   because the elaborator building ONE FU has to size that unit's operand ports
   and the container could only answer the question the other way. Two public
   halves over one private `_atomic_operands_for(unit, roles)`, because src
   cores size READ ports and dest cores size WRITE ports; the halves are
   disjoint by construction, since role lives in the core and `Uop` cross-checks
   it against slot position. It walks what the MOPS reach, not the declared
-  `uops`; ops match by VALUE so a unit built from a fresh `Op("ADD")` still
-  matches, everything below by identity. An undeclared unit is not rejected
-  (neither is `units_for`'s op) but a non-`ExecUnit` is, pointing at
+  `uops`; everything matches by identity, so a unit lists the very template
+  instances the mops name. An undeclared unit is not rejected
+  (neither is `units_for`'s µop) but a non-`ExecUnit` is, pointing at
   `self.unit(name)`. Core NAMES are also held unique here — unnamed ones
   skipped — since a name becomes a field name downstream. Decision (2026-08-15): `atomic_operands`,
   `operands` and `uops` are declared on the same terms — the ISA writes its
@@ -331,17 +350,18 @@ Immediates are deliberately NOT an `Operand` target — the µop record carries
 TEMPLATE skeleton: `reg.py` (`x_file()` → x0..x31, x0 via `const_regs`;
 **PC is deliberately not a register class** — it is front-end/ROB state, not
 something the engine renames through a PRF port, so a 1-entry `pc` file was
-drafted and deleted), `op.py` (its own op vocabulary — no
-shipped catalog), `exec_unit.py` (`exec_units()` + `AluUnit`, the units the
+drafted and deleted), `exec_unit.py` (`exec_units()` + `AluUnit`, the units the
 machine provides and what the ALU computes), `field_match.py` (32-bit field positions, the addressing group
 `PC_WIDTH = X_LEN` / `PC_ALIGN = 4` / `ILEN_BYTES = 4` that `Rv32i` names as its
 three scalar defaults,
 and `FORMATS` = the six base formats R/I/S/B/U/J as `union`s of those fields,
 each tiling the word exactly once — declared but not yet consumed, since a
-`Mop` has no format slot), `uop.py` (`UOP_*` + `UOPS`), `mop.py` (`MOP_*` +
+`Mop` has no format slot), `uop.py` (`UOP_*` + `UOPS`, plus the `LOADS` /
+`STORES` / `BRANCHES` groups the units build from — it is the whole operation
+vocabulary since `op.py` went on 2026-08-23), `mop.py` (`MOP_*` +
 `MOP_TABLE` → 11 opcode-group `Mop`s, exhaustive over `UOPS`), `rv32i.py`
-(`Rv32i`, an `IsaBase` **subclass** — op.py also holds the ALU's semantics,
-`AluUnit`, see the `ExecContext` entry below — supplying every vocabulary as a field
+(`Rv32i`, an `IsaBase` **subclass** — exec_unit.py also holds the ALU's
+semantics, `AluUnit`, see the `ExecContext` entry below — supplying every vocabulary as a field
 default — `Rv32i()` is the whole description, and `Rv32i(name=...)` varies one
 part without a builder signature for the rest; it stays DATA, no method
 override, so every inherited cross-check still runs. An `rv32i()` factory stood
@@ -391,13 +411,13 @@ add-vs-sub and ecall-vs-ebreak are genuinely distinguishable, and
 `check_matcher_pair` catches a mis-sized value at import.
 
 One gap was closed by enumerating instead of extending the record: memory
-width/sign and branch condition are **distinct ops** (`LB/LH/LW/LBU/LHU`,
+width/sign and branch condition are **distinct µops** (`LB/LH/LW/LBU/LHU`,
 `SB/SH/SW`, `BEQ/BNE/BLT/BGE/BLTU/BGEU`, tuples `LOADS`/`STORES`/`BRANCHES`),
-and `AUIPC` is its own op rather than an `ADD` missing its PC source. Generic
+and `AUIPC` is its own µop rather than an `ADD` missing its PC source. Generic
 `LOAD`/`STORE`/`BR_COND` kinds would have needed record sub-fields that only
-those kinds read — a second way of saying what `kind` already says. Cost: 32
-ops and more cases per FU; benefit: the §2 record stays as written and the
-decoder never fills a field it doesn't understand.
+those kinds read — a second way of saying what `kind` already says. Cost: 40
+templates and more cases per FU; benefit: the §2 record stays as written and
+the decoder never fills a field it doesn't understand.
 
 A first `Layout`/`Mop` pair (encoding metadata + macro-op variants binding an
 encoding to a µop sequence) was written and then removed as sloppy, and the
@@ -429,9 +449,11 @@ to comply, and the module itself imports nothing AT ALL (the type hints are
 `Any`; the values are opaque on purpose), so it adds no edge inside `isa`
 either and a plain same-package import needs no `TYPE_CHECKING` guard. The surface is
 `src`/`write`/`keep`/`kept` plus the flow three
-`when`/`until`/`while_` (zif/scwait/cwhile), and TWO additions: **`op_is(op)`**, because one
-unit serves every kind it declares so a body must branch on the record's kind
-(Ops compare by value, so the description's constant is the key), and
+`when`/`until`/`while_` (zif/scwait/cwhile), and TWO additions: **`uop_is(uop)`**
+(named `op_is` until 2026-08-23), because one
+unit serves every kind it declares so a body must branch on the record's kind —
+and the kind the record HAS is `uop_idx`, so the key is the description's own
+template constant and the compare is against the field that exists — and
 **`pc()`**, because the record carries the µop's own PC (the RSV entry already
 stores it) and that is the one PC-relative input no operand can name. `pc()`
 is what closes the auipc/link-value gap in the contract direction.
@@ -455,19 +477,20 @@ on a runtime value — elaboration runs every block whatever the values).
 **`AluUnit`** (`riscv/exec_unit.py`) is RV32I's first semantics, an
 `ExecUnitBase` subclass. Decision (2026-08-22): it and `exec_units()` live in
 their own module, the `riscv/` half of the `isa/exec_unit.py` pairing every
-other file in this package already has (`op`, `operand`, `reg`, `mop`, `uop`,
+other file in this package already has (`operand`, `reg`, `mop`, `uop`,
 `field_match`). They move TOGETHER, which is what makes the split legal: the
-factory needs the class and the class needs the ops, so moving the class alone
-would have op.py import the new module while the new module imports op.py — a
-cycle. Moving both leaves the dependency one-way, and `op.py` falls to a SINGLE
-import (`..op.Op`), no longer reaching operand.py or reg.py for the unit
-declarations — the op vocabulary is now standalone, which is what it always
-claimed to be. Ops are referenced `O.ADD` through `from . import op as O`, the
-spelling `uop.py` already uses. All twelve ops write ONE destination through a
-local `out(op, value)` helper, so the body is a list of guarded results and the
-op-guards are mutually exclusive by construction — which is why it states NO
-priority: the "equal priority is not statement order" trap needs two drivers
-that can be live at once, and `op_is` guarantees they cannot. `ctx.src("src_1")`
+factory needs the class and the class needs the vocabulary, so moving the class
+alone would have the vocabulary file import the new module while the new module
+imports it back — a cycle. Moving both leaves the dependency one-way; since
+2026-08-23 the vocabulary it reads is `uop.py` itself, so a unit is declared
+from the very templates the mops name. µops are referenced `U.UOP_ADD` through `from . import uop as U`.
+All twenty-one templates write ONE destination through a local
+`out(uops, value)` helper that takes ONE template or a GROUP of them — the
+register form and its immediate form compute the same thing off src_2, so they
+share one OR-ed guard — and the body is a list of guarded results whose guards
+are mutually exclusive by construction. Which is why it states NO priority: the
+"equal priority is not statement order" trap needs two drivers that can be live
+at once, and `uop_is` guarantees they cannot. `ctx.src("src_1")`
 is safe for the same reason the port shape is declared: `_reject_uncovered_operands`
 has already held every ALU µop to the two slots the unit declares, so a name the
 body reads is a name the record has. MOV_IMM passes src_2 through (the assembled

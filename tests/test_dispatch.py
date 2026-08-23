@@ -9,7 +9,7 @@ import pytest
 from kathryn import Module, _session, init, reset
 
 from carolyne.isa import (AtomicOperand, ExecUnit, FieldRef, InstrFieldMatch,
-                          Intermediate, IsaBase, Mop, Op, Operand, OperandRole,
+                          Intermediate, IsaBase, Mop, Operand, OperandRole,
                           RegFile, TargetKind, Uop, UopSeq)
 from carolyne.isa.riscv import Rv32i
 from carolyne.uarch.o3.config import CPUO3_Config, RsvSpec, RsvType
@@ -170,13 +170,12 @@ def test_an_unnamed_operand_cannot_name_its_fields():
     dest    = AtomicOperand(OperandRole.DEST, "dest_1", reg_file=X)
     src_opr = Operand(unnamed, TargetKind.ARCH, FieldRef("rs1"))
     dst_opr = Operand(dest,    TargetKind.ARCH, FieldRef("rd"))
-    op      = Op("ADD")
-    unit    = ExecUnit("alu", {op}, src_operands=(unnamed,),
+    uop     = Uop("ADD", srcs=(src_opr,), dests=(dst_opr,))
+    unit    = ExecUnit("alu", (uop,), src_operands=(unnamed,),
                        dest_operands=(dest,))
-    uop     = Uop(op, srcs=(src_opr,), dests=(dst_opr,))
     isa     = IsaBase(name="toy", pc_width=32, pc_align=4, ilen_bytes=4,
                       reg_files=(X,), atomic_operands=(unnamed, dest),
-                      operands=(src_opr, dst_opr), ops=(op,), exec_units=(unit,),
+                      operands=(src_opr, dst_opr), exec_units=(unit,),
                       uops=(uop,),
                       mops=(Mop(matcher_field=InstrFieldMatch("opcode", ((0, 7),)),
                                 uop_seq=(UopSeq(uops=(uop,)),)),))
@@ -191,12 +190,11 @@ def test_a_one_register_class_has_no_architectural_index_to_store():
     flags = RegFile("flags", 6, 1)
     core  = AtomicOperand(OperandRole.DEST_W_REQ, "flags_out", reg_file=flags)
     opr   = Operand(core, TargetKind.ARCH)
-    op    = Op("ADD")
-    unit  = ExecUnit("alu", {op}, dest_operands=(core,))
-    uop   = Uop(op, dests=(opr,))
+    uop   = Uop("ADD", dests=(opr,))
+    unit  = ExecUnit("alu", (uop,), dest_operands=(core,))
     isa   = IsaBase(name="toy", pc_width=32, pc_align=4, ilen_bytes=4,
                     reg_files=(flags,), atomic_operands=(core,), operands=(opr,),
-                    ops=(op,), exec_units=(unit,), uops=(uop,),
+                    exec_units=(unit,), uops=(uop,),
                     mops=(Mop(matcher_field=InstrFieldMatch("opcode", ((0, 7),)),
                               uop_seq=(UopSeq(uops=(uop,)),)),))
     cfg = CPUO3_Config(isa=isa, fe_lanes=1, commit_lanes=1,
