@@ -50,8 +50,11 @@ from carolyne.uarch.o3.operand_field import (ACTIVE, AR_IDX, DATA, PR_IDX,
                                              operand_fields)
 from carolyne.uarch.o3.rsv_helper import rsv_id_width
 
-SRC_KINDS  = (VALID, DATA, PR_IDX, AR_IDX, ACTIVE)
-DEST_KINDS = (PR_IDX, AR_IDX, ACTIVE, WB_REQUIRED)
+# In operand_field.KIND_ORDER, which is the order the fields land in — every
+# record here lists its kinds the same way, so the groups can be read against
+# each other.
+SRC_KINDS  = (ACTIVE, VALID, DATA, PR_IDX, AR_IDX)
+DEST_KINDS = (ACTIVE, WB_REQUIRED, PR_IDX, AR_IDX)
 
 # The two that need an architectural class to mean anything.
 _INDEX_KINDS = (PR_IDX, AR_IDX)
@@ -59,6 +62,31 @@ _INDEX_KINDS = (PR_IDX, AR_IDX)
 
 class DispatchBase(Karray):
 
+    #  HALF A BUS — the fields below are the machine's, the same for every
+    #  ISA. build_dispatch() ADDS one group per atomic operand the ISA
+    #  declares, core-wide:
+    #
+    #      per src core    active_<n>  valid_<n>  data_<n>
+    #                      pr_idx_<n>  ar_idx_<n>
+    #      per dest core   active_<n>  wb_required_<n>
+    #                      pr_idx_<n>  ar_idx_<n>
+    #
+    #  <n> is the core's own name, and a group lands in operand_field's
+    #  KIND_ORDER; both indexes drop on a core that only ever names a µtemp.
+    #  RV32I builds:
+    #
+    #      valid  is_spec  spec_tag  uop_idx  rob_des_idx         <- declared
+    #      rsv_id  is_branch  is_store  pc  npc
+    #      active_src_1   valid_src_1  data_src_1                 <- added
+    #                     pr_idx_src_1  ar_idx_src_1
+    #      active_src_2   valid_src_2  data_src_2
+    #                     pr_idx_src_2  ar_idx_src_2
+    #      active_src_3   valid_src_3  data_src_3
+    #      active_dest_1  wb_required_dest_1
+    #                     pr_idx_dest_1  ar_idx_dest_1
+    #
+    #  Which is why a reader downstream copies BY NAME (dispatch_field_names)
+    #  and never by position.
     valid       = kaf(1)
     # speculative
     is_spec     = kaf(1)

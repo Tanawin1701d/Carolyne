@@ -29,6 +29,22 @@ from carolyne.uarch.o3.operand_field import (ACTIVE, AR_IDX, PR_IDX, WB_REQUIRED
 
 
 class RobEntry(Karray):
+
+    #  HALF A RECORD. build_rob_table() ADDS one group per DESTINATION core
+    #  the ISA declares — sources are a station's business, what retires is a
+    #  write:
+    #
+    #      per dest core   active_<n>  wb_required_<n>  pr_idx_<n>  ar_idx_<n>
+    #
+    #  <n> is the core's own name, and a group lands in operand_field's
+    #  KIND_ORDER; ar_idx drops on a one-register class.
+    #  RV32I, whose only destination core is dest_1, builds:
+    #
+    #      wb_fin  is_branch  is_store  pc                        <- declared
+    #      active_dest_1  wb_required_dest_1                      <- added
+    #      pr_idx_dest_1  ar_idx_dest_1
+    #
+    #  build_rob_dispatch() puts a `valid` bit on top, for its wire rows only.
     wb_fin    = kaf(1)
     is_branch = kaf(1)
     is_store  = kaf(1)

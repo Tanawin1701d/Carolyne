@@ -23,7 +23,8 @@ from carolyne.uarch.o3.rsv_helper import rsv_id_width
 ISA = Rv32i()
 X   = ISA.reg_file("x")
 
-ALL_KINDS = ("valid", "data", "pr_idx", "ar_idx", "active", "wb_required")
+# operand_field.KIND_ORDER — the order a group's fields land in.
+ALL_KINDS = ("active", "valid", "wb_required", "data", "pr_idx", "ar_idx")
 
 
 def _cfg(**overrides):
@@ -66,12 +67,12 @@ def test_a_dispatch_row_is_one_group_per_operand():
 
     # A source off a register class: it waits on a value, so it carries the
     # value and both indexes.
-    assert by_name["src_1"] == ["valid", "data", "pr_idx", "ar_idx", "active"]
-    assert by_name["src_2"] == ["valid", "data", "pr_idx", "ar_idx", "active"]
+    assert by_name["src_1"] == ["active", "valid", "data", "pr_idx", "ar_idx"]
+    assert by_name["src_2"] == ["active", "valid", "data", "pr_idx", "ar_idx"]
     # RV32I's immediate names no register class, so neither index is there.
-    assert by_name["src_3"] == ["valid", "data", "active"]
+    assert by_name["src_3"] == ["active", "valid", "data"]
     # A destination: where the result goes, and whether it must land first.
-    assert by_name["dest_1"] == ["pr_idx", "ar_idx", "active", "wb_required"]
+    assert by_name["dest_1"] == ["active", "wb_required", "pr_idx", "ar_idx"]
 
 
 def test_a_lane_carries_the_machine_fields_beside_its_operands():
@@ -128,7 +129,7 @@ def test_an_operand_with_no_class_carries_neither_index():
     imm  = next(a for a in named_atomic_operands(ISA, "dispatch") if not a.has_arch)
 
     assert imm.name == "src_3"
-    assert dispatch_operand_kinds(imm) == ("valid", "data", "active")
+    assert dispatch_operand_kinds(imm) == ("active", "valid", "data")
     assert not _has_field(host.bus, "pr_idx_src_3")
     assert not _has_field(host.bus, "ar_idx_src_3")
 

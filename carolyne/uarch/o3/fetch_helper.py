@@ -22,6 +22,14 @@ from carolyne.uarch.o3.config import CPUO3_Config
 
 class FetchDT(Karray):
 
+    #  THE WHOLE RECORD — build_fetch_table() adds NOTHING:
+    #
+    #      pc  instr
+    #
+    #  Fetch runs before decode, so no field here varies with the ISA's
+    #  operands; the builder only SIZES these two (pc_width, ilen_bytes * 8).
+    #  Unsized kaf() = every instantiation must state a width, which is what
+    #  keeps a 64-bit ISA from silently inheriting RV32I's 32.
     pc    = kaf()
     instr = kaf()
 

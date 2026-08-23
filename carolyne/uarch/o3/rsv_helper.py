@@ -35,6 +35,29 @@ from carolyne.uarch.o3.operand_field import (DATA, PR_IDX, WB_REQUIRED, VALID,
 
 
 class RsvEntryBase(Karray):
+
+    #  HALF A RECORD — and the half that varies with the MACHINE, not only
+    #  with the ISA. build_rsv_table() ADDS, for THIS station:
+    #
+    #      per src core, arch    valid_<n>  data_<n>  pr_idx_<n>
+    #      per src core, µtemp   data_<n>          (nothing to wake on)
+    #      per dest core         wb_required_<n>   if the write is required
+    #                            pr_idx_<n>
+    #      per station KIND      pc, npc           (RsvSpec.rsv_type)
+    #      per machine           whatever RsvSpec.extra_fields lists
+    #
+    #  <n> is the core's own name, and a group lands in operand_field's
+    #  KIND_ORDER. Only the cores THIS station's units read or write, so two
+    #  stations of one core have DIFFERENT records. An out-of-order branch
+    #  station over RV32I's four units builds:
+    #
+    #      valid  is_spec  spec_tag  uop_idx  rob_des_idx    <- declared
+    #      is_lower_track  track                             <- RsvO3Entry
+    #      valid_src_1  data_src_1  pr_idx_src_1             <- added
+    #      valid_src_2  data_src_2  pr_idx_src_2
+    #      data_src_3
+    #      pr_idx_dest_1
+    #      pc  npc
     valid    = kaf(1)
     # speculative
     is_spec  = kaf(1)
@@ -48,12 +71,17 @@ class RsvEntryBase(Karray):
 
 class RsvO3Entry(RsvEntryBase):
 
+    #  Two more declared fields, on top of everything the base gets appended.
+    #  No dispatch lane carries an age stamp — the station writes it itself
+    #  (rsv_o3.write_entry), and a k2k copy from a lane simply skips them.
     is_lower_track = kaf(1)
     track          = kaf()
 
 
 # IOR = inorder
 class RsvIOREntry(RsvEntryBase):
+    #  Nothing on top of the base — position in the table IS the age order.
+    #  The appended half is the same as any station's.
     pass
 
 
@@ -94,7 +122,7 @@ def operand_fields(config: CPUO3_Config,
     required. The names and widths themselves are operand_field's.
     """
     if atm_operand.is_src:
-        kinds = (VALID, PR_IDX, DATA) if atm_operand.has_arch else (DATA,)
+        kinds = (VALID, DATA, PR_IDX) if atm_operand.has_arch else (DATA,)
     elif atm_operand.is_write_required:
         kinds = (WB_REQUIRED, PR_IDX)
     else:

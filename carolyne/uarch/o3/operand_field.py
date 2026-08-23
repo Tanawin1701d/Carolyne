@@ -5,12 +5,15 @@
 # per operand, and what differs between them is only WHICH kinds each keeps,
 # never what a kind is called or how wide it is:
 #
+#   active_<n>       1   this µop really fills/writes that slot
 #   valid_<n>        1   a source's value has landed and the entry may issue
+#   wb_required_<n>  1   the WRITEBACK must land before the instruction retires
 #   data_<n>         w   the value itself, the class width or the µtemp's
 #   pr_idx_<n>       w   the physical register rename gave it
 #   ar_idx_<n>       w   the architectural register it belongs to
-#   wb_required_<n>  1   the WRITEBACK must land before the instruction retires
-#   active_<n>       1   this instruction really writes that destination
+#
+# That listing IS the order a group is built in (KIND_ORDER): a caller states
+# WHICH kinds its record keeps, never in what order they land.
 #
 # A caller names the kinds its record carries and this module answers with the
 # field names and widths, so two records cannot drift apart or disagree about a
@@ -22,12 +25,18 @@ from kathryn import kaf
 from carolyne.isa import AtomicOperand, IsaBase
 from carolyne.uarch.o3.config import CPUO3_Config
 
+ACTIVE      = "active"
 VALID       = "valid"
+WB_REQUIRED = "wb_required"
 DATA        = "data"
 PR_IDX      = "pr_idx"
 AR_IDX      = "ar_idx"
-WB_REQUIRED = "wb_required"
-ACTIVE      = "active"
+
+# The ONE order a group's fields are built in, whatever order a caller lists
+# them: the status bits, then the value, then the indexes. Every record here
+# keeps only SOME of the kinds, so this is what makes their groups read the
+# same way — src_1's fields in a station line up with src_1's in the ROB.
+KIND_ORDER = (ACTIVE, VALID, WB_REQUIRED, DATA, PR_IDX, AR_IDX)
 
 # The kinds that name a REGISTER, and therefore need an architectural class.
 _INDEX_KINDS = (PR_IDX, AR_IDX)
@@ -74,6 +83,9 @@ def operand_fields(config      : CPUO3_Config,
                    where       : str) -> dict:
     """The named, sized kaf() specs these kinds contribute for one operand.
 
+    Built in KIND_ORDER, not in the order the caller listed them, so one
+    operand's group reads the same in every record that keeps it.
+
     A kind whose width works out to zero contributes NOTHING: that is `ar_idx`
     on a one-register class, where there is no index to choose and a 0-bit
     field is not a legal width.
@@ -81,11 +93,22 @@ def operand_fields(config      : CPUO3_Config,
     require_named(atm_operand, where)
 
     fields = {}
-    for kind in kinds:
+    for kind in in_record_order(kinds, where):
         width = field_width(config, atm_operand, kind, where)
         if width:
             fields[field_name(kind, atm_operand)] = kaf(width)
     return fields
+
+
+def in_record_order(kinds: tuple, where: str) -> tuple:
+    """The kinds a caller asked for, sorted into the order a record holds them.
+
+    Also what refuses a kind that does not exist, before anything is sized.
+    """
+    for kind in kinds:
+        if kind not in KIND_ORDER:
+            raise ValueError(f"{where}: no such operand field kind '{kind}'")
+    return tuple(kind for kind in KIND_ORDER if kind in kinds)
 
 
 def field_width(config      : CPUO3_Config,

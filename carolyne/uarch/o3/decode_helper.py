@@ -44,6 +44,27 @@ from carolyne.uarch.o3.operand_field import (ACTIVE, AR_IDX, DATA, WB_REQUIRED,
 
 class DecodeEntryBase(Karray):
 
+    #  HALF A RECORD. build_decode_table() ADDS one group per atomic operand
+    #  the ISA declares — BOTH directions, since a decoded µop has not been
+    #  routed anywhere yet:
+    #
+    #      per src core    active_<n>  valid_<n>
+    #                      + data_<n>     if the core may name an imm
+    #                      + ar_idx_<n>   if the core has an arch class
+    #      per dest core   active_<n>  wb_required_<n>  ar_idx_<n>
+    #
+    #  <n> is the core's own name, and a group lands in operand_field's
+    #  KIND_ORDER. NO pr_idx anywhere: decode runs BEFORE rename. RV32I, whose
+    #  cores are src_1 / src_2 / src_3 / dest_1, builds:
+    #
+    #      valid  pc  npc  uop_idx                                <- declared
+    #      active_src_1   valid_src_1                ar_idx_src_1 <- added
+    #      active_src_2   valid_src_2   data_src_2   ar_idx_src_2
+    #      active_src_3   valid_src_3   data_src_3
+    #      active_dest_1  wb_required_dest_1         ar_idx_dest_1
+    #
+    #  (src_1 is always a register, so no data_; src_3 is the immediate, so no
+    #  ar_idx_; src_2 is rs2 OR an immediate, so both.)
     valid   = kaf(1)
     pc      = kaf()
     npc     = kaf()
@@ -71,10 +92,10 @@ def decode_operand_fields(config: CPUO3_Config, atm_operand: AtomicOperand) -> d
     else:
         kinds = (ACTIVE, WB_REQUIRED)
 
-    if atm_operand.has_arch:
-        kinds += (AR_IDX,)
     if atm_operand.is_src and atm_operand.has_imm:
         kinds += (DATA,)
+    if atm_operand.has_arch:
+        kinds += (AR_IDX,)
 
     return build_fields(config, atm_operand, kinds, "decode")
 
