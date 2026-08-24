@@ -25,19 +25,19 @@ AOPR_SRC   = AtomicOperand(SRC,  "src_1",  reg_file=X)
 AOPR_SRC_2 = AtomicOperand(SRC,  "src_2",  reg_file=X)   # declared, never filled
 AOPR_DEST  = AtomicOperand(DEST, "dest_1", reg_file=X)
 
-def _uop(name, reg_file=X):
+def _uop(name, uop_idx=0, reg_file=X):
     """One µop template of the toy ISA — the shape both instructions share."""
     src  = AOPR_SRC  if reg_file is X else AtomicOperand(SRC,  reg_file=reg_file)
     dest = AOPR_DEST if reg_file is X else AtomicOperand(DEST, reg_file=reg_file)
-    return Uop(name,
+    return Uop(name, uop_idx,
                srcs=(Operand(src, ARCH, FieldRef("rs1")),),
                dests=(Operand(dest, ARCH, FieldRef("rd")),))
 
 
 # The templates are shared constants too: a unit lists the very instances the
 # mops name, which is what identity membership means.
-ADD  = _uop("ADD")
-LOAD = _uop("LOAD")
+ADD  = _uop("ADD",  0)
+LOAD = _uop("LOAD", 1)
 
 ALU = ExecUnit("alu", (ADD,),  src_operands=(AOPR_SRC,), dest_operands=(AOPR_DEST,))
 MEM = ExecUnit("mem", (LOAD,), src_operands=(AOPR_SRC,), dest_operands=(AOPR_DEST,))
@@ -140,6 +140,18 @@ def test_a_uop_may_be_claimed_by_several_units():
                     dest_operands=(AOPR_DEST,))
     isa  = _isa(exec_units=(ALU, alu2, MEM))
     assert [u.name for u in isa.units_for(ADD)] == ["alu", "alu2"]
+
+
+def test_uop_ids_are_unique_and_dense():
+    # The declared uop_idx is AUTHORITATIVE — position in `uops` is declaration
+    # order and nothing more — so the container is where a numbering typo
+    # fails: a duplicate would make two templates one kind, and a gap would
+    # waste an encoding of a record field sized ceil_log2(N). The extra µop is
+    # declared-but-unused, which keeps this the FIRST check that can object.
+    with pytest.raises(ValueError, match="both declare uop_idx 0"):
+        _isa(uops=(ADD, LOAD, _uop("XOR", 0)))
+    with pytest.raises(ValueError, match=r"missing \[2\], stray \[7\]"):
+        _isa(uops=(ADD, LOAD, _uop("XOR", 7)))
 
 
 def test_a_mop_may_not_target_an_undeclared_reg_file():

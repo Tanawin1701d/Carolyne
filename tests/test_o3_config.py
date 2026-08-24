@@ -73,7 +73,7 @@ def test_every_op_the_isa_uses_must_reach_a_station():
     with pytest.raises(ValueError, match="no reservation station can issue"):
         _cfg(rsv_specs=(RsvSpec(True, 16, alu_only, RsvType.RSV_EXEC),))
     with pytest.raises(ValueError, match="does not declare"):
-        _cfg(rsv_specs=(RsvSpec(True, 16, (ExecUnit("crypto", (Uop("AES"),)),),
+        _cfg(rsv_specs=(RsvSpec(True, 16, (ExecUnit("crypto", (Uop("AES", 0),)),),
                                 RsvType.RSV_EXEC),))
     with pytest.raises(ValueError, match="nothing can execute"):
         _cfg(rsv_specs=())

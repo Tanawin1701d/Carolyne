@@ -29,7 +29,7 @@
 # `sptag_len` is stated in BITS, the one knob holding a width where every other
 # holds a count and derives its log2: a tag is a value records carry and
 # compare, not an index into a structure. Blocks use it as written —
-# `FetchDT(..., spectag=kaf(cfg.sptag_len))`.
+# `FetchEntryBase(..., spectag=kaf(cfg.sptag_len))`.
 #
 # Frozen data, checked at construction: a config that cannot work fails here,
 # not deep in elaboration.

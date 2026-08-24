@@ -20,7 +20,7 @@ from kathryn import *
 from carolyne.uarch.o3.config import CPUO3_Config
 
 
-class FetchDT(Karray):
+class FetchEntryBase(Karray):
 
     #  THE WHOLE RECORD — build_fetch_table() adds NOTHING:
     #
@@ -40,7 +40,7 @@ def fetch_entry_shape(config: CPUO3_Config) -> tuple:
     Shared by the table and by any wire row a stage builds of the same shape,
     so the two cannot drift.
     """
-    return FetchDT, {"pc"   : config.pc_width,
+    return FetchEntryBase, {"pc"   : config.pc_width,
                      "instr": config.instr_width}   # ilen_bytes * 8
 
 

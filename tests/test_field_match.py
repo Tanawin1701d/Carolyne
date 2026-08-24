@@ -111,25 +111,25 @@ def test_the_holder_of_both_halves_checks_the_pairing():
     from carolyne.isa import Mop, Uop, UopSeq
 
     funct3, add = InstrFieldMatch("funct3", ((12, 15),)), "ADD"
-    uop = Uop(add, matcher_field=funct3, matcher_value=InstrValueMatch((0b000,)))
+    uop = Uop(add, 0, matcher_field=funct3, matcher_value=InstrValueMatch((0b000,)))
     assert uop.matcher_value.match_value == (0,)
 
     with pytest.raises(ValueError):                 # 4 bits into a 3-bit segment
-        Uop(add, matcher_field=funct3, matcher_value=InstrValueMatch((0b1000,)))
+        Uop(add, 0, matcher_field=funct3, matcher_value=InstrValueMatch((0b1000,)))
     with pytest.raises(ValueError):                 # 2 values, 1 segment
-        Uop(add, matcher_field=funct3, matcher_value=InstrValueMatch((0, 0)))
+        Uop(add, 0, matcher_field=funct3, matcher_value=InstrValueMatch((0, 0)))
     with pytest.raises(ValueError):                 # nothing to test against
-        Uop(add, matcher_value=InstrValueMatch((0b000,)))
+        Uop(add, 0, matcher_value=InstrValueMatch((0b000,)))
 
     # A field with no value is legal: positions stated, nothing tested yet.
-    assert Uop(add, matcher_field=funct3).matcher_value is None
+    assert Uop(add, 0, matcher_field=funct3).matcher_value is None
 
     # The same check guards the other two holders.
     with pytest.raises(ValueError):
-        UopSeq(uops=(Uop(add),), matcher_value=InstrValueMatch((0,)))
+        UopSeq(uops=(Uop(add, 0),), matcher_value=InstrValueMatch((0,)))
     with pytest.raises(ValueError):
         Mop(matcher_field=funct3, matcher_value=InstrValueMatch((0b1000,)),
-            uop_seq=(UopSeq(uops=(Uop(add),)),))
+            uop_seq=(UopSeq(uops=(Uop(add, 0),)),))
 
 
 def test_rv32i_uses_a_union_where_one_field_cannot_select():

@@ -216,10 +216,25 @@ Immediates are deliberately NOT an `Operand` target — the µop record carries
   distinction this layer refuses to make — and nothing consumes such a list
   yet. `STANDARD_UNITS`/`STANDARD_OPS` existed briefly on 2026-08-14 and
   were deleted; don't restore them from git.
-- **`Uop(name, srcs, dests, matcher_field, matcher_value)`** — one µop
+- **`Uop(name, uop_idx, srcs, dests, matcher_field, matcher_value)`** — one µop
   template, and since 2026-08-23 the KIND itself: `name` is what this operation
   IS (`"ADD"`, `"ADDI"`), required, non-empty, held unique across the ISA by
-  `IsaBase`, and the hardware plane speaks the same vocabulary as `uop_idx`.
+  `IsaBase`. Decision (2026-08-24): **`uop_idx` is DECLARED on the template**,
+  required, second positional — the id the hardware plane speaks (every
+  record's `uop_idx` field), no longer read off the template's position in
+  `isa.uops`. The field is AUTHORITATIVE: tuple order is declaration order and
+  nothing more, so reordering `UOPS` can never silently renumber the emitted
+  hardware — the stability that position-derivation could not give. `IsaBase`
+  holds the declared set **unique and dense 0..N-1** (a duplicate would make
+  two templates one kind; a gap would waste an encoding of a field sized
+  `ceil_log2(N)`, which is how `uop_idx_width` stays len-based). Required at
+  construction, not optional-with-container-demand — chosen knowingly against
+  the `AtomicOperand.name` bargain, so even a throwaway fragment picks a
+  number (`Uop("AGU", 0)`); the template itself validates only its own value
+  (int, ≥ 0, no bool), since one template cannot see the set. Rejected:
+  "field must equal tuple position" — that writes the vocabulary down twice
+  and cross-checks the halves, the exact pattern the `Op` removal retired.
+  `riscv/uop.py` numbers its forty 0..39 in `UOPS` order.
   Decision: the template names **only itself**, no unit — which FU executes a
   kind is a machine configuration question answered by the unit set
   (`ExecUnit.uops` read the other way round), and a µop two units both list is
@@ -286,7 +301,10 @@ Immediates are deliberately NOT an `Operand` target — the µop record carries
   **identity** — one PRF per instance, and `RegFile` holds a dict so it is
   unhashable anyway. Names unique per vocabulary — µops joined the NAME-keyed
   half when they took their names, so a duplicated template reads as
-  "duplicate uops name 'ADD'". Lookups: `uop(name)`,
+  "duplicate uops name 'ADD'". Since 2026-08-24 it also holds the declared
+  `uop_idx` set to **unique and dense 0..N-1** (see the `Uop` entry) —
+  checked AFTER `_reject_undeclared`, so an incomplete declaration reads as
+  the missing µop, not as its absent number. Lookups: `uop(name)`,
   `unit(name)`, `reg_file(name)`, `units_for(uop)` (the kind→FU map read out),
   `used_reg_files()`, `used_uops()`, `used_operands()`,
   `used_atomic_operands()`. Decision (2026-08-19): **`src_atomic_operands_for(unit)`
@@ -849,7 +867,7 @@ head to it inclusive; the head does not move.
 
 **`carolyne/uarch/o3/fetch_helper.py`** — `build_fetch_table(config,
 name="fetch")` (2026-08-22), the fetched-instruction record, one row per
-`fe_lanes`, with `fetch_entry_shape()` beside it. `FetchDT` moved here out of
+`fe_lanes`, with `fetch_entry_shape()` beside it. `FetchEntryBase` moved here out of
 `fetch.py`, which now holds the Fetch MODULE only — the same table/module split
 `rsv_helper`/`rsv` and `rob_helper`/`rob` already have, so a record can be
 sized and probed without elaborating the stage that owns it. It is the ONE
@@ -857,8 +875,8 @@ place raw ISA bits are legal: `instr` is the encoded word memory returned, and
 decode is what turns it into a `uop_idx` — nothing downstream of decode may
 carry it (§2). Decision: **ONE array of `fe_lanes` rows**, where `fetch.py`
 built a LIST of `fe_lanes` arrays of one row each. Statically indexed either
-way, so the registers are identical; one array is what `FetchDT`'s own comment
-already documented (`FetchDT(..., (lanes,), "fetch", ...)`) and what every
+way, so the registers are identical; one array is what `FetchEntryBase`'s own comment
+already documented (`FetchEntryBase(..., (lanes,), "fetch", ...)`) and what every
 other record in the core is. Decision: both fields declared **`kaf()` with no
 width**, where they were `kaf(32)` — a default that suits RV32I is a silent
 wrong answer for a 64-bit ISA, so the instantiation must state them, the same
@@ -898,7 +916,7 @@ of them, because a lane is shaped before it is routed and the same row is read
 by the ROB (`is_branch`/`is_store`/`pc`), by a station (`is_spec`/`spec_tag`/
 `uop_idx`/`rob_des_idx`, plus `pc`/`npc` if its KIND carries them) and by every
 station at once (`rsv_id` — the field that lets each take only the lanes naming
-it). `valid` IS declared here where `FetchDT` refuses one: a wire bus has no
+it). `valid` IS declared here where `FetchEntryBase` refuses one: a wire bus has no
 `pip` grant to read occupancy off, so the row has to say so itself. Widths come
 from the config exactly as the readers' do (`sptag_len`, `uop_idx_width`,
 `rob_idx_width`, `pc_width`) and `rsv_id` from `rsv_helper.rsv_id_width` —
@@ -946,6 +964,28 @@ is not known at decode but produced by an earlier µop of the same crack — the
 description cannot yet tell it from an immediate, so `valid_<n>` is what the
 decoder has to answer honestly per slot. The table is
 `reset(valid=0, active_<n>=0)`: a lane powers up empty with no slot claimed.
+
+**`carolyne/uarch/o3/decode.py`** — **`Decode`** (2026-08-23), the stage
+SHELL: `decode_meta` (its own `PipCon`, the arb fetch zyncs on to hand a row
+over), the decode table, the ISA's operand cores, the flattened match table,
+and the two slots `connect()` fills — the fetch rows to read and the consumer's
+arb to contend on. The flow that moves rows through it is NOT written yet.
+
+**`decode_templates(isa)`** is the part that is: the mop table flattened for
+matching, mop → variant → µop becoming one `DecodeTemplate` per decodable
+instruction, carrying every (field, value) rule on its path — the mop's opcode
+AND the variant's funct — plus `uop_idx`, the µop's place in `isa.uops`. A
+matcher with no VALUE tests nothing and is dropped; a template left with no rule
+at all is REFUSED, since nothing would tell it from its neighbours; and a
+`UopSeq` of several µops is REFUSED, because one lane has one record row and
+cracking needs a lane expansion this stage has not got (x86's AGU→LOAD→ADD→STORE
+is exactly that shape). `tests/test_decode_templates.py` evaluates the same
+tuples in pure Python and pins that all 40 RV32I encodings pick EXACTLY ONE
+template — which is what will let a decoder's per-template writes need no
+priority between them.
+
+`FetchDT` is now **`FetchEntryBase`** (2026-08-23), the name every other record
+in the core has (`DecodeEntryBase`, `RsvEntryBase`, `RobEntry`).
 
 FOUND ON THE WAY: `Rt.on_normal_flow` walked `sptag_len` rows of
 `temp_dispatch`, which is `(rename_ports, amount)` — out of bounds whenever the
@@ -1075,7 +1115,7 @@ elaboration from a `RegFile` in `uarch`.
   has; the call settles it, and the keyword's VALUE picks what it does — an
   `int` sets the width of a DECLARED field, a `kaf()` ADDS a field only that
   array has:
-  `FetchDT(REG, (lanes,), "fetch", pc=64, instr=16, spectag=kaf(8))`.
+  `FetchEntryBase(REG, (lanes,), "fetch", pc=64, instr=16, spectag=kaf(8))`.
   `kaf()` with no width in the class body declares a field every instantiation
   must size. Added fields append after the declared ones, flatten like any
   bundle (`pos=kaf(Vec2)` → `pos_x`/`pos_y`) and read back as `d[0].spectag`.

@@ -24,11 +24,11 @@ ARCH, TEMP = TargetKind.ARCH, TargetKind.TEMP
 # declares the µops and units its machine has. This block is what a per-ISA
 # package writes — the uop_contract.md §1.2 names are a convention, not an
 # import.
-ADD   = Uop("ADD")
-SUB   = Uop("SUB")
-AGU   = Uop("AGU")
-LOAD  = Uop("LOAD")
-STORE = Uop("STORE")
+ADD   = Uop("ADD",   0)
+SUB   = Uop("SUB",   1)
+AGU   = Uop("AGU",   2)
+LOAD  = Uop("LOAD",  3)
+STORE = Uop("STORE", 4)
 
 ALU = ExecUnit("alu", (ADD, SUB))
 MEM = ExecUnit("mem", (AGU, LOAD, STORE))
@@ -40,15 +40,28 @@ def test_a_uop_names_itself_and_a_unit_lists_the_instance():
     # discipline the whole layer runs on — a re-spelt template is a DIFFERENT
     # µop, so a unit lists the same constants the ISA declares.
     assert ADD.name == "ADD" and str(ADD) == "ADD"
-    assert ALU.has(ADD) and not ALU.has(Uop("ADD"))
+    assert ALU.has(ADD) and not ALU.has(Uop("ADD", 0))
     with pytest.raises(ValueError):
-        Uop("")                                 # nameless µop
+        Uop("", 0)                              # nameless µop
+
+
+def test_a_uop_declares_its_own_id():
+    # uop_idx is DECLARED on the template, never read off a tuple position —
+    # IsaBase holds the SET unique and dense; the template only answers for
+    # its own value being a legal one.
+    assert ADD.uop_idx == 0 and STORE.uop_idx == 4
+    with pytest.raises(TypeError):
+        Uop("ADD", "0")                         # an id is an int
+    with pytest.raises(TypeError):
+        Uop("ADD", True)                        # a bool is not an id
+    with pytest.raises(ValueError):
+        Uop("ADD", -1)                          # never negative
 
 
 def test_exec_unit_validation():
     # A custom FU is just another ExecUnit instance an ISA declares, and its
     # µops are as first-class as an ADD.
-    aes_round = Uop("AES_ROUND")
+    aes_round = Uop("AES_ROUND", 0)
     crypto = ExecUnit("crypto", (aes_round,))
     assert crypto.has(aes_round) and crypto.uop("AES_ROUND") is aes_round
     with pytest.raises(ValueError):
@@ -62,7 +75,7 @@ def test_exec_unit_validation():
     with pytest.raises(ValueError):
         ExecUnit("twice", (ADD, ADD))           # one template, listed once
     with pytest.raises(ValueError):
-        ExecUnit("clash", (ADD, Uop("ADD")))    # two µops cannot share a name
+        ExecUnit("clash", (ADD, Uop("ADD", 9)))  # two µops cannot share a name
 
 
 def test_routing_lives_in_the_unit_set_not_the_uop():
@@ -79,26 +92,26 @@ def test_a_uop_needs_a_name_and_no_unit_vouches_for_it():
     x = RegFile("x", 32, 32, const_regs={0: 0})
     rd = Operand(AtomicOperand(DEST, reg_file=x), ARCH, FieldRef("rd"))
     rs1, rs2 = (Operand(AtomicOperand(SRC, reg_file=x), ARCH, FieldRef(f)) for f in ("rs1", "rs2"))
-    add = Uop("ADD", srcs=(rs1, rs2), dests=(rd,))
+    add = Uop("ADD", 0, srcs=(rs1, rs2), dests=(rd,))
     assert add.name == "ADD"
     with pytest.raises(ValueError):
-        Uop(123, srcs=(rs1, rs2), dests=(rd,))     # a name is text
+        Uop(123, 0, srcs=(rs1, rs2), dests=(rd,))  # a name is text
     # A made-up µop is NOT caught here (no unit to check against); it is
     # caught when no unit of the machine claims it.
-    assert not any(u.has(Uop("ADQ")) for u in (ALU, MEM))
+    assert not any(u.has(Uop("ADQ", 0)) for u in (ALU, MEM))
 
 
 def test_uop_capped_at_record_shape():
     # The template may not describe what the §2 record cannot carry.
     x  = RegFile("x", 32, 32)
     op = Operand(AtomicOperand(SRC, reg_file=x), ARCH, FieldRef("rs1"))
-    assert Uop("ADD", srcs=[op]).srcs == (op,)       # lists are normalized
+    assert Uop("ADD", 0, srcs=[op]).srcs == (op,)    # lists are normalized
     with pytest.raises(ValueError):
-        Uop("ADD", srcs=(op, op, op, op))            # > 3 sources
+        Uop("ADD", 0, srcs=(op, op, op, op))         # > 3 sources
     with pytest.raises(ValueError):
-        Uop("ADD", dests=(Operand(AtomicOperand(DEST, reg_file=x), ARCH, FieldRef("rd")),) * 3)   # > 2 dests
+        Uop("ADD", 0, dests=(Operand(AtomicOperand(DEST, reg_file=x), ARCH, FieldRef("rd")),) * 3)   # > 2 dests
     with pytest.raises(TypeError):
-        Uop("ADD", srcs=(op, "rs2"))                 # not an Operand
+        Uop("ADD", 0, srcs=(op, "rs2"))              # not an Operand
 
 
 def test_uop_holds_operand_role_to_its_position():
@@ -108,11 +121,11 @@ def test_uop_holds_operand_role_to_its_position():
     x   = RegFile("x", 32, 32)
     src = Operand(AtomicOperand(SRC, reg_file=x), ARCH,  FieldRef("rs1"))
     dst = Operand(AtomicOperand(DEST, reg_file=x), ARCH, FieldRef("rd"))
-    assert Uop("ADD", srcs=(src,), dests=(dst,)).dests[0].is_dest
+    assert Uop("ADD", 0, srcs=(src,), dests=(dst,)).dests[0].is_dest
     with pytest.raises(ValueError):
-        Uop("ADD", srcs=(dst,))               # a dest operand in the src list
+        Uop("ADD", 0, srcs=(dst,))            # a dest operand in the src list
     with pytest.raises(ValueError):
-        Uop("ADD", srcs=(src,), dests=(src,))  # ...and the other way round
+        Uop("ADD", 0, srcs=(src,), dests=(src,))  # ...and the other way round
 
 
 def test_uop_slots_take_an_operand_and_nothing_else():
@@ -122,9 +135,9 @@ def test_uop_slots_take_an_operand_and_nothing_else():
     # it got before it could read one.
     flags = RegFile("flags", 6, 1)
     with pytest.raises(TypeError):
-        Uop("ADD", dests=(AtomicOperand(flags, DEST),))
+        Uop("ADD", 0, dests=(AtomicOperand(flags, DEST),))
     with pytest.raises(TypeError):
-        Uop("ADD", srcs=(flags,))              # a RegFile is not an operand either
+        Uop("ADD", 0, srcs=(flags,))           # a RegFile is not an operand either
 
 
 def test_encoding_text_reaches_a_template_through_the_unit():
@@ -142,12 +155,12 @@ def test_riscv_rtype_family_is_a_factory_function():
     # does, so every Uop reaching the elaborator is already resolved.
     x = RegFile("x", 32, 32, const_regs={0: 0})
 
-    def rtype(name):
-        return (Uop(name,
+    def rtype(name, uop_idx):
+        return (Uop(name, uop_idx,
                     srcs=(Operand(AtomicOperand(SRC, reg_file=x), ARCH, FieldRef("rs1")), Operand(AtomicOperand(SRC, reg_file=x), ARCH, FieldRef("rs2"))),
                     dests=(Operand(AtomicOperand(DEST, reg_file=x), ARCH, FieldRef("rd")),)),)
 
-    add, sub = rtype("ADD"), rtype("SUB")
+    add, sub = rtype("ADD", 0), rtype("SUB", 1)
     assert (add[0].name, sub[0].name) == ("ADD", "SUB")
     assert add[0].srcs == sub[0].srcs                # one shared shape
 
@@ -157,7 +170,7 @@ def test_x86_implicit_register_operand():
     # (The -4 adjustment rides in the imm rule — see the NOTE at the top.)
     gpr     = RegFile("gpr", 32, 8)
     esp_new = Intermediate(32, "esp_new")
-    dec = Uop("ADD", srcs=(Operand(AtomicOperand(SRC, reg_file=gpr), ARCH, 4),), dests=(Operand(AtomicOperand(DEST, intermediate=esp_new), TEMP),))
+    dec = Uop("ADD", 0, srcs=(Operand(AtomicOperand(SRC, reg_file=gpr), ARCH, 4),), dests=(Operand(AtomicOperand(DEST, intermediate=esp_new), TEMP),))
     assert not dec.srcs[0].is_decoded       # literal index, not is_const: ESP isn't hardwired
 
 
@@ -170,12 +183,12 @@ def test_x86_mem_add_cracks_to_four_uops():
     addr, old, new = Intermediate(32, "addr"), Intermediate(32, "old"), Intermediate(32, "new")
 
     crack = (
-        Uop("AGU",   srcs=(Operand(AtomicOperand(SRC, reg_file=gpr), ARCH, FieldRef("modrm_rm")),),
+        Uop("AGU",   0, srcs=(Operand(AtomicOperand(SRC, reg_file=gpr), ARCH, FieldRef("modrm_rm")),),
                    dests=(Operand(AtomicOperand(DEST, intermediate=addr), TEMP),)),
-        Uop("LOAD",  srcs=(Operand(AtomicOperand(SRC, intermediate=addr), TEMP),), dests=(Operand(AtomicOperand(DEST, intermediate=old), TEMP),)),
-        Uop("ADD",   srcs=(Operand(AtomicOperand(SRC, intermediate=old), TEMP), Operand(AtomicOperand(SRC, reg_file=gpr), ARCH, FieldRef("modrm_reg"))),
+        Uop("LOAD",  1, srcs=(Operand(AtomicOperand(SRC, intermediate=addr), TEMP),), dests=(Operand(AtomicOperand(DEST, intermediate=old), TEMP),)),
+        Uop("ADD",   2, srcs=(Operand(AtomicOperand(SRC, intermediate=old), TEMP), Operand(AtomicOperand(SRC, reg_file=gpr), ARCH, FieldRef("modrm_reg"))),
                    dests=(Operand(AtomicOperand(DEST, intermediate=new), TEMP), Operand(AtomicOperand(DEST, reg_file=flags), ARCH, 0))),
-        Uop("STORE", srcs=(Operand(AtomicOperand(SRC, intermediate=addr), TEMP), Operand(AtomicOperand(SRC, intermediate=new), TEMP))),
+        Uop("STORE", 3, srcs=(Operand(AtomicOperand(SRC, intermediate=addr), TEMP), Operand(AtomicOperand(SRC, intermediate=new), TEMP))),
     )
 
     # The shared µtemp instance IS the dataflow link between the µops.

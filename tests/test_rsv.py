@@ -191,7 +191,7 @@ def test_an_unnamed_atomic_operand_cannot_name_its_fields():
     dest    = AtomicOperand(OperandRole.DEST, "d", reg_file=X)
     src_opr = Operand(unnamed, TargetKind.ARCH, FieldRef("rs1"))
     dst_opr = Operand(dest,    TargetKind.ARCH, FieldRef("rd"))
-    uop     = Uop("ADD", srcs=(src_opr,), dests=(dst_opr,))
+    uop     = Uop("ADD", 0, srcs=(src_opr,), dests=(dst_opr,))
     unit    = ExecUnit("alu", (uop,), src_operands=(unnamed,),
                        dest_operands=(dest,))
     isa     = IsaBase(name="toy", pc_width=32, pc_align=4, ilen_bytes=4,

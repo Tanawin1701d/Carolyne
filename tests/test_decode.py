@@ -136,7 +136,7 @@ def test_a_one_register_class_has_no_architectural_index_to_store():
     flags = RegFile("flags", 6, 1)
     core  = AtomicOperand(OperandRole.DEST_W_REQ, "flags_out", reg_file=flags)
     opr   = Operand(core, TargetKind.ARCH)          # no index: one register
-    uop   = Uop("ADD", dests=(opr,))
+    uop   = Uop("ADD", 0, dests=(opr,))
     unit  = ExecUnit("alu", (uop,), dest_operands=(core,))
     isa   = IsaBase(name="toy", pc_width=32, pc_align=4, ilen_bytes=4,
                     reg_files=(flags,), atomic_operands=(core,), operands=(opr,),
@@ -160,7 +160,7 @@ def test_an_unnamed_operand_cannot_name_its_fields():
     dest    = AtomicOperand(OperandRole.DEST, "dest_1", reg_file=X)
     src_opr = Operand(unnamed, TargetKind.ARCH, FieldRef("rs1"))
     dst_opr = Operand(dest,    TargetKind.ARCH, FieldRef("rd"))
-    uop     = Uop("ADD", srcs=(src_opr,), dests=(dst_opr,))
+    uop     = Uop("ADD", 0, srcs=(src_opr,), dests=(dst_opr,))
     unit    = ExecUnit("alu", (uop,), src_operands=(unnamed,),
                        dest_operands=(dest,))
     isa     = IsaBase(name="toy", pc_width=32, pc_align=4, ilen_bytes=4,

@@ -5,12 +5,15 @@
 # constant, never a runtime value.
 #
 # THE TEMPLATE IS THE KIND. A µop names ITSELF: `name` is what the description
-# calls this operation, unique across the ISA, and the hardware plane speaks
-# the same vocabulary through `uop_idx` — the index of this template in the
-# ISA's `uops`, which is the only kind field any record carries. An `Op` type
-# sat between the two until 2026-08-23 and was removed: it held a name and
-# nothing else, and no record ever carried an op index for a body to compare
-# against.
+# calls this operation, unique across the ISA, and `uop_idx` is the id the
+# hardware plane speaks — the value every record's `uop_idx` field carries,
+# DECLARED on the template rather than read off its position in `isa.uops`
+# (position is declaration order and nothing more, so reordering the tuple can
+# never renumber the hardware). IsaBase holds the declared ids to unique and
+# dense 0..N-1, which is what keeps the record field's width honest. An `Op`
+# type sat between name and id until 2026-08-23 and was removed: it held a
+# name and nothing else, and no record ever carried an op index for a body to
+# compare against.
 #
 # Operand counts are capped at the record's shape (§2: src[0..2], dest[0..1]).
 # An instruction family sharing one shape is a factory function in the per-ISA
@@ -42,6 +45,8 @@ MAX_DESTS = 2       # 2nd dest: flags write (x86), link reg
 class Uop:
 
     name    : str                                     # what this µop IS, e.g. "ADD"
+    uop_idx : int                                     # the id the hardware plane speaks;
+                                                      # unique + dense per ISA (IsaBase)
     srcs    : Tuple[Operand, ...] = ()
     dests   : Tuple[Operand, ...] = ()
     matcher_field : Optional[InstrFieldMatch] = None  # which bits pick this template
@@ -50,6 +55,13 @@ class Uop:
     def __post_init__(self) -> None:
         if not (isinstance(self.name, str) and self.name):
             raise ValueError(f"Uop needs a non-empty name, got {self.name!r}")
+        if isinstance(self.uop_idx, bool) or not isinstance(self.uop_idx, int):
+            raise TypeError(
+                f"Uop '{self.name}': uop_idx must be an int, "
+                f"got {type(self.uop_idx).__name__}")
+        if self.uop_idx < 0:
+            raise ValueError(
+                f"Uop '{self.name}': uop_idx must be >= 0, got {self.uop_idx}")
         object.__setattr__(self, "srcs",  tuple(self.srcs))    # accept any sequence
         object.__setattr__(self, "dests", tuple(self.dests))
         for kind, roles, operands, limit in (("src",  SRC_ROLES,  self.srcs,  MAX_SRCS),

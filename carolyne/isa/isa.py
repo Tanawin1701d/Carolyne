@@ -93,6 +93,7 @@ class IsaBase:
         self._normalize()
         self._reject_duplicates()
         self._reject_undeclared()
+        self._reject_misnumbered_uops()
         self._reject_unrunnable_uops()
         self._reject_uncovered_operands()
 
@@ -161,6 +162,31 @@ class IsaBase:
                     f"IsaBase '{self.name}': two atomic operands named '{core.name}' — "
                     f"a core's name has to be unique, it names that slot's fields")
             seen_names.add(core.name)
+
+    def _reject_misnumbered_uops(self) -> None:
+        """The declared uop_idx values must be exactly 0..N-1.
+
+        The field is AUTHORITATIVE — position in `uops` is declaration order
+        and nothing more — so this is where a numbering typo fails: a
+        duplicate would make two templates one kind, and a gap would waste an
+        encoding of a field sized ceil_log2(N). Checked AFTER _reject_undeclared,
+        so an incomplete declaration reads as the missing µop, not as its
+        absent number.
+        """
+        by_idx = {}
+        for uop in self.uops:
+            if uop.uop_idx in by_idx:
+                raise ValueError(
+                    f"IsaBase '{self.name}': µops '{by_idx[uop.uop_idx].name}' and "
+                    f"'{uop.name}' both declare uop_idx {uop.uop_idx} — the id is "
+                    f"what the hardware plane speaks, so it has to be unique")
+            by_idx[uop.uop_idx] = uop
+        want = set(range(len(self.uops)))
+        if set(by_idx) != want:
+            raise ValueError(
+                f"IsaBase '{self.name}': uop_idx values must be exactly "
+                f"0..{len(self.uops) - 1} — missing {sorted(want - set(by_idx))}, "
+                f"stray {sorted(set(by_idx) - want)}")
 
     def _reject_undeclared(self) -> None:
         """Everything the mops reach must have been written down: the chain

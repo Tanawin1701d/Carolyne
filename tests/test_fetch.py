@@ -10,7 +10,7 @@ from kathryn import HwComponentType, Module, _session, init, reset
 
 from carolyne.isa.riscv import Rv32i
 from carolyne.uarch.o3.config import CPUO3_Config, RsvSpec, RsvType
-from carolyne.uarch.o3.fetch_helper import (FetchDT, build_fetch_table,
+from carolyne.uarch.o3.fetch_helper import (FetchEntryBase, build_fetch_table,
                                             fetch_entry_shape)
 
 ISA = Rv32i()
@@ -79,7 +79,7 @@ def test_neither_width_has_a_default():
         @init
         def decl(self):
             with pytest.raises(TypeError, match="no width"):
-                FetchDT(HwComponentType.REG, (1,), "unsized")
+                FetchEntryBase(HwComponentType.REG, (1,), "unsized")
 
     Host()
 
