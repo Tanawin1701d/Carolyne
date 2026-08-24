@@ -10,5 +10,8 @@
 from __future__ import annotations
 
 from .hw_util import ceil_log2
+from .word_util import (extract_arch_index, extract_field_bits,
+                        extract_imm_value)
 
-__all__ = ["ceil_log2"]
+__all__ = ["ceil_log2",
+           "extract_arch_index", "extract_field_bits", "extract_imm_value"]

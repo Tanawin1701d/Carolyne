@@ -17,7 +17,8 @@
 #
 # THE BOTTOM RUNG IS NOT HERE: structural work — a row copied forward, a
 # register reloaded every cycle — runs at DEFAULT_UE_PRI_USER by not naming a
-# priority at all.
+# priority at all. ONE rung sits BELOW that instead (PRI_DECODE_DEFAULT): a
+# default that every plain write must beat.
 #
 # This lives in `o3/` rather than `uarch/common/`: these are the events of an
 # OUT-OF-ORDER pipeline, and `common/` is deliberately Kathryn-free.
@@ -31,9 +32,16 @@
 
 from kathryn import DEFAULT_UE_PRI_USER
 
+# A decoded lane's empty default: valid=0, written every granted cycle. The
+# ladder's one BELOW-user rung — it must LOSE to every match-guard row write
+# (those run plain, at DEFAULT_UE_PRI_USER), and it sits above Kathryn's own
+# fallback (DEFAULT_UE_PRI_FALLBACK = 1). No hit -> the default stands ->
+# the lane decodes to empty.
+PRI_DECODE_DEFAULT = DEFAULT_UE_PRI_USER - 1
+
 # A station's age epoch rolls over: every entry already in the table is stamped
-# older. The bottom-most rung, because it must LOSE to the entry dispatch writes
-# in the same cycle — that entry belongs to the NEW epoch.
+# older. The bottom-most rung above user, because it must LOSE to the entry
+# dispatch writes in the same cycle — that entry belongs to the NEW epoch.
 PRI_TRACK_ROLL = DEFAULT_UE_PRI_USER + 1
 
 # A mapping retires: the physical register goes back to the free pool, so every
