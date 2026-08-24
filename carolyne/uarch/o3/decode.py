@@ -14,12 +14,28 @@ from kathryn import *
 
 from carolyne.isa import IsaBase, Uop
 from carolyne.uarch.o3.config import CPUO3_Config
-from carolyne.uarch.o3.decode_helper import build_decode_table, decode_atm_operands
+from carolyne.uarch.o3.decode_helper import (build_decode_table,
+                                             decode_atm_operands,
+                                             DecodeEntryBase)
+from carolyne.uarch.o3.fetch_helper import FetchEntryBase
 
 
-def decode(isa: IsaBase, fetch_entry, decode_entry):
+class laneDecoder:
+
+    def decode(isa: IsaBase,
+               fetch_entry: FetchEntryBase,
+               decode_entry: DecodeEntryBase):
+        pass
 
 
+    def mop_decode(self):
+        pass
+
+    def uop_decode(self,
+                   uop         : Uop,
+                   fetch_entry : FetchEntryBase,
+                   decode_entry: DecodeEntryBase):
+        pass
 
 
 
