@@ -42,15 +42,23 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Optional, Sequence, Tuple
 
-from carolyne.isa import RegFile
+from carolyne.isa import IsaBase, RegFile
 from carolyne.uarch.o3.arf import Arf
 from carolyne.uarch.o3.config import CPUO3_Config
+from carolyne.uarch.o3.operand_field import named_atomic_operands
 from carolyne.uarch.o3.prf import Prf
 from carolyne.uarch.o3.rt import Rt
 
 # The per-class mispredict argument: a RegFile cannot be a dict key (header), so
 # the pairs ARE the map, exactly as CPUO3_Config.phy_specs is.
 PhyIdxByClass = Sequence[Tuple[RegFile, object]]
+
+
+def collect_arch_dest_atm_oprs(isa: IsaBase, where: str) -> tuple:
+    """The DEST slots with an architectural class — what rename books a
+    physical register for. A µtemp-only dest books nothing (no PRF)."""
+    return tuple(atm_opr for atm_opr in named_atomic_operands(isa, where)
+                 if not atm_opr.is_src and atm_opr.has_arch)
 
 
 @dataclass(frozen=True, eq=False)

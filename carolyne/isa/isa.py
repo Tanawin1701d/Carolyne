@@ -96,6 +96,7 @@ class IsaBase:
         self._reject_misnumbered_uops()
         self._reject_unrunnable_uops()
         self._reject_uncovered_operands()
+        self._reject_shared_dest_classes()
 
     # --- construction checks --------------------------------------------------
     def _check_addressing(self) -> None:
@@ -215,6 +216,28 @@ class IsaBase:
                     f"IsaBase '{self.name}': no exec unit executes µop '{uop.name}' "
                     f"(units: {', '.join(u.name for u in self.exec_units)}; a unit lists "
                     f"the same template instances the ISA declares)")
+
+    def _reject_shared_dest_classes(self) -> None:
+        """At most ONE destination atomic operand per architectural class,
+        among the operands the mops actually use.
+
+        Rename books a class's physical file through the slot's own port —
+        two destination slots writing one class would book it twice in the
+        same lane.
+        """
+        by_class = {}
+        for atm_opr in self.used_atomic_operands():
+            if atm_opr.is_src or not atm_opr.has_arch:
+                continue
+            other = by_class.get(id(atm_opr.reg_file))
+            if other is not None:
+                raise ValueError(
+                    f"IsaBase '{self.name}': destination atomic operands "
+                    f"'{other.name or '<unnamed>'}' and "
+                    f"'{atm_opr.name or '<unnamed>'}' both write class "
+                    f"'{atm_opr.reg_file.name}' — one destination per class, "
+                    f"it is what a rename port is booked through")
+            by_class[id(atm_opr.reg_file)] = atm_opr
 
     # --- derived facts --------------------------------------------------------
     @property

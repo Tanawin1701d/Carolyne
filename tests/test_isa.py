@@ -154,6 +154,19 @@ def test_uop_ids_are_unique_and_dense():
         _isa(uops=(ADD, LOAD, _uop("XOR", 7)))
 
 
+def test_at_most_one_arch_destination_per_class():
+    # Rename books a class's physical file through the slot's own port, so
+    # two destination slots writing one class would book it twice in the
+    # same lane. Checked here, ISA-wide, so no stage needs a guard of its own.
+    dest2 = AtomicOperand(DEST, "dest_2", reg_file=X)
+    two   = Uop("TWO", 0,
+                dests=(Operand(AOPR_DEST, ARCH, FieldRef("rd")),
+                       Operand(dest2,     ARCH, FieldRef("rd2"))))
+    unit  = ExecUnit("alu2", (two,), dest_operands=(AOPR_DEST, dest2))
+    with pytest.raises(ValueError, match="both write class 'x'"):
+        _isa(mops=(_mop(two, "two"),), exec_units=(unit,))
+
+
 def test_a_mop_may_not_target_an_undeclared_reg_file():
     # Same rule for register classes: the elaborator sizes one PRF/RAT per
     # declared file, so a class only some crack knows about would be missed.

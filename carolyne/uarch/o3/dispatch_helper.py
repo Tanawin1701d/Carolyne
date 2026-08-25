@@ -60,7 +60,7 @@ DEST_KINDS = (ACTIVE, WB_REQUIRED, PR_IDX, AR_IDX)
 _INDEX_KINDS = (PR_IDX, AR_IDX)
 
 
-class DispatchBase(Karray):
+class DispatchEntryBase(Karray):
 
     #  HALF A BUS — the fields below are the machine's, the same for every
     #  ISA. build_dispatch() ADDS one group per atomic operand the ISA
@@ -129,7 +129,7 @@ def dispatch_entry_shape(config: CPUO3_Config) -> tuple:
     for atm_operand in named_atomic_operands(config.isa, where):
         fields.update(operand_fields(config, atm_operand,
                                      dispatch_operand_kinds(atm_operand), where))
-    return DispatchBase, fields
+    return DispatchEntryBase, fields
 
 
 def dispatch_field_names(config: CPUO3_Config) -> tuple:

@@ -315,7 +315,12 @@ Immediates are deliberately NOT an `Operand` target — the µop record carries
   "duplicate uops name 'ADD'". Since 2026-08-24 it also holds the declared
   `uop_idx` set to **unique and dense 0..N-1** (see the `Uop` entry) —
   checked AFTER `_reject_undeclared`, so an incomplete declaration reads as
-  the missing µop, not as its absent number. Lookups: `uop(name)`,
+  the missing µop, not as its absent number. Also since 2026-08-24: the USED
+  destination operands are held to **one per architectural class**
+  (`_reject_shared_dest_classes`) — rename books a class's physical file
+  through the slot's own port, so a second dest on one class would book it
+  twice in a lane; checked HERE, ISA-wide, so dispatch carries no guard of
+  its own. Lookups: `uop(name)`,
   `unit(name)`, `reg_file(name)`, `units_for(uop)` (the kind→FU map read out),
   `used_reg_files()`, `used_uops()`, `used_operands()`,
   `used_atomic_operands()`. Decision (2026-08-19): **`src_atomic_operands_for(unit)`
@@ -752,7 +757,7 @@ Decision (2026-08-23): a dispatch lane is the **CORE-WIDE bus**
 (`dispatch_helper`), not a row of the station's own shape —
 `rsv_helper.build_rsv_dispatch()`, which built `lanes` rows of
 `rsv_entry_shape` plus an added `rsv_id`, is DELETED. One bus per station only
-worked while the bus was shaped per reader; now that `DispatchBase` declares
+worked while the bus was shaped per reader; now that `DispatchEntryBase` declares
 the machine half, a lane holds whatever the µop turns out to be and every
 station reads the same rows. And `rsv.py` needed NO CHANGE for it:
 `write_entry` stays the whole-row `|= src_row` it was, because Kathryn's k2k
@@ -920,8 +925,9 @@ index rule is `operand_field`'s, not a choice made here: `pr_idx`/`ar_idx` name
 a register OF A CLASS, so an operand that only ever names a µtemp carries
 neither, and a one-register class still drops `ar_idx` on the 0-width rule.
 `SRC_KINDS`/`DEST_KINDS` are the two tuples and `dispatch_operand_kinds()` is
-the one place the target narrows them. Decision (2026-08-23): `DispatchBase`
-now DECLARES the machine half beside the operand groups — `valid`, `is_spec` +
+the one place the target narrows them. Decision (2026-08-23): `DispatchEntryBase`
+(named `DispatchBase` until 2026-08-24 — the record-class naming every other
+table already has) now DECLARES the machine half beside the operand groups — `valid`, `is_spec` +
 `spec_tag`, `uop_idx`, `rob_des_idx`, `rsv_id`, `is_branch` + `is_store`,
 `pc` + `npc`. It is the UNION of what the readers keep, not a copy of any one
 of them, because a lane is shaped before it is routed and the same row is read
@@ -939,6 +945,25 @@ pooling against `rsv_entry_shape`/`rob_entry_shape`. A version that pooled both 
 built and reverted on 2026-08-22; don't restore it from the scratchpad — the
 declaration above is the union written down, which is a statement, where
 pooling made the bus's shape depend on which readers happened to exist.
+
+**`carolyne/uarch/o3/dispatch.py`** — **`Dispatch`** (2026-08-24), the stage
+in the `Decode` shape: the bus from `build_dispatch`, its own
+`dispatch_meta` `PipCon`, the two `connect()` slots (`decode`, `next_meta` —
+wiring call pending), and **`transfer()`** (`@flow`) —
+`pip(dispatch_meta){ zync(next_meta){ per-lane convert_lane } }`. Decision:
+**the conversion is ONE k2k assign per lane** (`dispatch_entry *=
+decode_entry`; `*=` because the bus rows are WIRES, a lane means something
+only in the grant cycle): name+width pairing copies valid/pc/npc/uop_idx and
+the operand groups, and SKIPS exactly the RENAME half — `pr_idx_<n>`,
+`rob_des_idx`, `rsv_id`, `is_spec`/`spec_tag`, `is_branch`/`is_store`, plus
+`data_src_1` (the bus carries data for every source; rs1 is never an
+immediate, so decode has none) — Kathryn's skip warning at elaboration is the
+honest list, and the unfilled wires read implicit zero until
+rename/allocation lands and overlays them at its own rung. FOUND ON THE WAY:
+sibling TOP-LEVEL modules share no ancestor, so `emit_verilog` panics
+(`find_common_ancestor_module_paths`); stages must be constructed INSIDE one
+parent module's `@init` — the shape the eventual top CPU module has anyway,
+and gen/build_flow do not catch it, only emission does.
 
 **`carolyne/uarch/o3/decode_helper.py`** — `build_decode_table(config,
 name="decode")` (2026-08-22), the decoded-µop record, **one row per
