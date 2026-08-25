@@ -216,10 +216,19 @@ Immediates are deliberately NOT an `Operand` target — the µop record carries
   distinction this layer refuses to make — and nothing consumes such a list
   yet. `STANDARD_UNITS`/`STANDARD_OPS` existed briefly on 2026-08-14 and
   were deleted; don't restore them from git.
-- **`Uop(name, uop_idx, srcs, dests, matcher_field, matcher_value)`** — one µop
+- **`Uop(name, uop_idx, srcs, dests)`** — one µop
   template, and since 2026-08-23 the KIND itself: `name` is what this operation
   IS (`"ADD"`, `"ADDI"`), required, non-empty, held unique across the ISA by
-  `IsaBase`. Decision (2026-08-24): **`uop_idx` is DECLARED on the template**,
+  `IsaBase`. Decision (2026-08-24, later the same day as `uop_idx`): the
+  template carries **NO MATCHER** — `matcher_field`/`matcher_value` lived on
+  `Uop` and were DELETED, because the encoding side (`Mop` + `UopSeq`) already
+  has sufficient data to pick an instruction and a template is the OPERATION,
+  never its encoding. RV32I's forty funct rules moved from `riscv/uop.py` onto
+  their `UopSeq`s in `riscv/mop.py`, where they sit beside the opcode they
+  refine. COST, accepted: templates that differed only by matcher are now
+  value-equal but for name and id (ecall/ebreak), and a decoder's guard is
+  built from the mop + uop_seq pair alone (`_collect_matchers`).
+  Decision (2026-08-24): **`uop_idx` is DECLARED on the template**,
   required, second positional — the id the hardware plane speaks (every
   record's `uop_idx` field), no longer read off the template's position in
   `isa.uops`. The field is AUTHORITATIVE: tuple order is declaration order and
@@ -277,7 +286,9 @@ Immediates are deliberately NOT an `Operand` target — the µop record carries
   (`field_match.py`) — holds the two halves to each other, which neither can
   do alone: one value per segment, each narrow enough for the segment it
   tests. A field alone is legal (positions stated, nothing tested — the state
-  RV32I is in); a value alone is not. Called by `Uop`, `UopSeq` and `Mop`.
+  RV32I is in); a value alone is not. Called by `UopSeq` and `Mop` — the
+  encoding side's holders; `Uop` called it too until its matcher went
+  (2026-08-24).
   **/ `UopSeq(uops, matcher_field, matcher_value)` /
   `Mop(matcher_field, matcher_value, uop_seq)`** (`mop.py`) — the encoding
   side, still preliminary. Decision: the matcher is **TWO SLOTS**, not one
@@ -423,8 +434,9 @@ the µop record as `ExecContext.pc()` (2026-08-22; `AluUnit`'s AUIPC uses it,
 the jumps' link value will), `FUNCT3_7 = FUNCT3
 | FUNCT7` spans both fields, and **every matcher in the package now states its
 value** — `FM.val(...)` beside the field, opcode values on the eleven `Mop`
-groups and funct values on the 37 templates that name a field (LUI/AUIPC/JAL
-name none: their opcode alone identifies them, and that is the Mop's rule). So
+groups and funct values on the `UopSeq`s (since 2026-08-24 — templates carry
+no matcher; LUI/AUIPC/JAL's seqs name no field: their opcode alone identifies
+them, and that is the Mop's rule). So
 add-vs-sub and ecall-vs-ebreak are genuinely distinguishable, and
 `check_matcher_pair` catches a mis-sized value at import.
 
@@ -965,24 +977,69 @@ description cannot yet tell it from an immediate, so `valid_<n>` is what the
 decoder has to answer honestly per slot. The table is
 `reset(valid=0, active_<n>=0)`: a lane powers up empty with no slot claimed.
 
-**`carolyne/uarch/o3/decode.py`** — **`Decode`** (2026-08-23), the stage
-SHELL: `decode_meta` (its own `PipCon`, the arb fetch zyncs on to hand a row
-over), the decode table, the ISA's operand cores, the flattened match table,
-and the two slots `connect()` fills — the fetch rows to read and the consumer's
-arb to contend on. The flow that moves rows through it is NOT written yet.
+**`carolyne/uarch/o3/decode.py`** — **`Decode`** (2026-08-24), the whole
+stage in one Module: the table, `decode_meta`, the two `connect()` slots
+(`fetch`, `next_meta` — the wiring call itself still pending), and the decode
+logic as methods (a separate `laneDecoder` class held them for a day and was
+MERGED in — one stage, one object). A `UopSeq` may
+crack an instruction into SEVERAL µops, and decode walks them BREADTH-FIRST,
+one LEVEL per cycle: **`transfer()`** (`@flow`, the name `Fetch` uses — and
+`decode` is taken: `self.decode` is the TABLE) builds
+`pip(decode_meta){ seq{ zync(next_meta){ per-lane guards }, … one per level } }`.
+Decision: one seq child per level — a Kathryn seq child gets its own
+StateNode, so a child IS a cycle — and every level is a **zync on the
+consumer's arb**: its writes fire on `state & grant`, so the walk paces
+itself on the handshake and needs no explicit exit. The pip holds fetch for
+the whole walk (`master_ack` low mid-body), so the instr word is stable at
+every level; cost, accepted: one instruction per N cycles, N = the longest
+crack (RV32I: N = 1, nothing changes). A `par` per level was in the sketch
+and DROPPED — it buys nothing around a single zync, and the pip body must
+hold exactly one top-level child (the seq). **`group_uops_by_level(isa)`** flattens
+the mop table for the walk: one path per (mop, uop_seq), guarded by EVERY
+stated (field, value) rule on it — the mop's and the uop_seq's, the whole
+encoding side (a template carries no matcher), the SAME conjunction at every
+level so the identity cannot drift mid-crack; a half-stated matcher is
+dropped, a path with no rule at all is refused; `levels[k]` holds the k-th
+µop of every longer uop_seq.
+**`mop_decode(level, …)`** lays one INDEPENDENT zif per path alive at the
+level — parallel, no zelif chain, since the encoding table's own mutual
+exclusivity makes priority redundant — with the guard built by
+`match_field_bits`. **`uop_decode(uop, …)`** writes the WHOLE record for a
+matched lane in ONE `|=`: valid=1, pc, npc = pc + ilen_bytes, `uop_idx` (the
+template's declared id), and a field group per atomic operand, ZEROS for
+slots the µop does not fill — the rows are REGs, and silence would keep the
+previous instruction's claim. Decision: **matcher presence separates an
+immediate from a linking µtemp** — an is_intermediate source WITH a matcher
+is an immediate (valid=1, data extracted); WITHOUT one it is produced by an
+earlier µop of the same crack, so valid=0, data=0, active=1 (LIMIT: nothing
+wakes a linking µtemp downstream yet — that is the cracker/rename story).
+**`write_lane_default`** is the no-hit half: valid=0, once per lane per
+level, at **`PRI_DECODE_DEFAULT`** (`priority.py`) — the ladder's one
+BELOW-user rung, because at EQUAL priority an unconditional write is emitted
+after (and silently beats) every zif write; one rung down, every matched
+branch beats the default and a no-hit level hands a bubble. The earlier flat
+`decode_templates` design and its multi-µop refusal are SUPERSEDED by
+`group_uops_by_level`; `tests/test_decode_templates.py` (untracked) still pins the
+old shape and needs rewriting against `group_uops_by_level`.
 
-**`decode_templates(isa)`** is the part that is: the mop table flattened for
-matching, mop → variant → µop becoming one `DecodeTemplate` per decodable
-instruction, carrying every (field, value) rule on its path — the mop's opcode
-AND the variant's funct — plus `uop_idx`, the µop's place in `isa.uops`. A
-matcher with no VALUE tests nothing and is dropped; a template left with no rule
-at all is REFUSED, since nothing would tell it from its neighbours; and a
-`UopSeq` of several µops is REFUSED, because one lane has one record row and
-cracking needs a lane expansion this stage has not got (x86's AGU→LOAD→ADD→STORE
-is exactly that shape). `tests/test_decode_templates.py` evaluates the same
-tuples in pure Python and pins that all 40 RV32I encodings pick EXACTLY ONE
-template — which is what will let a decoder's per-template writes need no
-priority between them.
+**`carolyne/uarch/common/word_util.py`** (2026-08-24) — reading the word by
+the description's rules. Decode is the ONE legitimate consumer (§2: nothing
+downstream carries the raw word), but the helpers live in `common/` beside
+`hw_util` on that package's terms: NO Kathryn import, `word` opaque — an int
+under pytest, a signal under elaboration, typed `Any` on purpose (the
+ExecContext bargain), while the rule parameters are real description types.
+Decision: **`extract_field_bits` returns a SLICE for a one-segment field on
+a signal** — a slice is a view, so the emitted Verilog is a bare part-select
+with no shift/mask wires — and falls back to full-width shift-and-OR for
+ints and scrambled fields, because a slice's width is the segment's own
+(shifting one left for placement TRUNCATES — measured) and Kathryn has no
+concat. `extract_arch_index` reads a literal index as the implicit register
+and a FieldRef through the operand's matcher, refusing one without;
+`extract_imm_value` is STILL the extraction-gap placeholder (naive
+first-segment-lowest, no sign extension, no placement — wrong for
+imm_b/imm_j; the real rule swaps in there); `match_field_bits` is the guard
+half — per-segment equals, AND-ed, slice compares on signals. Names are
+verb-first on purpose.
 
 `FetchDT` is now **`FetchEntryBase`** (2026-08-23), the name every other record
 in the core has (`DecodeEntryBase`, `RsvEntryBase`, `RobEntry`).

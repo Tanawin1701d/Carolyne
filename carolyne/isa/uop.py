@@ -18,7 +18,10 @@
 # Operand counts are capped at the record's shape (§2: src[0..2], dest[0..1]).
 # An instruction family sharing one shape is a factory function in the per-ISA
 # package. The template names no unit: which ExecUnit executes it is answered
-# by the unit set at elaboration.
+# by the unit set at elaboration. It carries NO matcher either — picking an
+# instruction out of the word is the ENCODING side's job, and Mop/UopSeq
+# (mop.py) hold those rules; a template names the operation, never its
+# encoding.
 # A slot holds an Operand and nothing else, and this is the one place that sees
 # both an operand's own role and its position, so it holds them to each other.
 # No first/last bound here — that comes from position in the cracker sequence.
@@ -28,10 +31,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional, Tuple, Union
+from typing import Tuple, Union
 
 from .atomic_operand import DEST_ROLES, SRC_ROLES
-from .field_match import InstrFieldMatch, InstrValueMatch, check_matcher_pair
 from .operand import FieldRef, Operand
 
 ImmRule = Union[int, FieldRef]
@@ -44,13 +46,11 @@ MAX_DESTS = 2       # 2nd dest: flags write (x86), link reg
 @dataclass(frozen=True)
 class Uop:
 
-    name    : str                                     # what this µop IS, e.g. "ADD"
-    uop_idx : int                                     # the id the hardware plane speaks;
-                                                      # unique + dense per ISA (IsaBase)
+    name    : str                       # what this µop IS, e.g. "ADD"
+    uop_idx : int                       # the id the hardware plane speaks;
+                                        # unique + dense per ISA (IsaBase)
     srcs    : Tuple[Operand, ...] = ()
     dests   : Tuple[Operand, ...] = ()
-    matcher_field : Optional[InstrFieldMatch] = None  # which bits pick this template
-    matcher_value : Optional[InstrValueMatch] = None  # what they must equal, per segment
 
     def __post_init__(self) -> None:
         if not (isinstance(self.name, str) and self.name):
@@ -80,8 +80,6 @@ class Uop:
                         f"Uop '{self.name}': {kind} slot {slot} holds an operand "
                         f"declared {operand.role} — an operand's role must match "
                         f"the list it sits in")
-        check_matcher_pair(self.matcher_field, self.matcher_value,
-                           where=f"Uop '{self.name}'")
 
     def __str__(self) -> str:
         return self.name

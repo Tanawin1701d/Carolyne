@@ -16,13 +16,10 @@
 # is therefore its own µop rather than "ADD with the other second-operand
 # rule", and a stage body that means both guards on both.
 #
-# Each template declares its own matcher: the funct field that picks it out of
-# its opcode group, plus the value that field must equal (`FM.val(...)`, one
-# value per segment, in the field's own segment order). Where an instruction
-# needs BOTH funct3 and funct7 (add vs sub, srl vs sra, the shift-immediates)
-# it names FM.FUNCT3_7, one rule spanning both fields. LUI/AUIPC/JAL name no
-# field and no value: their opcode alone identifies them, and the opcode is
-# the Mop's rule.
+# A template carries NO matcher: picking an instruction out of the word is
+# the ENCODING side's job, and the funct rules live on the UopSeq variants in
+# mop.py beside the opcode they refine. A template names the operation only —
+# which is why ecall and ebreak are equal here but for name and id.
 #
 # Width, sign and branch condition are distinct µops, not sub-fields of one
 # LOAD/STORE/BR_COND kind, so the file is 1:1 with the listing and the record
@@ -46,16 +43,15 @@
 #
 # KNOWN GAPS carried from the layer below:
 # - A value says WHICH BITS but not where each segment lands in an assembled
-#   field, so the funct matchers here are complete but the immediate
-#   *extractors* still are not (field_match.py). Discriminating works;
-#   building the immediate value does not.
+#   field, so the mop table discriminates but the immediate *extractors*
+#   still do not exist (field_match.py). Picking works; building the
+#   immediate value does not.
 # - The branch/jump redirect is not expressed: the control FU takes it from
 #   the op plus the immediate, and no dest names it.
 
 from __future__ import annotations
 
 from ..uop import Uop
-from . import field_match as FM
 from .operand import (OPR_IMM_B, OPR_IMM_I, OPR_IMM_J, OPR_IMM_S,
                       OPR_IMM_SHAMT, OPR_IMM_U, OPR_RD, OPR_RS1, OPR_RS2)
 
@@ -68,86 +64,74 @@ _SHIFT = (OPR_RS1, OPR_IMM_SHAMT)           # shift-imm: register + 5-bit count
 _REG   = (OPR_RS1, OPR_RS2)                 # op:     two registers
 
 # --- U-type, opcode 0110111 / 0010111: rd = imm ------------------------------
-# No funct field: the opcode alone identifies these, so no matcher at all.
 UOP_LUI   = Uop("LUI",   0, srcs=(OPR_IMM_U,), dests=_RD)   # rd = imm_u << 12
 UOP_AUIPC = Uop("AUIPC", 1, srcs=(OPR_IMM_U,), dests=_RD)   # rd = pc + (imm_u << 12)
 
 # --- jumps, opcode 1101111 / 1100111: rd = pc + ilen, then redirect ----------
 # rd = pc + ilen, then redirect: jal to pc + imm (target known at decode),
 # jalr to (rs1 + imm) & ~1 (known at execute). One µop, so nothing cracks.
-UOP_JAL  = Uop("JAL",  2, srcs=(OPR_IMM_J,), dests=_RD)               # opcode alone
-UOP_JALR = Uop("JALR", 3, srcs=_ADDR, dests=_RD,
-               matcher_field=FM.FUNCT3, matcher_value=FM.val(0b000))
+UOP_JAL  = Uop("JAL",  2, srcs=(OPR_IMM_J,), dests=_RD)
+UOP_JALR = Uop("JALR", 3, srcs=_ADDR, dests=_RD)
 
 # --- B-type, opcode 1100011: redirect when the test holds, no destination ----
-UOP_BEQ  = Uop("BEQ",  4, srcs=_BR, matcher_field=FM.FUNCT3, matcher_value=FM.val(0b000))
-UOP_BNE  = Uop("BNE",  5, srcs=_BR, matcher_field=FM.FUNCT3, matcher_value=FM.val(0b001))
-UOP_BLT  = Uop("BLT",  6, srcs=_BR, matcher_field=FM.FUNCT3, matcher_value=FM.val(0b100))
-UOP_BGE  = Uop("BGE",  7, srcs=_BR, matcher_field=FM.FUNCT3, matcher_value=FM.val(0b101))
-UOP_BLTU = Uop("BLTU", 8, srcs=_BR, matcher_field=FM.FUNCT3, matcher_value=FM.val(0b110))
-UOP_BGEU = Uop("BGEU", 9, srcs=_BR, matcher_field=FM.FUNCT3, matcher_value=FM.val(0b111))
+UOP_BEQ  = Uop("BEQ",  4, srcs=_BR)
+UOP_BNE  = Uop("BNE",  5, srcs=_BR)
+UOP_BLT  = Uop("BLT",  6, srcs=_BR)
+UOP_BGE  = Uop("BGE",  7, srcs=_BR)
+UOP_BLTU = Uop("BLTU", 8, srcs=_BR)
+UOP_BGEU = Uop("BGEU", 9, srcs=_BR)
 
 BRANCHES = (UOP_BEQ, UOP_BNE, UOP_BLT, UOP_BGE, UOP_BLTU, UOP_BGEU)
 
 # --- I-type loads, opcode 0000011: rd = mem[rs1 + imm] -----------------------
-UOP_LB  = Uop("LB",  10, srcs=_ADDR, dests=_RD, matcher_field=FM.FUNCT3, matcher_value=FM.val(0b000))
-UOP_LH  = Uop("LH",  11, srcs=_ADDR, dests=_RD, matcher_field=FM.FUNCT3, matcher_value=FM.val(0b001))
-UOP_LW  = Uop("LW",  12, srcs=_ADDR, dests=_RD, matcher_field=FM.FUNCT3, matcher_value=FM.val(0b010))
-UOP_LBU = Uop("LBU", 13, srcs=_ADDR, dests=_RD, matcher_field=FM.FUNCT3, matcher_value=FM.val(0b100))
-UOP_LHU = Uop("LHU", 14, srcs=_ADDR, dests=_RD, matcher_field=FM.FUNCT3, matcher_value=FM.val(0b101))
+UOP_LB  = Uop("LB",  10, srcs=_ADDR, dests=_RD)
+UOP_LH  = Uop("LH",  11, srcs=_ADDR, dests=_RD)
+UOP_LW  = Uop("LW",  12, srcs=_ADDR, dests=_RD)
+UOP_LBU = Uop("LBU", 13, srcs=_ADDR, dests=_RD)
+UOP_LHU = Uop("LHU", 14, srcs=_ADDR, dests=_RD)
 
 LOADS = (UOP_LB, UOP_LH, UOP_LW, UOP_LBU, UOP_LHU)
 
 # --- S-type stores, opcode 0100011: mem[rs1 + imm] = rs2 ---------------------
-UOP_SB = Uop("SB", 15, srcs=_STORE, matcher_field=FM.FUNCT3, matcher_value=FM.val(0b000))
-UOP_SH = Uop("SH", 16, srcs=_STORE, matcher_field=FM.FUNCT3, matcher_value=FM.val(0b001))
-UOP_SW = Uop("SW", 17, srcs=_STORE, matcher_field=FM.FUNCT3, matcher_value=FM.val(0b010))
+UOP_SB = Uop("SB", 15, srcs=_STORE)
+UOP_SH = Uop("SH", 16, srcs=_STORE)
+UOP_SW = Uop("SW", 17, srcs=_STORE)
 
 STORES = (UOP_SB, UOP_SH, UOP_SW)
 
 # --- I-type ALU, opcode 0010011: rd = rs1 op imm -----------------------------
-UOP_ADDI  = Uop("ADDI",  18, srcs=_IMM, dests=_RD, matcher_field=FM.FUNCT3, matcher_value=FM.val(0b000))
-UOP_SLTI  = Uop("SLTI",  19, srcs=_IMM, dests=_RD, matcher_field=FM.FUNCT3, matcher_value=FM.val(0b010))
-UOP_SLTIU = Uop("SLTIU", 20, srcs=_IMM, dests=_RD, matcher_field=FM.FUNCT3, matcher_value=FM.val(0b011))
-UOP_XORI  = Uop("XORI",  21, srcs=_IMM, dests=_RD, matcher_field=FM.FUNCT3, matcher_value=FM.val(0b100))
-UOP_ORI   = Uop("ORI",   22, srcs=_IMM, dests=_RD, matcher_field=FM.FUNCT3, matcher_value=FM.val(0b110))
-UOP_ANDI  = Uop("ANDI",  23, srcs=_IMM, dests=_RD, matcher_field=FM.FUNCT3, matcher_value=FM.val(0b111))
+UOP_ADDI  = Uop("ADDI",  18, srcs=_IMM, dests=_RD)
+UOP_SLTI  = Uop("SLTI",  19, srcs=_IMM, dests=_RD)
+UOP_SLTIU = Uop("SLTIU", 20, srcs=_IMM, dests=_RD)
+UOP_XORI  = Uop("XORI",  21, srcs=_IMM, dests=_RD)
+UOP_ORI   = Uop("ORI",   22, srcs=_IMM, dests=_RD)
+UOP_ANDI  = Uop("ANDI",  23, srcs=_IMM, dests=_RD)
 
-# Shift-immediate: funct3 picks the direction, funct7 logical vs arithmetic.
-# Two segments in FUNCT3_7, so two values, funct3 first — that is the order
-# FUNCT3_7 was unioned in (field_match.py).
-UOP_SLLI = Uop("SLLI", 24, srcs=_SHIFT, dests=_RD,
-               matcher_field=FM.FUNCT3_7, matcher_value=FM.val(0b001, 0b0000000))
-UOP_SRLI = Uop("SRLI", 25, srcs=_SHIFT, dests=_RD,
-               matcher_field=FM.FUNCT3_7, matcher_value=FM.val(0b101, 0b0000000))
-UOP_SRAI = Uop("SRAI", 26, srcs=_SHIFT, dests=_RD,
-               matcher_field=FM.FUNCT3_7, matcher_value=FM.val(0b101, 0b0100000))
+# Shift-immediate: SHAMT rather than IMM_I — a 5-bit count, not a 12-bit value.
+UOP_SLLI = Uop("SLLI", 24, srcs=_SHIFT, dests=_RD)
+UOP_SRLI = Uop("SRLI", 25, srcs=_SHIFT, dests=_RD)
+UOP_SRAI = Uop("SRAI", 26, srcs=_SHIFT, dests=_RD)
 
 # --- R-type, opcode 0110011: rd = rs1 op rs2 ---------------------------------
-UOP_ADD  = Uop("ADD",  27, srcs=_REG, dests=_RD,
-               matcher_field=FM.FUNCT3_7, matcher_value=FM.val(0b000, 0b0000000))
-UOP_SUB  = Uop("SUB",  28, srcs=_REG, dests=_RD,
-               matcher_field=FM.FUNCT3_7, matcher_value=FM.val(0b000, 0b0100000))
-UOP_SLL  = Uop("SLL",  29, srcs=_REG, dests=_RD, matcher_field=FM.FUNCT3, matcher_value=FM.val(0b001))
-UOP_SLT  = Uop("SLT",  30, srcs=_REG, dests=_RD, matcher_field=FM.FUNCT3, matcher_value=FM.val(0b010))
-UOP_SLTU = Uop("SLTU", 31, srcs=_REG, dests=_RD, matcher_field=FM.FUNCT3, matcher_value=FM.val(0b011))
-UOP_XOR  = Uop("XOR",  32, srcs=_REG, dests=_RD, matcher_field=FM.FUNCT3, matcher_value=FM.val(0b100))
-UOP_SRL  = Uop("SRL",  33, srcs=_REG, dests=_RD,
-               matcher_field=FM.FUNCT3_7, matcher_value=FM.val(0b101, 0b0000000))
-UOP_SRA  = Uop("SRA",  34, srcs=_REG, dests=_RD,
-               matcher_field=FM.FUNCT3_7, matcher_value=FM.val(0b101, 0b0100000))
-UOP_OR   = Uop("OR",   35, srcs=_REG, dests=_RD, matcher_field=FM.FUNCT3, matcher_value=FM.val(0b110))
-UOP_AND  = Uop("AND",  36, srcs=_REG, dests=_RD, matcher_field=FM.FUNCT3, matcher_value=FM.val(0b111))
+UOP_ADD  = Uop("ADD",  27, srcs=_REG, dests=_RD)
+UOP_SUB  = Uop("SUB",  28, srcs=_REG, dests=_RD)
+UOP_SLL  = Uop("SLL",  29, srcs=_REG, dests=_RD)
+UOP_SLT  = Uop("SLT",  30, srcs=_REG, dests=_RD)
+UOP_SLTU = Uop("SLTU", 31, srcs=_REG, dests=_RD)
+UOP_XOR  = Uop("XOR",  32, srcs=_REG, dests=_RD)
+UOP_SRL  = Uop("SRL",  33, srcs=_REG, dests=_RD)
+UOP_SRA  = Uop("SRA",  34, srcs=_REG, dests=_RD)
+UOP_OR   = Uop("OR",   35, srcs=_REG, dests=_RD)
+UOP_AND  = Uop("AND",  36, srcs=_REG, dests=_RD)
 
 # --- outside the base listing above, but part of RV32I -----------------------
-# ecall and ebreak share opcode 1110011 AND funct3 000; the whole imm[11:0] is
-# what tells them apart, which is why their matcher is IMM_I and not FUNCT3.
 # fence orders earlier memory ops before later ones: no register dataflow and
 # no result. ecall/ebreak raise at commit and redirect to the handler — where
-# to is the §6 trap policy, which has no type yet.
-UOP_FENCE  = Uop("FENCE",  37, matcher_field=FM.FUNCT3, matcher_value=FM.val(0b000))
-UOP_ECALL  = Uop("ECALL",  38, matcher_field=FM.IMM_I, matcher_value=FM.val(0b000000000000))
-UOP_EBREAK = Uop("EBREAK", 39, matcher_field=FM.IMM_I, matcher_value=FM.val(0b000000000001))
+# to is the §6 trap policy, which has no type yet. What tells ecall from
+# ebreak is their UopSeq's IMM_I value (mop.py).
+UOP_FENCE  = Uop("FENCE",  37)
+UOP_ECALL  = Uop("ECALL",  38)
+UOP_EBREAK = Uop("EBREAK", 39)
 
 UOPS = (UOP_LUI, UOP_AUIPC, UOP_JAL, UOP_JALR,
         UOP_BEQ, UOP_BNE, UOP_BLT, UOP_BGE, UOP_BLTU, UOP_BGEU,

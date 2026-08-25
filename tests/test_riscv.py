@@ -223,19 +223,20 @@ def test_the_mop_table_wraps_every_uop_template_exactly_once():
 
 def test_every_matcher_in_the_table_states_a_value():
     # The table is discriminable: wherever a rule names bits, it also says what
-    # those bits must equal. Only LUI/AUIPC/JAL name no field at all — their
-    # opcode alone identifies them, and that opcode is the Mop's rule.
+    # those bits must equal. The rules live on the Mops and UopSeqs — a Uop
+    # template carries no matcher. Only LUI/AUIPC/JAL's seqs name no field:
+    # their opcode alone identifies them, and that opcode is the Mop's rule.
     isa = Rv32i()
     for mop in isa.mops:
         assert mop.matcher_field is FM.OPCODE and mop.matcher_value is not None
         for seq in mop.uop_seq:
-            for uop in seq.uops:
-                if uop.matcher_field is None:
-                    assert uop.matcher_value is None, uop.name
-                else:
-                    assert uop.matcher_value is not None, uop.name
+            if seq.matcher_field is None:
+                assert seq.matcher_value is None, seq.uops[0].name
+            else:
+                assert seq.matcher_value is not None, seq.uops[0].name
 
-    no_funct = [u.name for u in UOPS if u.matcher_field is None]
+    no_funct = [seq.uops[0].name for mop in isa.mops for seq in mop.uop_seq
+                if seq.matcher_field is None]
     assert no_funct == ["LUI", "AUIPC", "JAL"]              # opcode alone
 
     # Every opcode in the table is distinct — 11 groups, 11 patterns.
@@ -243,12 +244,16 @@ def test_every_matcher_in_the_table_states_a_value():
     assert len(set(opcodes)) == len(opcodes) == 11
     assert (0b0110011,) in opcodes and (0b1110011,) in opcodes
 
-    # ecall vs ebreak: identical but for the imm value, which now separates them.
-    ecall, ebreak = U.UOP_ECALL, U.UOP_EBREAK
-    assert ecall.srcs == ebreak.srcs and ecall.matcher_field is ebreak.matcher_field
-    assert ecall.matcher_value.match_value == (0b000000000000,)
-    assert ebreak.matcher_value.match_value == (0b000000000001,)
-    assert ecall != ebreak
+    # ecall vs ebreak: equal templates but for name and id; the imm value on
+    # their UopSeqs is what separates the encodings.
+    system = next(m for m in isa.mops
+                  if m.matcher_value.match_value == (0b1110011,))
+    ecall_seq, ebreak_seq = system.uop_seq
+    assert ecall_seq.uops == (U.UOP_ECALL,)
+    assert ecall_seq.matcher_field is FM.IMM_I is ebreak_seq.matcher_field
+    assert ecall_seq.matcher_value.match_value  == (0b000000000000,)
+    assert ebreak_seq.matcher_value.match_value == (0b000000000001,)
+    assert U.UOP_ECALL != U.UOP_EBREAK          # name and id still differ
 
 
 def test_the_six_instruction_formats_tile_the_word():

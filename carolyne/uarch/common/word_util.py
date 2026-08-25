@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from carolyne.isa import InstrFieldMatch, Operand
+from carolyne.isa import InstrFieldMatch, InstrValueMatch, Operand
 
 
 def extract_field_bits(word: Any, field: InstrFieldMatch) -> Any:
@@ -36,6 +36,25 @@ def extract_field_bits(word: Any, field: InstrFieldMatch) -> Any:
         value = segment if value is None else value | segment
         pos  += end - start
     return value
+
+
+def match_field_bits(word: Any,
+                     field: InstrFieldMatch,
+                     value: InstrValueMatch) -> Any:
+    """True when every segment of the field equals its stated value.
+
+    - one compare per (segment, value) pair, AND-ed
+    - sliceable word -> slice compare (a bare part-select, no shift/mask)
+    - int word -> shift-and-mask compare, same bits
+    """
+    hit = None
+    for (start, end), want in zip(field.match_idx, value.match_value):
+        if isinstance(word, int):
+            compare = ((word >> start) & ((1 << (end - start)) - 1)) == want
+        else:
+            compare = word[end - 1, start] == want
+        hit = compare if hit is None else hit & compare
+    return hit
 
 
 def extract_arch_index(word: Any, operand: Operand) -> Any:

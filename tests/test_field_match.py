@@ -108,42 +108,48 @@ def test_value_union_runs_in_step_with_the_field_union():
 def test_the_holder_of_both_halves_checks_the_pairing():
     # Neither type can validate the other — a field does not know what values
     # test it, a value does not know its segments — so the holder does it.
+    # The holders are the ENCODING side, Mop and UopSeq; a Uop carries no
+    # matcher at all (the template names the operation, never its encoding).
     from carolyne.isa import Mop, Uop, UopSeq
 
-    funct3, add = InstrFieldMatch("funct3", ((12, 15),)), "ADD"
-    uop = Uop(add, 0, matcher_field=funct3, matcher_value=InstrValueMatch((0b000,)))
-    assert uop.matcher_value.match_value == (0,)
+    funct3, add = InstrFieldMatch("funct3", ((12, 15),)), Uop("ADD", 0)
+    seq = UopSeq(uops=(add,), matcher_field=funct3,
+                 matcher_value=InstrValueMatch((0b000,)))
+    assert seq.matcher_value.match_value == (0,)
 
     with pytest.raises(ValueError):                 # 4 bits into a 3-bit segment
-        Uop(add, 0, matcher_field=funct3, matcher_value=InstrValueMatch((0b1000,)))
+        UopSeq(uops=(add,), matcher_field=funct3,
+               matcher_value=InstrValueMatch((0b1000,)))
     with pytest.raises(ValueError):                 # 2 values, 1 segment
-        Uop(add, 0, matcher_field=funct3, matcher_value=InstrValueMatch((0, 0)))
+        UopSeq(uops=(add,), matcher_field=funct3,
+               matcher_value=InstrValueMatch((0, 0)))
     with pytest.raises(ValueError):                 # nothing to test against
-        Uop(add, 0, matcher_value=InstrValueMatch((0b000,)))
+        UopSeq(uops=(add,), matcher_value=InstrValueMatch((0b000,)))
 
     # A field with no value is legal: positions stated, nothing tested yet.
-    assert Uop(add, 0, matcher_field=funct3).matcher_value is None
+    assert UopSeq(uops=(add,), matcher_field=funct3).matcher_value is None
 
-    # The same check guards the other two holders.
-    with pytest.raises(ValueError):
-        UopSeq(uops=(Uop(add, 0),), matcher_value=InstrValueMatch((0,)))
+    # The same check guards the other holder.
     with pytest.raises(ValueError):
         Mop(matcher_field=funct3, matcher_value=InstrValueMatch((0b1000,)),
-            uop_seq=(UopSeq(uops=(Uop(add, 0),)),))
+            uop_seq=(UopSeq(uops=(add,)),))
 
 
 def test_rv32i_uses_a_union_where_one_field_cannot_select():
-    from carolyne.isa.riscv import field_match as FM, uop as U
+    from carolyne.isa.riscv import field_match as FM, mop as M, uop as U
 
     assert FM.FUNCT3_7.match_idx == FM.FUNCT3.match_idx + FM.FUNCT7.match_idx
     # add vs sub, srl vs sra, and the three shift-immediates need both fields.
-    both = [u for u in U.UOPS if u.matcher_field is FM.FUNCT3_7]
+    # The rules live on the UopSeqs — a template carries no matcher.
+    seqs   = [seq for mop in M.MOP_TABLE for seq in mop.uop_seq]
+    both   = [seq for seq in seqs if seq.matcher_field is FM.FUNCT3_7]
+    by_uop = {seq.uops[0].name: seq for seq in seqs}
     assert len(both) == 7
-    assert U.UOP_ADD.matcher_field is FM.FUNCT3_7
-    assert U.UOP_SLT.matcher_field is FM.FUNCT3
+    assert by_uop["ADD"].matcher_field is FM.FUNCT3_7
+    assert by_uop["SLT"].matcher_field is FM.FUNCT3
     # And the values make them actually distinguishable: same field, same
     # funct3, different funct7 — the pair the union exists for.
-    assert U.UOP_ADD.matcher_value.match_value == (0b000, 0b0000000)
-    assert U.UOP_SUB.matcher_value.match_value == (0b000, 0b0100000)
-    assert U.UOP_ADD.matcher_field is U.UOP_SUB.matcher_field
-    assert U.UOP_ADD != U.UOP_SUB
+    assert by_uop["ADD"].matcher_value.match_value == (0b000, 0b0000000)
+    assert by_uop["SUB"].matcher_value.match_value == (0b000, 0b0100000)
+    assert by_uop["ADD"].matcher_field is by_uop["SUB"].matcher_field
+    assert U.UOP_ADD != U.UOP_SUB       # name and id still tell them apart
