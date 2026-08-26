@@ -19,6 +19,14 @@ from carolyne.uarch.o3.operand_field import ACTIVE, AR_IDX, field_name
 from carolyne.uarch.o3.reg_arch_mng import collect_arch_dest_atm_oprs
 
 
+def booking_ok(block):
+    """READY-polarity read of a block's over_use: its bookings all fit.
+
+    Works on anything with the port — TagGen and every class's Prf.
+    """
+    return ~to_ref(block.over_use)
+
+
 class Dispatch(Module):
 
     def __init__(self, config: CPUO3_Config):
@@ -37,10 +45,15 @@ class Dispatch(Module):
         self.arch_dest_atm_oprs = collect_arch_dest_atm_oprs(
             self.config.isa, f"dispatch of ISA '{self.config.isa.name}'")
 
+        # every resource this cycle's bundle books is available — the AND of
+        # what the warm_* calls return, what the handshake stalls on
+        self.ready_to_go = wire(1, "dispatch_ready_to_go")
+
         self.decode       = None    # the decode stage's rows, from connect()
         self.next_meta    = None    # the consumer's arb, from connect()
         self.reg_arch_mng = None    # ARF/PRF/RT per class, from connect()
         self.tag_gen      = None    # the speculation-tag allocator, from connect()
+        self.rob          = None    # the reorder buffer, from connect()
 
 
     # warm system means wire connect / no update register typically used for protocol handshake and give promiss data
@@ -54,6 +67,7 @@ class Dispatch(Module):
           (is_branch, is_spec, tag) — the request bit beside what the bus's
           is_spec/spec_tag will carry
         - nothing commits here: the counters move on TagGen's update half
+        - returns READY: no lane booked a tag the pool has not got
         """
         self.tag_acquisition = {}
         for lane in range(self.config.fe_lanes):
@@ -62,6 +76,7 @@ class Dispatch(Module):
                          & to_ref(decode_entry.is_branch)
             is_spec, tag = self.tag_gen.book_rename(lane, is_branch)
             self.tag_acquisition[lane] = (is_branch, is_spec, tag)
+        return booking_ok(self.tag_gen)
 
     def warm_prfs(self):
         """Book every lane's allocation on its class's PRF — wires only.
@@ -73,6 +88,7 @@ class Dispatch(Module):
           promised entry the bus will carry
         - nothing commits here: update_prfs (on the grant) is what moves
           free_entry/next_index
+        - returns READY: no class's file ran out under the cycle's bookings
         """
         # one dest per class is the ISA's own rule (IsaBase's
         # _reject_shared_dest_classes), so no lane can book a port twice
@@ -88,6 +104,11 @@ class Dispatch(Module):
                 self.prf_acquisition[(lane, id(atm_opr))] = \
                     (req, prf.book_rename(lane, req))
 
+        ok = val(1, 1)
+        for atm_opr in self.arch_dest_atm_oprs:
+            ok = ok & booking_ok(self.reg_arch_mng.prf(atm_opr.reg_file))
+        return ok
+
 
 
     def warm_rts(self):
@@ -97,6 +118,7 @@ class Dispatch(Module):
           tag_acquisition, ar_idx straight off the decode row
         - book_rename only RECORDS the port's metas; RT's on_rename (the
           update half) is what builds the writes from them
+        - returns READY, constant 1: registering metas runs out of nothing
         """
         for lane in range(self.config.fe_lanes):
             decode_entry            = self.decode[lane]
@@ -112,9 +134,24 @@ class Dispatch(Module):
                     ar_idx = to_ref(getattr(decode_entry,
                                             field_name(AR_IDX, atm_opr)))
                 rt.book_rename(lane, req, is_branch, tag, ar_idx, pr_idx)
+        return val(1, 1)
 
     def warm_rob(self):
-        pass
+        """Ask the ROB where every lane would land — wires only.
+
+        - free_slots reads the DECODE rows' valid bits: the bus's own are
+          driven inside the granted zync, and the fit answer must exist
+          BEFORE the grant it helps decide
+        - the promise lands in self.rob_acquisition as (dispatch_fits,
+          free_idx) — the all-or-nothing room bit and one entry per lane,
+          the rob_des_idx the bus will carry
+        - nothing commits here: update_rob (on the grant) is what writes
+          entries and moves the allocation pointer
+        - returns READY: the whole bundle fits the buffer
+        """
+        fits, free_idx = self.rob.free_slots(self.decode)
+        self.rob_acquisition = (fits, free_idx)
+        return fits
 
     def warm_rsvs(self):
         pass
@@ -156,7 +193,15 @@ class Dispatch(Module):
             rt.on_rename()
 
     def update_rob(self):
-        pass
+        """Commit the cycle's allocations on the ROB.
+
+        - MUST run inside the granted zync: the entry writes and the
+          pointer advance take the grant as their gate there
+        - passes the BUS rows: free_slots already built its wants off the
+          decode rows (warm_rob), so on_dispatch reuses those and takes
+          each entry's CONTENT off the filled lane
+        """
+        self.rob.on_dispatch(self.dispatch)
 
     def update_rsvs(self):
         pass
@@ -166,12 +211,14 @@ class Dispatch(Module):
     @flow
     def transfer(self):
 
-        #
-        self.warm_tag_gen()
-        self.warm_prfs()
-        self.warm_rts()
-        self.warm_rob()
+        # the warm half books, and each call answers whether its resource
+        # is actually available — the AND is the cycle's go/stall bit
+        tag_ok = self.warm_tag_gen()
+        prf_ok = self.warm_prfs()
+        rt_ok  = self.warm_rts()
+        rob_ok = self.warm_rob()
         self.warm_rsvs()
+        self.ready_to_go *= tag_ok & prf_ok & rt_ok & rob_ok
 
         with pip(self.dispatch_meta):
             # inside the zync: everything here fires on the grant only

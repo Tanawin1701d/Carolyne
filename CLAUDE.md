@@ -1129,6 +1129,21 @@ one dest per architectural class is the ISA's own rule
 one operand — the class loop, the `frees` list, its `any_of` and
 `_commit_classes` all dropped; each dest operand drives its class's
 `Prf.on_commit` port directly, still one drive per lane per class.
+Every `warm_*` now RETURNS a 1-bit READY (2026-08-26): availability in
+ready-polarity so the caller ANDs them — `~tag_gen.over_use`,
+`~prf.over_use` per class, `val(1, 1)` from `warm_rts` (registering metas
+runs out of nothing), the ROB's `dispatch_fits` — collected in `transfer()`
+onto the `ready_to_go` wire (`dispatch_ready_to_go`), the cycle's go/stall
+bit the handshake will consume. Both over_use wires are readable at warm
+time because each block's own @flow drives them outside its trigger gate.
+And `warm_rob`: `rob_acquisition = rob.free_slots(self.decode)` — the
+(dispatch_fits, free_idx) promise, with `rob` a fifth connect() slot.
+Deliberately the DECODE rows, not the bus: the bus wires are driven inside
+the granted zync, and the fit answer must exist before the grant it helps
+decide. free_slots caches on `_free_built`, so `update_rob`'s
+`on_dispatch(self.dispatch)` (wired same day, in the granted zync) reuses
+the decode-fed wants while taking row CONTENT off the bus — wants
+pre-grant, entries from the filled lane.
 Then `warm_rts`: each lane registers its rename on its
 class's RT via `Rt.book_rename(lane, req, is_branch, tag, ar_idx, pr_idx)` —
 metas only, no hardware; req/pr_idx read back off `prf_acquisition`,
