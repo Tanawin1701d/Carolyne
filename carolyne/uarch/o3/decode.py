@@ -219,8 +219,9 @@ class Decode(Module):
                 group[field_name(DATA, atm_opr)] = (extract_imm_value(word, operand)
                                                     if is_imm else 0)
         else:
-            group[field_name(WB_REQUIRED, atm_opr)] = int(active
-                                                          and atm_opr.is_write_required)
+            # only a DEST_W_REQ core has the field; there the bit is active
+            if atm_opr.is_write_required:
+                group[field_name(WB_REQUIRED, atm_opr)] = int(active)
 
         if atm_opr.has_arch and atm_opr.reg_file.index_width:
             group[field_name(AR_IDX, atm_opr)] = (extract_arch_index(word, operand)

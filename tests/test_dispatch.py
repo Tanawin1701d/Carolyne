@@ -71,8 +71,9 @@ def test_a_dispatch_row_is_one_group_per_operand():
     assert by_name["src_2"] == ["active", "valid", "data", "pr_idx", "ar_idx"]
     # RV32I's immediate names no register class, so neither index is there.
     assert by_name["src_3"] == ["active", "valid", "data"]
-    # A destination: where the result goes, and whether it must land first.
-    assert by_name["dest_1"] == ["active", "wb_required", "pr_idx", "ar_idx"]
+    # A destination: where the result goes. dest_1 is a plain DEST, so the
+    # wb_required bit drops — the role itself is the constant answer.
+    assert by_name["dest_1"] == ["active", "pr_idx", "ar_idx"]
 
 
 def test_a_lane_carries_the_machine_fields_beside_its_operands():
@@ -107,7 +108,9 @@ def test_a_source_never_promises_a_writeback():
     assert "wb_required" not in SRC_KINDS
     for slot in ("src_1", "src_2", "src_3"):
         assert not _has_field(host.bus, f"wb_required_{slot}"), slot
-    assert _has_field(host.bus, "wb_required_dest_1")
+    # dest_1 is a plain DEST, so even the destination stores no bit here;
+    # only a DEST_W_REQ core does (the flags_out test below).
+    assert not _has_field(host.bus, "wb_required_dest_1")
 
 
 def test_a_destination_waits_on_nothing_and_holds_no_value():
@@ -142,8 +145,9 @@ def test_the_widths_come_from_the_isa_and_the_machine():
     assert fields["ar_idx_src_1"].width == X.index_width == 5          # ISA
     assert fields["data_src_1"].width == X.width == 32
     assert fields["data_src_3"].width == 32          # the µtemp's own width
-    for flag in ("valid_src_1", "active_src_1", "wb_required_dest_1"):
+    for flag in ("valid_src_1", "active_src_1", "active_dest_1"):
         assert fields[flag].width == 1
+    assert "wb_required_dest_1" not in fields    # a plain DEST stores no bit
 
 
 def test_the_bus_is_one_row_per_front_end_lane():

@@ -816,7 +816,7 @@ DESTINATION atomic operand:
 | field             | width                            | what it is                 |
 | ----------------- | -------------------------------- | -------------------------- |
 | `active_<n>`      | 1                                | this instruction writes it |
-| `wb_required_<n>` | 1                                | the writeback must land first |
+| `wb_required_<n>` | 1                                | the writeback must land first (DEST_W_REQ cores only, 2026-08-26) |
 | `pr_idx_<n>`      | `config.phy_idx_width(reg_file)` | rename's physical register |
 | `ar_idx_<n>`      | `reg_file.index_width`           | the architectural register |
 
@@ -1106,7 +1106,30 @@ from the granted scope
 drives the branch ports UNGATED, so without the trigger a stalled cycle
 would consume tags; with it, a cycle where neither rename nor resolve acted
 moves neither counter. `on_mis_pred` stays outside the chain at raised
-priority, as before. Then `warm_rts`: each lane registers its rename on its
+priority, as before. Also 2026-08-26: **`wb_required_<n>` exists only on a
+`DEST_W_REQ` core**, and the rule lives in **`operand_field.field_width`** —
+it answers 0 for the bit on anything else, the same nothing-to-store bargain
+`ar_idx` makes on a one-register class, so EVERY record built through
+`operand_fields` (ROB, decode, dispatch bus, stations) drops it at once. A
+first version put the conditional in `rob_operand_fields` and was moved the
+same day — the caller states WHICH kinds it keeps, the one place that sizes
+them decides where a kind stores nothing. `rsv_helper`'s own role conditional
+collapsed into a plain dest tuple; `decode._operand_group` writes the bit
+(as `active`) only where the record has it. The SEMANTICS, corrected the
+same day: the bit is the per-instruction PERMISSION a `DEST_W_REQ` write
+asks — a plain `DEST` stores none because its write asks none, so
+`Rob._retire` gates the ARF hop on `frees & wb_required` for a DEST_W_REQ
+core and on `frees` ALONE for a plain DEST (a first reading had the hop
+skipped entirely there; wrong way round). FIXED BY THE CORRECTION: RV32I's
+`AOPR_DEST_1` is a plain `DEST` and decode used to store the bit as
+`active & is_write_required` = constant 0, so commit NEVER moved PRF→ARF —
+rd's writes now retire on active alone. And `_retire` FLATTENED (same day):
+one dest per architectural class is the ISA's own rule
+(`_reject_shared_dest_classes`), so the per-class inner loop matched exactly
+one operand — the class loop, the `frees` list, its `any_of` and
+`_commit_classes` all dropped; each dest operand drives its class's
+`Prf.on_commit` port directly, still one drive per lane per class.
+Then `warm_rts`: each lane registers its rename on its
 class's RT via `Rt.book_rename(lane, req, is_branch, tag, ar_idx, pr_idx)` —
 metas only, no hardware; req/pr_idx read back off `prf_acquisition`,
 is_branch/tag off `tag_acquisition` (which now stores the TRIPLE

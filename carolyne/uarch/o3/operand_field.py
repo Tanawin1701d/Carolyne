@@ -7,7 +7,8 @@
 #
 #   active_<n>       1   this µop really fills/writes that slot
 #   valid_<n>        1   a source's value has landed and the entry may issue
-#   wb_required_<n>  1   the WRITEBACK must land before the instruction retires
+#   wb_required_<n>  1   the WRITEBACK must land before the instruction
+#                        retires — DEST_W_REQ cores only, dropped elsewhere
 #   data_<n>         w   the value itself, the class width or the µtemp's
 #   pr_idx_<n>       w   the physical register rename gave it
 #   ar_idx_<n>       w   the architectural register it belongs to
@@ -116,6 +117,10 @@ def field_width(config      : CPUO3_Config,
                 kind        : str,
                 where       : str) -> int:
     """How wide one kind is for this operand. Zero means "nothing to store"."""
+    if kind == WB_REQUIRED and not atm_operand.is_write_required:
+        # only a DEST_W_REQ core stores the bit: everywhere else the role
+        # itself is the constant answer, and a constant needs no storage
+        return 0
     if kind in _FLAG_KINDS:
         return 1
 

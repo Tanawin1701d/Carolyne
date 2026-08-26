@@ -88,13 +88,13 @@ def test_commit_is_as_wide_as_the_config_says():
 def test_every_front_end_lane_allocates_and_the_group_goes_together():
     # A µop goes to ONE station, but every instruction goes to the ROB, so the
     # allocation run is as wide as the front end and asks only whether a lane
-    # is carrying something. The group lands whole or not at all, so every lane
-    # reads the SAME room signal rather than one per lane.
+    # is carrying something. The group lands whole or not at all, so the
+    # return is ONE room bit beside the per-lane indices.
     cfg  = _cfg(fe_lanes=3, commit_lanes=2)
     host = _drive(cfg)
-    slots = host.rob.free_slots(host.disp)
-    assert len(slots) == 3
-    assert len({id(fits) for fits, _idx in slots}) == 1     # one answer, shared
+    fits, free_idx = host.rob.free_slots(host.disp)
+    assert fits is host.rob.dispatch_fits                   # one answer, shared
+    assert len(free_idx) == 3
 
 
 def test_a_group_wider_than_the_buffer_is_refused():

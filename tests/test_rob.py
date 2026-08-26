@@ -58,10 +58,12 @@ def test_a_rob_entry_is_the_machine_shape_plus_the_isa_destinations():
     for field in ("wb_fin", "is_branch", "is_store", "pc"):
         assert _has_field(host.table, field), field
 
-    # The ISA half: one group per DESTINATION core. RV32I writes one register.
-    for field in ("active_dest_1", "wb_required_dest_1", "pr_idx_dest_1",
-                  "ar_idx_dest_1"):
+    # The ISA half: one group per DESTINATION core. RV32I writes one register,
+    # and dest_1 is a plain DEST, so no wb_required bit — the role itself is
+    # the (constant) answer, and a constant needs no storage.
+    for field in ("active_dest_1", "pr_idx_dest_1", "ar_idx_dest_1"):
         assert _has_field(host.table, field), field
+    assert not _has_field(host.table, "wb_required_dest_1")
 
 
 def test_only_destinations_reach_the_rob():
@@ -82,7 +84,7 @@ def test_the_two_indexes_are_sized_from_different_things():
 
     assert fields["pr_idx_dest_1"].width == cfg.phy_idx_width(X) == 6
     assert fields["ar_idx_dest_1"].width == X.index_width == 5
-    assert fields["active_dest_1"].width == fields["wb_required_dest_1"].width == 1
+    assert fields["active_dest_1"].width == 1
 
 
 def test_the_pc_follows_the_config():

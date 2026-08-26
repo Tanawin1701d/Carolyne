@@ -19,7 +19,9 @@
 #         ar_idx_<n>       the architectural register the decoder extracted
 #         data_<n>         the value itself
 #   dest  active_<n>       this µop writes that slot
-#         wb_required_<n>  the writeback must land before the instruction retires
+#         wb_required_<n>  the writeback must land before the instruction
+#                          retires — DEST_W_REQ cores only (operand_field
+#                          drops the bit on a plain DEST)
 #         ar_idx_<n>       the architectural register rename will map
 #
 # NO pr_idx anywhere: decode is BEFORE rename, so a physical index does not
@@ -53,7 +55,8 @@ class DecodeEntryBase(Karray):
     #      per src core    active_<n>  valid_<n>
     #                      + data_<n>     if the core may name an imm
     #                      + ar_idx_<n>   if the core has an arch class
-    #      per dest core   active_<n>  wb_required_<n>  ar_idx_<n>
+    #      per dest core   active_<n>  ar_idx_<n>
+    #                      + wb_required_<n>  if the core is DEST_W_REQ
     #
     #  <n> is the core's own name, and a group lands in operand_field's
     #  KIND_ORDER. NO pr_idx anywhere: decode runs BEFORE rename. RV32I, whose
@@ -63,7 +66,7 @@ class DecodeEntryBase(Karray):
     #      active_src_1   valid_src_1                ar_idx_src_1 <- added
     #      active_src_2   valid_src_2   data_src_2   ar_idx_src_2
     #      active_src_3   valid_src_3   data_src_3
-    #      active_dest_1  wb_required_dest_1         ar_idx_dest_1
+    #      active_dest_1                             ar_idx_dest_1
     #
     #  (src_1 is always a register, so no data_; src_3 is the immediate, so no
     #  ar_idx_; src_2 is rs2 OR an immediate, so both.)

@@ -118,15 +118,14 @@ def operand_fields(config: CPUO3_Config,
     Which KINDS a waiting entry keeps, in the order they read: a source waits
     on a value, so it carries the wake pair and the value; a µtemp source has
     no physical register to wake on, so the value rides alone. A destination
-    carries only where its result goes, plus the bit that says the write is
-    required. The names and widths themselves are operand_field's.
+    carries where its result goes, plus the bit that says the write is
+    required — which operand_field drops on a plain DEST, where the role is
+    the constant answer. The names and widths themselves are operand_field's.
     """
     if atm_operand.is_src:
         kinds = (VALID, DATA, PR_IDX) if atm_operand.has_arch else (DATA,)
-    elif atm_operand.is_write_required:
-        kinds = (WB_REQUIRED, PR_IDX)
     else:
-        kinds = (PR_IDX,)
+        kinds = (WB_REQUIRED, PR_IDX)
 
     return build_fields(config, atm_operand, kinds,
                         f"reservation station '{rsv_spec.label}'")

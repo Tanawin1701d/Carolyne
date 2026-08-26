@@ -10,7 +10,9 @@
 # retires is a WRITE:
 #
 #   active_<n>       this instruction actually writes that destination
-#   wb_required_<n>  the writeback must have landed before it may retire
+#   wb_required_<n>  the writeback must have landed before it may retire —
+#                    DEST_W_REQ cores only, since on a plain DEST the answer
+#                    is the role itself and a constant needs no storage
 #   pr_idx_<n>       the physical register rename gave it
 #   ar_idx_<n>       the architectural register it belongs to, which is what
 #                    commit writes into the ARF and clears from the RAT
@@ -37,12 +39,12 @@ class RobEntry(Karray):
     #      per dest core   active_<n>  wb_required_<n>  pr_idx_<n>  ar_idx_<n>
     #
     #  <n> is the core's own name, and a group lands in operand_field's
-    #  KIND_ORDER; ar_idx drops on a one-register class.
-    #  RV32I, whose only destination core is dest_1, builds:
+    #  KIND_ORDER; ar_idx drops on a one-register class, wb_required on a
+    #  plain DEST (only a DEST_W_REQ core stores the bit).
+    #  RV32I, whose only destination core is dest_1 (a plain DEST), builds:
     #
     #      wb_fin  is_branch  is_store  pc                        <- declared
-    #      active_dest_1  wb_required_dest_1                      <- added
-    #      pr_idx_dest_1  ar_idx_dest_1
+    #      active_dest_1  pr_idx_dest_1  ar_idx_dest_1            <- added
     #
     #  build_rob_dispatch() puts a `valid` bit on top, for its wire rows only.
     wb_fin    = kaf(1)
@@ -72,9 +74,10 @@ def rob_operand_fields(config: CPUO3_Config, atm_operand: AtomicOperand) -> dict
 
     Which KINDS a retiring instruction keeps: whether it writes that
     destination at all, whether the write must land first, and the two indexes
-    commit hops between. `ar_idx` drops out on a one-register class, where
-    there is no index to choose. The names and widths themselves are
-    operand_field's.
+    commit hops between. The names, widths and the drop rules are
+    operand_field's: `wb_required` survives only on a DEST_W_REQ core (a plain
+    DEST's role is the constant answer), `ar_idx` only where there is an index
+    to choose (not on a one-register class).
     """
     return build_fields(config, atm_operand, (ACTIVE, WB_REQUIRED, PR_IDX, AR_IDX),
                         "ROB")

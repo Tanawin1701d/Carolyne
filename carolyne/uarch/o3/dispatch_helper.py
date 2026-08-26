@@ -29,6 +29,8 @@
 #
 # A SOURCE never carries `wb_required`: it is a destination's promise that the
 # writeback lands before the instruction retires, and a source writes nothing.
+# And a destination carries it only on a DEST_W_REQ core — operand_field drops
+# the bit on a plain DEST, where the role itself is the constant answer.
 #
 # A DESTINATION never carries `valid` or `data`: it is not waiting on anything,
 # and at dispatch its value does not exist yet — the FU has not run.
@@ -72,8 +74,9 @@ class DispatchEntryBase(Karray):
     #                      pr_idx_<n>  ar_idx_<n>
     #
     #  <n> is the core's own name, and a group lands in operand_field's
-    #  KIND_ORDER; both indexes drop on a core that only ever names a µtemp.
-    #  RV32I builds:
+    #  KIND_ORDER; both indexes drop on a core that only ever names a µtemp,
+    #  wb_required on a plain DEST (only a DEST_W_REQ core stores the bit).
+    #  RV32I, whose dest_1 is a plain DEST, builds:
     #
     #      valid  is_spec  spec_tag  uop_idx  rob_des_idx         <- declared
     #      rsv_id  is_branch  is_store  pc  npc
@@ -82,8 +85,7 @@ class DispatchEntryBase(Karray):
     #      active_src_2   valid_src_2  data_src_2
     #                     pr_idx_src_2  ar_idx_src_2
     #      active_src_3   valid_src_3  data_src_3
-    #      active_dest_1  wb_required_dest_1
-    #                     pr_idx_dest_1  ar_idx_dest_1
+    #      active_dest_1  pr_idx_dest_1  ar_idx_dest_1
     #
     #  Which is why a reader downstream copies BY NAME (dispatch_field_names)
     #  and never by position.
