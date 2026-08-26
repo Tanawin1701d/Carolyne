@@ -6,10 +6,15 @@
 # comparison per entry. `free_tag` is the COUNT of tags left, which is why it is
 # ceil_log2(sptag_len) bits while the tag itself is sptag_len.
 #
-# `book_rename` returns the tag BEFORE rotating, so a branch carries the
-# current tag and the pointer moves past it — the relation `on_mis_pred`
-# inverts when it restores `next_tag = rot(last_valid_tag)`. A non-branch takes
-# the same tag and leaves both counters alone.
+# `book_rename` returns (is_spec, tag). The tag is the pointer BEFORE
+# rotating, so a branch carries the current tag and the pointer moves past
+# it — the relation `on_mis_pred` inverts when it restores
+# `next_tag = rot(last_valid_tag)`. A non-branch takes the same tag and leaves
+# both counters alone. `is_spec` says the lane dispatches under an open
+# speculation: a tag is already out (free_tag below full), or an earlier lane
+# of the same cycle books a branch. It reads `free_tag` BEFORE the cycle's
+# resolve — legal because the caller stalls rename in any cycle `on_suc_pred`
+# fires, so a booking never lands beside a resolve.
 #
 # Rename and a resolved prediction resolve into ONE clocked write per counter,
 # committed by `on_update_meta`: two independent whole-value writes to
@@ -78,14 +83,29 @@ class TagGen(Module):
     def book_rename(self, port, is_branch):
         """Hand lane `port` its one-hot tag; a branch also consumes one.
 
-        Returns the tag that lane carries: the pointer rotated once per BRANCH
-        booked by a lane before it, so the lanes of one cycle take consecutive
-        tags and a non-branch simply repeats its predecessor's. It reads the
-        other lanes' port wires, which is legal whether or not they are driven
-        yet.
+        Returns (is_spec, tag):
+        - is_spec: the lane sits under an open speculation — a tag is already
+          out (free_tag below full), or a lane before it books a branch this
+          cycle
+        - tag: the pointer rotated once per BRANCH booked by a lane before it,
+          so the lanes of one cycle take consecutive tags and a non-branch
+          simply repeats its predecessor's
+        It reads the other lanes' port wires, which is legal whether or not
+        they are driven yet.
         """
         self.branch_port[port] *= is_branch
-        return self._tag_after(self.branch_port[:port], "tag_p{}".format(port))
+        earlier = self.branch_port[:port]
+        return (self._spec_before(earlier),
+                self._tag_after(earlier, "tag_p{}".format(port)))
+
+    def _spec_before(self, earlier):
+        """Open speculation covering a lane behind the bookings in `earlier`.
+
+        - reads free_tag PRE-resolve: the caller stalls rename in a cycle
+          on_suc_pred fires, so a booking never sees a same-cycle refill
+        """
+        outstanding = self.free_tag != (self.config.sptag_len - 1)
+        return any_of([outstanding, *earlier])
 
     def _tag_after(self, earlier, label):
         """The pointer stepped past every booking in `earlier`."""

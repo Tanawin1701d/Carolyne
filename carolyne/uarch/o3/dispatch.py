@@ -48,14 +48,15 @@ class Dispatch(Module):
 
         - req = the lane's `valid` & the dest slot's `active_<n>`, straight
           off the decode row
-        - the promised entry lands in self.promised_pr_idx, keyed
-          (id(atm_opr), lane) — the pr_idx the bus will carry
+        - the booking lands in self.prf_acquisition, keyed
+          (id(atm_opr), lane), as (req, pr_idx) — the request bit and the
+          promised entry the bus will carry
         - nothing commits here: update_prfs (on the grant) is what moves
           free_entry/next_index
         """
         # one dest per class is the ISA's own rule (IsaBase's
         # _reject_shared_dest_classes), so no lane can book a port twice
-        self.promised_pr_idx = {}
+        self.prf_acquisition = {}
         for lane in range(self.config.fe_lanes):
             decode_entry = self.decode[lane]
             valid        = to_ref(decode_entry.valid)
@@ -63,8 +64,11 @@ class Dispatch(Module):
                 prf    = self.reg_arch_mng.prf(atm_opr.reg_file)
                 active = to_ref(getattr(decode_entry,
                                         field_name(ACTIVE, atm_opr)))
-                self.promised_pr_idx[(id(atm_opr), lane)] = \
-                    prf.book_rename(lane, valid & active)
+                req = valid & active
+                self.prf_acquisition[(id(atm_opr), lane)] = \
+                    (req, prf.book_rename(lane, req))
+
+        def war
 
     def warm_rts(self):
         pass
@@ -87,7 +91,8 @@ class Dispatch(Module):
         for lane in range(self.config.fe_lanes):
             for atm_opr in self.arch_dest_atm_oprs:
                 prf = self.reg_arch_mng.prf(atm_opr.reg_file)
-                prf.on_rename(self.promised_pr_idx[(id(atm_opr), lane)])
+                req, pr_idx = self.prf_acquisition[(id(atm_opr), lane)]
+                prf.on_rename(pr_idx)
 
     def update_rts(self):
         pass

@@ -1069,6 +1069,20 @@ verb-first on purpose.
 `FetchDT` is now **`FetchEntryBase`** (2026-08-23), the name every other record
 in the core has (`DecodeEntryBase`, `RsvEntryBase`, `RobEntry`).
 
+**`carolyne/uarch/o3/tag_gen.py`** — `book_rename` returns **`(is_spec, tag)`**
+(2026-08-26): `is_spec` says the lane dispatches under an open speculation —
+`free_tag` below full, OR an earlier lane of the same cycle booking a branch
+(`_spec_before`, reading the same `branch_port[:port]` slice `_tag_after`
+does, so the bit is call-order-independent like the tag). Decision: the pool
+check reads the REGISTER only, never `free_tag + resolve_port` — the resolve
+does NOT lead here the way `_resolve` lets it lead the free count — because
+the caller STALLS rename in any cycle `on_suc_pred` fires, so a booking never
+lands beside a resolve and the pre-resolve read cannot be stale. That stall is
+a caller obligation, stated in the module header beside `over_use`'s. Also
+2026-08-26, in `dispatch.py`: `promised_pr_idx` is now **`prf_acquisition`**,
+holding `(req, pr_idx)` per `(id(atm_opr), lane)` — the `valid & active`
+request bit rides beside the promised index so the update half can gate on it.
+
 FOUND ON THE WAY: `Rt.on_normal_flow` walked `sptag_len` rows of
 `temp_dispatch`, which is `(rename_ports, amount)` — out of bounds whenever the
 two differ, so NO design containing a rename table could elaborate. Fixed to

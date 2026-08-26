@@ -156,11 +156,13 @@ class Prf(Module):
         - the gating rides in the PORT WIRES: driven in the granted scopes,
           reading 0 otherwise, so the resolve composes whatever fired
         """
+        free, next_index, over_terms = self._resolve()
+        self.over_use *= any_of(over_terms)
+
         with zif(self.rename_commit_trigger):
-            free, next_index, over_terms = self._resolve()
             self.free_entry |= free
             self.next_index |= next_index
-            self.over_use   *= any_of(over_terms)
+
 
     def _resolve(self):
         """The cycle's free count and allocation pointer, read off the PORT
