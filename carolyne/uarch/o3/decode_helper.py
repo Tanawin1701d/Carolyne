@@ -3,9 +3,11 @@
 # are.
 #
 # The fixed half is what every decoded µop carries whatever it is: whether the
-# lane holds one at all, where it came from, where the next instruction is, and
+# lane holds one at all, where it came from, where the next instruction is,
 # WHICH µop of the ISA's vocabulary it is (`uop_idx`, the id the whole core
-# speaks in after decode — no raw ISA bits ride along, uop_contract.md §2).
+# speaks in after decode — no raw ISA bits ride along, uop_contract.md §2), and
+# whether it is a BRANCH (`is_branch` — what dispatch books a speculation tag
+# against, and the commit barrier the ROB groups on).
 #
 # The part that varies with the ISA is one field group per atomic operand,
 # core-wide: decode happens before a µop is routed anywhere, so the record must
@@ -57,7 +59,7 @@ class DecodeEntryBase(Karray):
     #  KIND_ORDER. NO pr_idx anywhere: decode runs BEFORE rename. RV32I, whose
     #  cores are src_1 / src_2 / src_3 / dest_1, builds:
     #
-    #      valid  pc  npc  uop_idx                                <- declared
+    #      valid  pc  npc  uop_idx  is_branch                     <- declared
     #      active_src_1   valid_src_1                ar_idx_src_1 <- added
     #      active_src_2   valid_src_2   data_src_2   ar_idx_src_2
     #      active_src_3   valid_src_3   data_src_3
@@ -65,10 +67,11 @@ class DecodeEntryBase(Karray):
     #
     #  (src_1 is always a register, so no data_; src_3 is the immediate, so no
     #  ar_idx_; src_2 is rs2 OR an immediate, so both.)
-    valid   = kaf(1)
-    pc      = kaf()
-    npc     = kaf()
-    uop_idx = kaf()
+    valid     = kaf(1)
+    pc        = kaf()
+    npc       = kaf()
+    uop_idx   = kaf()
+    is_branch = kaf(1)
 
 
 def decode_atm_operands(isa: IsaBase) -> tuple:

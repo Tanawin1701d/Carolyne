@@ -171,10 +171,13 @@ class Decode(Module):
                     f"cannot say both")
             filled[id(operand.atomic)] = operand
 
-        row = {"valid"  : 1,
-               "pc"     : pc,
-               "npc"    : pc + self.config.isa.ilen_bytes,
-               "uop_idx": uop.uop_idx}
+        # LIMIT: the description cannot yet say which µops are branches, so
+        # every decode reads non-branch; the real rule swaps in here.
+        row = {"valid"    : 1,
+               "pc"       : pc,
+               "npc"      : pc + self.config.isa.ilen_bytes,
+               "uop_idx"  : uop.uop_idx,
+               "is_branch": 0}
         for atm_opr in self.atm_operands:
             operand = filled.get(id(atm_opr))   # None = this µop leaves it empty
             group   = self._operand_group(word, atm_opr, operand)

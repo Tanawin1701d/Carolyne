@@ -1082,6 +1082,17 @@ a caller obligation, stated in the module header beside `over_use`'s. Also
 2026-08-26, in `dispatch.py`: `promised_pr_idx` is now **`prf_acquisition`**,
 holding `(req, pr_idx)` per `(id(atm_opr), lane)` — the `valid & active`
 request bit rides beside the promised index so the update half can gate on it.
+Same day: **`is_branch` joined `DecodeEntryBase`'s fixed half** — branch-ness
+is DECODE's to supply, because dispatch books the speculation tag against it:
+`Dispatch.warm_tag_gen` calls `book_rename(lane, valid & is_branch)` per lane
+(an empty lane consumes no tag) and saves the `(is_spec, tag)` pair in
+`tag_acquisition`, keyed by lane; `tag_gen` is a fourth `connect()` slot,
+core-wide where `reg_arch_mng` is per-class. The 1-bit field k2k-copies onto
+the bus's own `is_branch` in `convert_lane`, so it left the header's skip
+list. LIMIT: `uop_decode` writes it ZERO — the description layer cannot yet
+say which µop templates are branches, so no decode marks one and no tag is
+ever consumed until that rule lands; the write must exist even so, because
+the rows are REGs and silence would keep the previous instruction's claim.
 
 FOUND ON THE WAY: `Rt.on_normal_flow` walked `sptag_len` rows of
 `temp_dispatch`, which is `(rename_ports, amount)` — out of bounds whenever the

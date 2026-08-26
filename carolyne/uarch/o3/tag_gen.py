@@ -96,7 +96,7 @@ class TagGen(Module):
         self.branch_port[port] *= is_branch
         earlier = self.branch_port[:port]
         return (self._spec_before(earlier),
-                self._tag_after(earlier, "tag_p{}".format(port)))
+                self._tag_after  (earlier, "tag_p{}".format(port)))
 
     def _spec_before(self, earlier):
         """Open speculation covering a lane behind the bookings in `earlier`.

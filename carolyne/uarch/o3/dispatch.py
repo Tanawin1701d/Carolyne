@@ -5,8 +5,8 @@
 #   AND WIDTH and skips the rest (uop_contract §6 reader rule), so the decode
 #   row fills exactly the overlap
 # - the skipped fields are the RENAME half — pr_idx_<n>, rob_des_idx, rsv_id,
-#   is_spec/spec_tag, is_branch/is_store — and Kathryn's skip warning at
-#   elaboration is the honest list of what this stage does not fill yet
+#   is_spec/spec_tag, is_store — and Kathryn's skip warning at elaboration is
+#   the honest list of what this stage does not fill yet
 # - the bus rows are WIRES: a lane means something only in the grant cycle
 
 from kathryn import *
@@ -40,9 +40,28 @@ class Dispatch(Module):
         self.decode       = None    # the decode stage's rows, from connect()
         self.next_meta    = None    # the consumer's arb, from connect()
         self.reg_arch_mng = None    # ARF/PRF/RT per class, from connect()
+        self.tag_gen      = None    # the speculation-tag allocator, from connect()
 
 
     # warm system means wire connect / no update register typically used for protocol handshake and give promiss data
+
+    def warm_tag_gen(self):
+        """Book every lane's speculation tag on the core-wide TagGen — wires only.
+
+        - is_branch = the lane's `valid` & the decode row's `is_branch`, so an
+          empty lane consumes no tag
+        - the booking lands in self.tag_acquisition, keyed by lane, as
+          (is_spec, tag) — what the bus's is_spec/spec_tag will carry
+        - nothing commits here: the counters move on TagGen's update half
+        """
+        self.tag_acquisition = {}
+        for lane in range(self.config.fe_lanes):
+            decode_entry = self.decode[lane]
+            is_branch    = to_ref(decode_entry.valid) \
+                         & to_ref(decode_entry.is_branch)
+            self.tag_acquisition[lane] = \
+                self.tag_gen.book_rename(lane, is_branch)
+
     def warm_prfs(self):
         """Book every lane's allocation on its class's PRF — wires only.
 
@@ -68,7 +87,7 @@ class Dispatch(Module):
                 self.prf_acquisition[(id(atm_opr), lane)] = \
                     (req, prf.book_rename(lane, req))
 
-        def war
+
 
     def warm_rts(self):
         pass
@@ -109,6 +128,7 @@ class Dispatch(Module):
     def transfer(self):
 
         #
+        self.warm_tag_gen()
         self.warm_prfs()
         self.warm_rts()
         self.warm_rob()
@@ -129,8 +149,8 @@ class Dispatch(Module):
                      dispatch_entry: DispatchEntryBase):
         """One decoded row onto one bus lane, as a single k2k assign.
 
-        - name+width pairing copies valid, pc, npc, uop_idx and the operand
-          groups; the rest is SKIPPED with Kathryn's warning
+        - name+width pairing copies valid, pc, npc, uop_idx, is_branch and
+          the operand groups; the rest is SKIPPED with Kathryn's warning
         - LIMIT: the skipped fields are rename/allocation's answers — until
           the update_* half fills them, an unfilled wire reads its implicit
           zero
