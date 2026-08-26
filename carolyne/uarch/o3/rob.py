@@ -2,7 +2,7 @@
 # the commit that retires them into architectural state.
 #
 # TWO POINTERS AND A COUNT. `alloc_ptr` is where the next instruction lands,
-# `com_ptr` the oldest one, and `in_flight` how many sit between them. The
+# `com_ptr` the oldest one, and `used_entry_cnt` how many sit between them. The
 # count is what tells a full buffer from an empty one, which two pointers of
 # the same width cannot; it takes ONE clocked write per cycle from
 # `on_update_meta`, the way Prf resolves rename against commit, so allocating
@@ -93,8 +93,8 @@ class Rob(Module):
         self.alloc_ptr.reset(0)
         self.com_ptr   = reg(self.idx_width, f"{self.label}_com_ptr")
         self.com_ptr.reset(0)
-        self.in_flight = reg(self.cnt_width, f"{self.label}_in_flight")
-        self.in_flight.reset(0)
+        self.used_entry_cnt = reg(self.cnt_width, f"{self.label}_used_entry_cnt")
+        self.used_entry_cnt.reset(0)
 
         # The rows commit reads, one per lane, materialised so the commit block
         # reads a slot instead of folding the table once per field.
@@ -107,7 +107,7 @@ class Rob(Module):
         # Where each front-end lane allocates. Built on the first free_slots
         # call. ONE room bit for the cycle, not one per lane: the group lands
         # whole or not at all, so there is only one answer to give.
-        self.group_ok = wire(1, f"{self.label}_group_ok")
+        self.dispatch_fits = wire(1, f"{self.label}_dispatch_fits")
         self.free_idx = [wire(self.idx_width, f"{self.label}_free_idx{port}")
                          for port in range(self.config.fe_lanes)]
         self._free_built = False
@@ -119,14 +119,14 @@ class Rob(Module):
         self.commit_cnt = wire(self.cnt_width, f"{self.label}_commit_cnt").default(0)
 
     # --- occupancy ----------------------------------------------------------------
-    def lane_in_flight(self, lane: int):
+    def lane_used(self, lane: int):
         """Lane `lane` of a commit group names a real instruction."""
-        return val(self.cnt_width, lane) < self.in_flight
+        return val(self.cnt_width, lane) < self.used_entry_cnt
 
     def room_left(self):
         """Entries the buffer still has. Both sides of the compare stay inside
         the count's width, which `depth + a group` would not."""
-        return val(self.cnt_width, self.depth) - self.in_flight
+        return val(self.cnt_width, self.depth) - self.used_entry_cnt
 
     def group_fits(self, wanted):
         """The WHOLE dispatch group fits. A group lands together or not at all,
@@ -150,7 +150,8 @@ class Rob(Module):
             wants = [to_ref(dispatch[port].valid)
                      for port in range(self.config.fe_lanes)]
             alloc = self.alloc_ptr
-            self.group_ok *= self.group_fits(sum_cnt(wants, width=self.cnt_width))
+            self.dispatch_fits *= \
+                self.group_fits(sum_cnt(wants, width=self.cnt_width))
             for port in range(self.config.fe_lanes):
                 offset = val(1, 0) if port == 0 else sum_cnt(wants[:port])
                 self.free_idx[port] *= alloc if port == 0 else alloc + offset
@@ -158,7 +159,7 @@ class Rob(Module):
 
         # The room bit is the SAME signal in every pair — that is the
         # all-or-nothing, and it is why this needs no per-lane answer.
-        return [(self.group_ok, idx) for idx in self.free_idx]
+        return [(self.dispatch_fits, idx) for idx in self.free_idx]
 
     def on_dispatch(self, dispatch):
         """Allocate an entry for every lane carrying an instruction.
@@ -219,7 +220,7 @@ class Rob(Module):
             allow = None
             for lane in range(self.lanes):
                 row = self.com_row[lane]
-                ok  = self.lane_in_flight(lane) & to_ref(row.wb_fin)
+                ok  = self.lane_used(lane) & to_ref(row.wb_fin)
                 if allow is not None:
                     ok = ok & allow
                 self.commit_ok[lane] *= ok
@@ -285,7 +286,7 @@ class Rob(Module):
     # --- the cycle ----------------------------------------------------------------
     def on_update_meta(self):
         """Resolve allocation against commit into ONE write of the count."""
-        self.in_flight |= (self.in_flight
+        self.used_entry_cnt |= (self.used_entry_cnt
                            + self.alloc_cnt - self.commit_cnt)
 
     # --- squash -------------------------------------------------------------------
@@ -298,5 +299,5 @@ class Rob(Module):
         """
         with priority(PRI_MIS_PRED):
             self.alloc_ptr |= to_ref(rob_idx) + 1
-            self.in_flight |= (to_ref(rob_idx) - self.com_ptr
+            self.used_entry_cnt |= (to_ref(rob_idx) - self.com_ptr
                                ).extend(self.cnt_width) + 1

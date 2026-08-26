@@ -74,7 +74,7 @@ def test_a_rob_is_two_pointers_and_a_count():
     # empty one — which two pointers of the same width cannot tell apart.
     assert rob.cnt_width == 4
     assert rob.alloc_ptr is not None and rob.com_ptr is not None
-    assert rob.in_flight is not None
+    assert rob.used_entry_cnt is not None
 
 
 def test_commit_is_as_wide_as_the_config_says():

@@ -835,7 +835,9 @@ has no architectural register to retire into. The table is
 **`carolyne/uarch/o3/rob.py`** — **`Rob`** (2026-08-19), the reorder buffer and
 the commit stage that drains it, from the C++ `rob.h` / `rob.cpp`.
 
-**TWO POINTERS AND A COUNT.** `alloc_ptr`, `com_ptr` and `in_flight`. The count
+**TWO POINTERS AND A COUNT.** `alloc_ptr`, `com_ptr` and `used_entry_cnt`
+(named `in_flight` until 2026-08-26 — a metaphor where the file's other
+counts say what they count; `lane_in_flight` became `lane_used` with it). The count
 is what tells a FULL buffer from an empty one, which two pointers of the same
 width cannot, and it takes ONE clocked write from `on_update_meta` — the Prf
 bargain, so allocating and retiring in the same cycle cannot lose each other.
@@ -845,13 +847,13 @@ the RRF pointer — this engine renames each register class into its own physica
 file, so there is no single rename pointer to borrow.
 
 **A DISPATCH GROUP LANDS WHOLE OR NOT AT ALL.** `free_slots` asks once whether
-the cycle's whole bundle fits (`wanted <= depth - in_flight`) and every lane
+the cycle's whole bundle fits (`wanted <= depth - used_entry_cnt`) and every lane
 reads that one answer, so a partial dispatch — which would leave the rest of
 the group to be re-formed behind it — cannot happen, and no hole-blocking chain
 is needed the way `RsvIOR` needs one. It also makes `fe_lanes > rob_depth` a
 refusal at construction: a bundle that cannot fit an EMPTY buffer could never
-dispatch. The compare is written `wanted <= depth - in_flight` rather than
-`in_flight + wanted <= depth` so both sides stay inside the count's width.
+dispatch. The compare is written `wanted <= depth - used_entry_cnt` rather than
+`used_entry_cnt + wanted <= depth` so both sides stay inside the count's width.
 
 **COMMIT IN GROUPS, UP TO AND INCLUDING A BARRIER.** Lane k retires only if
 every earlier lane retires AND no earlier lane is a branch or a store, so a
@@ -1094,7 +1096,9 @@ say which µop templates are branches, so no decode marks one and no tag is
 ever consumed until that rule lands; the write must exist even so, because
 the rows are REGs and silence would keep the previous instruction's claim.
 Later the same day TagGen took the **Prf gating pattern** whole:
-`rename_commit_trigger`, `on_rename()` firing it from the granted scope
+`rename_success_trigger` (named `rename_commit_trigger` for a day — TagGen's
+pair is rename OR successful prediction, not commit), `on_rename()` firing it
+from the granted scope
 (dispatch's `update_tag_gen`, in the zync beside `update_prfs`),
 `on_suc_pred` firing it too — Prf's `on_commit` bargain — and
 `on_update_meta` became TagGen's own `@flow`, counter writes gated by
