@@ -15,7 +15,7 @@ from kathryn.signal import to_ref
 from carolyne.uarch.o3.config import CPUO3_Config
 from carolyne.uarch.o3.decode_helper import DecodeEntryBase
 from carolyne.uarch.o3.dispatch_helper import build_dispatch, DispatchEntryBase
-from carolyne.uarch.o3.operand_field import ACTIVE, field_name
+from carolyne.uarch.o3.operand_field import ACTIVE, AR_IDX, field_name
 from carolyne.uarch.o3.reg_arch_mng import collect_arch_dest_atm_oprs
 
 
@@ -51,7 +51,8 @@ class Dispatch(Module):
         - is_branch = the lane's `valid` & the decode row's `is_branch`, so an
           empty lane consumes no tag
         - the booking lands in self.tag_acquisition, keyed by lane, as
-          (is_spec, tag) — what the bus's is_spec/spec_tag will carry
+          (is_branch, is_spec, tag) — the request bit beside what the bus's
+          is_spec/spec_tag will carry
         - nothing commits here: the counters move on TagGen's update half
         """
         self.tag_acquisition = {}
@@ -59,8 +60,8 @@ class Dispatch(Module):
             decode_entry = self.decode[lane]
             is_branch    = to_ref(decode_entry.valid) \
                          & to_ref(decode_entry.is_branch)
-            self.tag_acquisition[lane] = \
-                self.tag_gen.book_rename(lane, is_branch)
+            is_spec, tag = self.tag_gen.book_rename(lane, is_branch)
+            self.tag_acquisition[lane] = (is_branch, is_spec, tag)
 
     def warm_prfs(self):
         """Book every lane's allocation on its class's PRF — wires only.
@@ -90,7 +91,27 @@ class Dispatch(Module):
 
 
     def warm_rts(self):
-        pass
+        """Register every lane's rename on its class's RT — metas only.
+
+        - req / pr_idx come off prf_acquisition, is_branch / tag off
+          tag_acquisition, ar_idx straight off the decode row
+        - book_rename only RECORDS the port's metas; RT's on_rename (the
+          update half) is what builds the writes from them
+        """
+        for lane in range(self.config.fe_lanes):
+            decode_entry            = self.decode[lane]
+            is_branch, is_spec, tag = self.tag_acquisition[lane]
+            for atm_opr in self.arch_dest_atm_oprs:
+                rt          = self.reg_arch_mng.rt(atm_opr.reg_file)
+                req, pr_idx = self.prf_acquisition[(lane, id(atm_opr))]
+                # a one-register class stores no ar_idx (index_width 0):
+                # there is nothing to choose, that register is 0
+                if atm_opr.reg_file.index_width == 0:
+                    ar_idx = 0
+                else:
+                    ar_idx = to_ref(getattr(decode_entry,
+                                            field_name(AR_IDX, atm_opr)))
+                rt.book_rename(lane, req, is_branch, tag, ar_idx, pr_idx)
 
     def warm_rob(self):
         pass
@@ -121,8 +142,18 @@ class Dispatch(Module):
                 req, pr_idx = self.prf_acquisition[(lane, id(atm_opr))]
                 prf.on_rename(pr_idx)
 
+
     def update_rts(self):
-        pass
+        """Commit each class's registered renames on its RT.
+
+        - MUST run inside the granted zync: the chain overlays and the
+          branch snapshots take the grant as their gate there
+        - reads the metas warm_rts registered; on_rename walks every port
+          itself, so one call per class
+        """
+        for atm_opr in self.arch_dest_atm_oprs:
+            rt = self.reg_arch_mng.rt(atm_opr.reg_file)
+            rt.on_rename()
 
     def update_rob(self):
         pass

@@ -145,19 +145,31 @@ class Rt(Module):
         self.rename_metas[port_idx] = (req_rename_sig, is_branch_sig, spectag_dyn, arch_idx_to_set, prf_idx_to_set)
 
     def on_rename(self):
+        """Overlay each port's registered rename on the stage chain.
+
+        - call in the granted scope: the overlays and the branch snapshots
+          take the grant as their gate there
+        - lane k writes ITS OWN temp_dispatch row, so every later lane sees
+          it through the chain and master takes the last row
+        - a branch snapshots temp_dispatch[k] AFTER its own overlay resolves
+          (PRI_RENAME beats the chain copy): the state it leaves behind,
+          which is what on_mis_pred restores — the branch itself retires,
+          so its own rename must survive the rollback
+        """
+        amount = self.isa_reg_file.amount
         with priority(PRI_RENAME):
-            # augment the spec structure
-            for rename_port_idx, (req_rename_sig, is_branch_sig, spectag_dyn, arch_idx_to_set, prf_idx_to_set) \
-                in enumerate(self.rename_metas): \
-                # augment the temp structure (the master will be updated)
+            for port_idx, metas in enumerate(self.rename_metas):
+                if metas is None:
+                    raise ValueError(
+                        f"Rt of '{self.isa_reg_file.name}': rename port "
+                        f"{port_idx} has no booking — call book_rename for "
+                        f"every port before on_rename")
+                req_rename_sig, is_branch_sig, spectag_dyn, \
+                    arch_idx_to_set, prf_idx_to_set = metas
                 with zif(req_rename_sig):
-                    write_entry(self.temp_commit[rename_port_idx], arch_idx_to_set,
-                                self.isa_reg_file.amount,
-                                renamed=1, prf_idx=prf_idx_to_set)
-                # update the main structure
-                with zif(req_rename_sig.land(is_branch_sig)):
-                    if rename_port_idx == 0:
-                        copy_row(self.spec_rt[OH(spectag_dyn)], self.temp_commit[0],
-                                 self.isa_reg_file.amount, clocked=True)
-                    copy_row(self.spec_rt[OH(spectag_dyn)], self.temp_dispatch[rename_port_idx-1],
-                             self.isa_reg_file.amount, clocked=True)
+                    write_entry(self.temp_dispatch[port_idx], arch_idx_to_set,
+                                amount, renamed=1, prf_idx=prf_idx_to_set)
+                with zif(req_rename_sig & is_branch_sig):
+                    copy_row(self.spec_rt[OH(spectag_dyn)],
+                             self.temp_dispatch[port_idx],
+                             amount, clocked=True)

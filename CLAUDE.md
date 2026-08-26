@@ -1102,15 +1102,31 @@ Later the same day TagGen took the **Prf gating pattern** whole:
 drives the branch ports UNGATED, so without the trigger a stalled cycle
 would consume tags; with it, a cycle where neither rename nor resolve acted
 moves neither counter. `on_mis_pred` stays outside the chain at raised
-priority, as before.
+priority, as before. Then `warm_rts`: each lane registers its rename on its
+class's RT via `Rt.book_rename(lane, req, is_branch, tag, ar_idx, pr_idx)` —
+metas only, no hardware; req/pr_idx read back off `prf_acquisition`,
+is_branch/tag off `tag_acquisition` (which now stores the TRIPLE
+`(is_branch, is_spec, tag)` — the prf_acquisition move again), ar_idx off the
+decode row, a one-register class passing literal 0 since it stores no
+`ar_idx` field. Then **`update_rts` + the `Rt.on_rename` repair** (same day):
+one `rt.on_rename()` per class inside the granted zync, and the repair came
+with the caller — lane k now overlays ITS OWN `temp_dispatch` row (the old
+body wrote `temp_commit[k]`, a 1-row array, out of bounds past lane 0), and a
+branch snapshots `temp_dispatch[k]` AFTER its own overlay resolves
+(`PRI_RENAME` beats the chain copy), which killed the drafted k==0 special
+case. Post-own-rename is the deliberate choice: `on_mis_pred` restores
+`spec_rt[tag]` into master while the ROB lets the branch itself retire, so
+the branch's own mapping must survive the rollback — a pre-rename snapshot
+would fail commit's renamed/prf_idx fixup and leak the physical register. A
+port with no booking raises, naming the port.
 
 FOUND ON THE WAY: `Rt.on_normal_flow` walked `sptag_len` rows of
 `temp_dispatch`, which is `(rename_ports, amount)` — out of bounds whenever the
 two differ, so NO design containing a rename table could elaborate. Fixed to
 walk `rename_ports` and to feed `master_rt` from the last lane's row rather
-than the commit row. `Rt.on_rename` has the same confusion between
-`temp_commit` and `temp_dispatch` and is NOT yet fixed — nothing calls it, and
-it is a bigger repair than a bounds correction.
+than the commit row. `Rt.on_rename` had the same confusion between
+`temp_commit` and `temp_dispatch`; repaired 2026-08-26 when `update_rts`
+became its first caller — see the tag_gen/dispatch entry above.
 
 NEXT UP — the function unit, designed 2026-08-19. Step 1 (the declared port
 shape above) and step 2 (`ExecContext` + `AluUnit` + the fake-context test,
