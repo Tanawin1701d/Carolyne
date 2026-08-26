@@ -17,8 +17,11 @@
 # fires, so a booking never lands beside a resolve.
 #
 # Rename and a resolved prediction resolve into ONE clocked write per counter,
-# committed by `on_update_meta`: two independent whole-value writes to
-# `free_tag` in one cycle would silently lose one.
+# committed by `on_update_meta` — TagGen's own flow, gated the way Prf's is:
+# `on_rename` (the granted rename scope) and `on_suc_pred` each fire
+# `rename_commit_trigger`, so a cycle where neither acted moves nothing. Two
+# independent whole-value writes to `free_tag` in one cycle would silently
+# lose one.
 #
 # CALL ORDER MUST NOT MATTER, for any of the three. The ports are WIRES
 # declared in `com_declare`; `book_rename` and `on_suc_pred` only DRIVE one and
@@ -78,6 +81,8 @@ class TagGen(Module):
                              for i in range(self.rename_ports)]
         # ONE resolve port — tags come back in order, so at most one per cycle.
         self.resolve_port = wire(1, "resolve_ok").default(0)
+        # rename and resolve arbiter
+        self.rename_commit_trigger = wire(1, "rename_or_resolve_trigger")
 
     # ---- rename ----------------------------------------------------------------
     def book_rename(self, port, is_branch):
@@ -97,6 +102,10 @@ class TagGen(Module):
         earlier = self.branch_port[:port]
         return (self._spec_before(earlier),
                 self._tag_after  (earlier, "tag_p{}".format(port)))
+
+    def on_rename(self):
+        """Commit the cycle's bookings (call in the granted scope)."""
+        self.rename_commit_trigger *= 1
 
     def _spec_before(self, earlier):
         """Open speculation covering a lane behind the bookings in `earlier`.
@@ -122,13 +131,25 @@ class TagGen(Module):
     def on_suc_pred(self, valid):
         """Hand the resolved branch's tag back; `valid` is a 1-bit enable."""
         self.resolve_port *= valid
+        self.rename_commit_trigger *= 1
 
     # ---- resolve the cycle -------------------------------------------------------
+
+    @flow
     def on_update_meta(self):
+        """The cycle's one clocked write per counter — TagGen's own flow.
+
+        - automatic and UNGATED: built once at gen_flow, in this module's scope
+        - the gating rides in `rename_commit_trigger`: driven in the granted
+          scopes by on_rename/on_suc_pred, reading 0 otherwise, so an idle
+          cycle moves neither counter
+        """
         free, over_terms = self._resolve()
-        self.free_tag |= free
-        self.next_tag |= self._tag_after(self.branch_port, "tag_next")
         self.over_use *= any_of(over_terms)
+
+        with zif(self.rename_commit_trigger):
+            self.free_tag |= free
+            self.next_tag |= self._tag_after(self.branch_port, "tag_next")
 
     def _resolve(self):
         """The cycle's free-tag count, read off the PORT WIRES rather than off

@@ -68,7 +68,7 @@ class Dispatch(Module):
         - req = the lane's `valid` & the dest slot's `active_<n>`, straight
           off the decode row
         - the booking lands in self.prf_acquisition, keyed
-          (id(atm_opr), lane), as (req, pr_idx) — the request bit and the
+          (lane, id(atm_opr)), as (req, pr_idx) — the request bit and the
           promised entry the bus will carry
         - nothing commits here: update_prfs (on the grant) is what moves
           free_entry/next_index
@@ -84,7 +84,7 @@ class Dispatch(Module):
                 active = to_ref(getattr(decode_entry,
                                         field_name(ACTIVE, atm_opr)))
                 req = valid & active
-                self.prf_acquisition[(id(atm_opr), lane)] = \
+                self.prf_acquisition[(lane, id(atm_opr))] = \
                     (req, prf.book_rename(lane, req))
 
 
@@ -100,6 +100,14 @@ class Dispatch(Module):
 
     # it is used when everything is good and ready to go to
 
+    def update_tag_gen(self):
+        """Commit the cycle's tag bookings on the core-wide TagGen.
+
+        - MUST run inside the granted zync: the trigger on_rename fires is
+          what opens TagGen's on_update_meta gate
+        """
+        self.tag_gen.on_rename()
+
     def update_prfs(self):
         """Commit each lane's booking on every class's PRF.
 
@@ -110,7 +118,7 @@ class Dispatch(Module):
         for lane in range(self.config.fe_lanes):
             for atm_opr in self.arch_dest_atm_oprs:
                 prf = self.reg_arch_mng.prf(atm_opr.reg_file)
-                req, pr_idx = self.prf_acquisition[(id(atm_opr), lane)]
+                req, pr_idx = self.prf_acquisition[(lane, id(atm_opr))]
                 prf.on_rename(pr_idx)
 
     def update_rts(self):
@@ -137,6 +145,7 @@ class Dispatch(Module):
         with pip(self.dispatch_meta):
             # inside the zync: everything here fires on the grant only
             with zync(self.next_meta):
+                self.update_tag_gen()
                 self.update_prfs()
                 self.update_rts()
                 self.update_rob()

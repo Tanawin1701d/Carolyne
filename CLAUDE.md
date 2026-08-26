@@ -1080,7 +1080,7 @@ the caller STALLS rename in any cycle `on_suc_pred` fires, so a booking never
 lands beside a resolve and the pre-resolve read cannot be stale. That stall is
 a caller obligation, stated in the module header beside `over_use`'s. Also
 2026-08-26, in `dispatch.py`: `promised_pr_idx` is now **`prf_acquisition`**,
-holding `(req, pr_idx)` per `(id(atm_opr), lane)` — the `valid & active`
+holding `(req, pr_idx)` per `(lane, id(atm_opr))` — the `valid & active`
 request bit rides beside the promised index so the update half can gate on it.
 Same day: **`is_branch` joined `DecodeEntryBase`'s fixed half** — branch-ness
 is DECODE's to supply, because dispatch books the speculation tag against it:
@@ -1093,6 +1093,16 @@ list. LIMIT: `uop_decode` writes it ZERO — the description layer cannot yet
 say which µop templates are branches, so no decode marks one and no tag is
 ever consumed until that rule lands; the write must exist even so, because
 the rows are REGs and silence would keep the previous instruction's claim.
+Later the same day TagGen took the **Prf gating pattern** whole:
+`rename_commit_trigger`, `on_rename()` firing it from the granted scope
+(dispatch's `update_tag_gen`, in the zync beside `update_prfs`),
+`on_suc_pred` firing it too — Prf's `on_commit` bargain — and
+`on_update_meta` became TagGen's own `@flow`, counter writes gated by
+`zif(trigger)` with `over_use` computed outside the gate. The why: warm
+drives the branch ports UNGATED, so without the trigger a stalled cycle
+would consume tags; with it, a cycle where neither rename nor resolve acted
+moves neither counter. `on_mis_pred` stays outside the chain at raised
+priority, as before.
 
 FOUND ON THE WAY: `Rt.on_normal_flow` walked `sptag_len` rows of
 `temp_dispatch`, which is `(rename_ports, amount)` — out of bounds whenever the
