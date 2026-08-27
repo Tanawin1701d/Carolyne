@@ -1174,7 +1174,9 @@ the branch's own mapping must survive the rollback — a pre-rename snapshot
 would fail commit's renamed/prf_idx fixup and leak the physical register. A
 port with no booking raises, naming the port.
 
-**`warm_rsvs`** (2026-08-27): one `free_slots(self.dispatch)` per station,
+**`warm_rsvs`** (2026-08-27): one `free_slots(self.dispatch_bus)` per
+station (the attribute was `dispatch` until later that day — it is the BUS,
+and the name now says so beside `dispatch_meta`),
 its `all_ok` bits AND-ed into the READY the call returns — the sizing check
 lives in the STATION (`free_slots`' `(all_ok, slots)` shape above), so
 dispatch only collects. `rsvs` is the sixth connect() slot. A first version
@@ -1188,10 +1190,23 @@ the decode-fed `valid` before the grant they help decide, and the granted
 zync keeps only the update_* calls — the bus states the cycle's candidate,
 the grant is what commits it into state. The free_slots caches
 (`_free_built`, `_lane_targets_me`) mean these are also the wants
-`update_rsvs`'s `on_dispatch(bus)` will reuse. LIMIT, narrowed to routing
-alone: `rsv_id` is still on the k2k skip list, so it reads implicit zero
-and every valid lane names station 0 until the µop→station rule fills it.
-`update_rsvs` is still a stub.
+`update_rsvs`'s `on_dispatch(bus)` will reuse. Also 2026-08-27:
+**`is_store` and `rsv_id` joined `DecodeEntryBase`'s fixed half** — the
+`is_branch` precedent: store-ness and routing are decode's to supply —
+with `rsv_id` sized `rsv_id_width(config)` so the k2k copy pairs it with
+the bus's field; both left convert_lane's skip list, which is now the
+rename half proper (`pr_idx_<n>`, `rob_des_idx`, `is_spec`/`spec_tag`,
+`data_src_1`). LIMIT, narrowed to decode's own writes: `uop_decode` writes
+all three zero — every valid lane still names station 0 (and reads
+non-branch, non-store) until the real rules land there.
+`update_rsvs` (wired later the same day) is one `on_dispatch(dispatch_bus)`
+per station inside the granted zync — the update_rob split again, reusing
+the warm-cached wants/slots and taking entry content off the filled lane.
+Also 2026-08-27: **`ready_to_go` is BOUND
+into the handshake** — `zync((next_meta, ready_to_go))`, the
+`(PipCon, condition)` pair both stations' issue already uses — so a cycle
+missing any booked resource stalls the transfer instead of granting it;
+the wire's "the handshake will consume" note above is now consumed.
 
 FOUND ON THE WAY: `Rt.on_normal_flow` walked `sptag_len` rows of
 `temp_dispatch`, which is `(rename_ports, amount)` — out of bounds whenever the

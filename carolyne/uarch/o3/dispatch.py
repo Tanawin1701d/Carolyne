@@ -4,9 +4,9 @@
 # - the conversion is ONE k2k assign per lane: Kathryn pairs fields by NAME
 #   AND WIDTH and skips the rest (uop_contract §6 reader rule), so the decode
 #   row fills exactly the overlap
-# - the skipped fields are the RENAME half — pr_idx_<n>, rob_des_idx, rsv_id,
-#   is_spec/spec_tag, is_store — and Kathryn's skip warning at elaboration is
-#   the honest list of what this stage does not fill yet
+# - the skipped fields are the RENAME half — pr_idx_<n>, rob_des_idx,
+#   is_spec/spec_tag — and Kathryn's skip warning at elaboration is the
+#   honest list of what this stage does not fill yet
 # - the bus rows are WIRES, driven at WARM time (warm_rsvs): a station's
 #   wants read them before the grant; the granted zync is where the readers
 #   commit their content into state
@@ -39,7 +39,7 @@ class Dispatch(Module):
 
     @init
     def com_declare(self):
-        self.dispatch      = build_dispatch(self.config, name="dispatch")
+        self.dispatch_bus  = build_dispatch(self.config, name="dispatch")
         self.dispatch_meta = PipCon()
 
         # DEST slots with an architectural class — what rename books a
@@ -168,17 +168,17 @@ class Dispatch(Module):
           aimed there at all
         - nothing commits here: update_rsvs (on the grant) is what writes
           the entries
-        - LIMIT: rsv_id is still on convert_lane's skip list, so it reads
-          implicit zero and every valid lane names station 0 until the
-          routing rule fills it
+        - LIMIT: rsv_id now copies from the decode row, but decode still
+          writes it 0 — every valid lane names station 0 until the
+          µop→station routing rule lands in uop_decode
         - returns READY: the AND of every station's all_ok
         """
         for lane in range(self.config.fe_lanes):
-            self.convert_lane(self.decode[lane], self.dispatch[lane])
+            self.convert_lane(self.decode[lane], self.dispatch_bus[lane])
 
         ok = val(1, 1)
         for rsv in self.rsvs:
-            all_ok, _slots = rsv.free_slots(self.dispatch)
+            all_ok, _slots = rsv.free_slots(self.dispatch_bus)
             ok = ok & all_ok
         return ok
 
@@ -227,10 +227,19 @@ class Dispatch(Module):
           decode rows (warm_rob), so on_dispatch reuses those and takes
           each entry's CONTENT off the filled lane
         """
-        self.rob.on_dispatch(self.dispatch)
+        self.rob.on_dispatch(self.dispatch_bus)
 
     def update_rsvs(self):
-        pass
+        """Commit the cycle's dispatches on every station.
+
+        - MUST run inside the granted zync: write_entry and the age/pointer
+          work take the grant as their gate there
+        - passes the BUS rows: free_slots already built its wants and slots
+          at warm time (warm_rsvs), so on_dispatch reuses those and takes
+          each entry's content off the filled lane
+        """
+        for rsv in self.rsvs:
+            rsv.on_dispatch(self.dispatch_bus)
 
 
 
@@ -247,8 +256,10 @@ class Dispatch(Module):
         self.ready_to_go *= tag_ok & prf_ok & rt_ok & rob_ok & rsv_ok
 
         with pip(self.dispatch_meta):
-            # inside the zync: everything here fires on the grant only
-            with zync(self.next_meta):
+            # inside the zync: everything here fires on the grant only, and
+            # the handshake itself is gated on ready_to_go — a cycle missing
+            # any booked resource stalls instead of transferring
+            with zync((self.next_meta, self.ready_to_go)):
                 self.update_tag_gen()
                 self.update_prfs()
                 self.update_rts()
@@ -260,8 +271,9 @@ class Dispatch(Module):
                      dispatch_entry: DispatchEntryBase):
         """One decoded row onto one bus lane, as a single k2k assign.
 
-        - name+width pairing copies valid, pc, npc, uop_idx, is_branch and
-          the operand groups; the rest is SKIPPED with Kathryn's warning
+        - name+width pairing copies valid, pc, npc, uop_idx, is_branch,
+          is_store, rsv_id and the operand groups; the rest is SKIPPED with
+          Kathryn's warning
         - LIMIT: the skipped fields are rename/allocation's answers — until
           the update_* half fills them, an unfilled wire reads its implicit
           zero

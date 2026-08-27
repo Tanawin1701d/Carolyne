@@ -18,6 +18,7 @@ from carolyne.uarch.o3.decode_helper import (build_decode_table,
                                              decode_atm_operands,
                                              decode_entry_shape,
                                              decode_operand_fields)
+from carolyne.uarch.o3.rsv_helper import rsv_id_width
 
 ISA = Rv32i()
 X   = ISA.reg_file("x")
@@ -126,6 +127,7 @@ def test_the_widths_come_from_the_isa_and_the_config():
 
     assert fields["pc"] == fields["npc"] == cfg.pc_width == ISA.pc_width
     assert fields["uop_idx"] == cfg.uop_idx_width
+    assert fields["rsv_id"] == rsv_id_width(cfg)     # sized as the bus's
     assert fields["ar_idx_src_1"].width == X.index_width == 5
     assert fields["data_src_3"].width == 32                 # the µtemp's width
     assert fields["active_src_1"].width == fields["valid_src_1"].width == 1

@@ -5,9 +5,11 @@
 # The fixed half is what every decoded µop carries whatever it is: whether the
 # lane holds one at all, where it came from, where the next instruction is,
 # WHICH µop of the ISA's vocabulary it is (`uop_idx`, the id the whole core
-# speaks in after decode — no raw ISA bits ride along, uop_contract.md §2), and
+# speaks in after decode — no raw ISA bits ride along, uop_contract.md §2),
 # whether it is a BRANCH (`is_branch` — what dispatch books a speculation tag
-# against, and the commit barrier the ROB groups on).
+# against) or a STORE (`is_store` — with is_branch, the commit barrier the ROB
+# groups on), and WHICH STATION it is for (`rsv_id` — routing, decode's to
+# supply the way branch-ness is).
 #
 # The part that varies with the ISA is one field group per atomic operand,
 # core-wide: decode happens before a µop is routed anywhere, so the record must
@@ -44,6 +46,7 @@ from carolyne.uarch.o3.operand_field import (ACTIVE, AR_IDX, DATA, WB_REQUIRED,
                                              VALID, field_name,
                                              named_atomic_operands,
                                              operand_fields as build_fields)
+from carolyne.uarch.o3.rsv_helper import rsv_id_width
 
 
 class DecodeEntryBase(Karray):
@@ -62,7 +65,7 @@ class DecodeEntryBase(Karray):
     #  KIND_ORDER. NO pr_idx anywhere: decode runs BEFORE rename. RV32I, whose
     #  cores are src_1 / src_2 / src_3 / dest_1, builds:
     #
-    #      valid  pc  npc  uop_idx  is_branch                     <- declared
+    #      valid  pc  npc  uop_idx  is_branch  is_store  rsv_id  <- declared
     #      active_src_1   valid_src_1                ar_idx_src_1 <- added
     #      active_src_2   valid_src_2   data_src_2   ar_idx_src_2
     #      active_src_3   valid_src_3   data_src_3
@@ -75,6 +78,9 @@ class DecodeEntryBase(Karray):
     npc       = kaf()
     uop_idx   = kaf()
     is_branch = kaf(1)
+    is_store  = kaf(1)      # the ROB's commit barrier groups on it
+    rsv_id    = kaf()       # which station the µop is for — routing is
+                            # decode's to supply, like branch-ness
 
 
 def decode_atm_operands(isa: IsaBase) -> tuple:
@@ -114,7 +120,9 @@ def decode_entry_shape(config: CPUO3_Config) -> tuple:
     """
     fields = {"pc"     : config.pc_width,
               "npc"    : config.pc_width,       # where the next instruction sits
-              "uop_idx": config.uop_idx_width}  # which µop of the ISA this is
+              "uop_idx": config.uop_idx_width,  # which µop of the ISA this is
+              "rsv_id" : rsv_id_width(config)}  # sized as the bus's, so the
+                                                # k2k copy pairs the two
 
     for atm_operand in decode_atm_operands(config.isa):
         fields.update(decode_operand_fields(config, atm_operand))
