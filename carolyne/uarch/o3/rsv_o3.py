@@ -44,18 +44,17 @@ class RsvO3(RsvBase):
     """A station that issues the oldest ready entry."""
 
     def __init__(self,
-                 config      : CPUO3_Config,
-                 rsv_spec    : RsvSpec,
-                 name        : str = "",
-                 rsv_idx     : int = 0,
-                 write_ports : int = 0):
+                 config   : CPUO3_Config,
+                 rsv_spec : RsvSpec,
+                 name     : str = "",
+                 rsv_idx  : int = 0):
 
         if not rsv_spec.issue_o3:
             raise ValueError(
                 f"RsvO3 '{rsv_spec.label}': this spec asks for in-order issue, and "
                 f"an in-order entry carries no age track — build an RsvIOR")
 
-        super().__init__(config, rsv_spec, name, rsv_idx, write_ports)
+        super().__init__(config, rsv_spec, name, rsv_idx)
 
     @init
     def o3_declare(self):
@@ -78,9 +77,9 @@ class RsvO3(RsvBase):
 
         # Where each write port dispatches. Built on the first free_slots call.
         self.free_idx = [wire(self.track_width, f"{self.label}_free_idx{port}")
-                         for port in range(self.write_ports)]
+                         for port in range(self.config.fe_lanes)]
         self.free_ok  = [wire(1, f"{self.label}_free_ok{port}")
-                         for port in range(self.write_ports)]
+                         for port in range(self.config.fe_lanes)]
         self._free_built = False
 
     # --- dispatch ---------------------------------------------------------------
@@ -96,14 +95,15 @@ class RsvO3(RsvBase):
         if self._free_built:
             return list(zip(self.free_ok, self.free_idx))
 
-        wants   = self.lanes_for_me(dispatch)
-        claimed = []
-        for port in range(self.write_ports):
+        targets_me = self.lanes_for_me(dispatch)
+        claimed    = []
+        for port in range(self.config.fe_lanes):
             found, idx = self._find_free(claimed)
             self.free_ok[port]  *= found
             self.free_idx[port] *= idx
             # This lane takes it only if it is dispatching here at all.
-            claimed.append((self.free_ok[port] & wants[port], self.free_idx[port]))
+            claimed.append((self.free_ok[port] & targets_me[port],
+                            self.free_idx[port]))
 
         self._free_built = True
         return list(zip(self.free_ok, self.free_idx))
@@ -140,7 +140,7 @@ class RsvO3(RsvBase):
         where it was looking.
         """
         bits = []
-        for row_idx in self.row_idxs():
+        for row_idx in self.all_row_idxs():
             is_free = ~to_ref(self.table[row_idx].valid)
             for accepted, idx in claimed:
                 is_free = is_free & ~(accepted & (idx == row_idx))
@@ -161,10 +161,10 @@ class RsvO3(RsvBase):
 
     def on_dispatch(self, dispatch):
         """Take every dispatch lane aimed at this station, all in one cycle."""
-        wants    = self.lanes_for_me(dispatch)
-        accepted = []
+        targets_me = self.lanes_for_me(dispatch)
+        accepted   = []
         for port, (free_ok, free_idx) in enumerate(self.free_slots(dispatch)):
-            accept = free_ok & wants[port]
+            accept = free_ok & targets_me[port]
             accepted.append(accept)
             with zif(accept):
                 self.write_entry(to_ref(free_idx), dispatch[port])
@@ -186,9 +186,9 @@ class RsvO3(RsvBase):
         equal priority would not order the way they read.
         """
         with priority(PRI_RENAME):
-            self.table[idx] |= self.row_fields(src_row,
-                                               track=self.track_ptr,
-                                               is_lower_track=0)
+            self.table[idx] |= self.read_row_fields(src_row,
+                                                    track=self.track_ptr,
+                                                    is_lower_track=0)
 
     def roll_track_epoch(self):
         """Every entry in the table is now a wrap behind the counter.
@@ -197,7 +197,7 @@ class RsvO3(RsvBase):
         NEW epoch, and their write has to land after this one.
         """
         with priority(PRI_TRACK_ROLL):
-            for row_idx in self.row_idxs():
+            for row_idx in self.all_row_idxs():
                 self.table[row_idx] |= {"is_lower_track": 1}
 
     # --- issue ------------------------------------------------------------------

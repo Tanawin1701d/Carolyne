@@ -50,19 +50,14 @@ class RsvBase(Module):
     """
 
     def __init__(self,
-                 config   : CPUO3_Config,
-                 rsv_spec : RsvSpec,
+                 config      : CPUO3_Config,
+                 rsv_spec    : RsvSpec,
                  name        : str = "",
-                 rsv_idx     : int = 0,
-                 write_ports : int = 0):
+                 rsv_idx     : int = 0):
 
-        self.config      = config
-        self.rsv_spec    = rsv_spec
-        self.rsv_idx     = rsv_idx      # which station a dispatch bus names
-        # One write port per front-end lane: every lane may dispatch in the
-        # same cycle, and any of them may be aimed at this station. Issue stays
-        # single — one entry leaves per cycle, to one execution unit.
-        self.write_ports = write_ports or config.fe_lanes
+        self.config   = config
+        self.rsv_spec = rsv_spec
+        self.rsv_idx  = rsv_idx         # which station a dispatch bus names
         self.label    = name or f"rsv_{rsv_spec.label.replace('/', '_')}"
 
         super().__init__()
@@ -81,7 +76,7 @@ class RsvBase(Module):
         self.wake_operands = tuple(a for a in self.atm_operands
                                    if a.is_src and a.has_arch)
         self.entry_fields  = rsv_field_names(self.config, self.rsv_spec)
-        self._lane_wants   = None       # built on the first lanes_for_me call
+        self._lane_targets_me = None    # built on the first lanes_for_me call
 
     # --- reads -----------------------------------------------------------------
     def slot_ready(self, row):
@@ -91,9 +86,10 @@ class RsvBase(Module):
             ready = ready & to_ref(getattr(row, field_name(VALID, atm_operand)))
         return ready
 
-    def row_idxs(self):
-        """Every entry index. A Karray selection collapses to ONE element and
-        has no ranges, so logic over the whole table is a Python loop.
+    def all_row_idxs(self):
+        """Every row index of the table. A Karray selection collapses to ONE
+        element and has no ranges, so logic over the whole table is a Python
+        loop.
 
         Indices, not cached row handles: `row |= {...}` rebinds the name it is
         written on to Kathryn's assigned-marker, so a write always names
@@ -101,7 +97,7 @@ class RsvBase(Module):
         """
         return range(self.rsv_spec.size)
 
-    def row_fields(self, src_row, **overrides) -> dict:
+    def read_row_fields(self, src_row: KarrayRef, **overrides) -> dict:
         """One row's fields, read out by name, with some of them replaced.
 
         The spelling for "copy this row but say something else about two of its
@@ -152,14 +148,18 @@ class RsvBase(Module):
     def lanes_for_me(self, dispatch):
         """That answer for every write port, built ONCE.
 
+        One write port per front-end lane: every lane may dispatch in the same
+        cycle, and any of them may be aimed at this station. Issue stays
+        single — one entry leaves per cycle, to one execution unit.
+
         Both halves ask — the slot search, to know what an earlier lane takes,
         and the write side, to know whether to take it — and rebuilding it
         would be two comparator trees saying one thing.
         """
-        if self._lane_wants is None:
-            self._lane_wants = [self.lane_targets_me(dispatch[port])
-                                for port in range(self.write_ports)]
-        return self._lane_wants
+        if self._lane_targets_me is None:
+            self._lane_targets_me = [self.lane_targets_me(dispatch[port])
+                                     for port in range(self.config.fe_lanes)]
+        return self._lane_targets_me
 
     def entry_squashed(self, row, fix_tag):
         """This entry dies on this mispredict: occupied, speculating, and under
@@ -198,15 +198,15 @@ class RsvBase(Module):
             self.exec_src[0] |= src_row
         else:
             left = to_ref(src_row.spec_tag) & ~suc_tag
-            self.exec_src[0] |= self.row_fields(src_row, spec_tag=left,
-                                                is_spec=left != 0)
+            self.exec_src[0] |= self.read_row_fields(src_row, spec_tag=left,
+                                                     is_spec=left != 0)
         self.table[idx] |= {"valid": 0}
 
     def on_mis_pred(self, fix_tag):
         """A prediction was wrong: every entry speculating under a killed tag
         goes away. `fix_tag` is the one-hot mask of what is being squashed."""
         with priority(PRI_MIS_PRED):
-            for row_idx in self.row_idxs():
+            for row_idx in self.all_row_idxs():
                 with zif(self.entry_squashed(self.table[row_idx], fix_tag)):
                     self.table[row_idx] |= {"valid": 0}
 
@@ -214,7 +214,7 @@ class RsvBase(Module):
         """A prediction resolved correctly: its tag stops covering anything.
         An entry stays speculative while any OTHER tag it carries is still
         open, which is what the mask-out says."""
-        for row_idx in self.row_idxs():
+        for row_idx in self.all_row_idxs():
             row  = self.table[row_idx]
             left = to_ref(row.spec_tag) & ~suc_tag
             with zif(to_ref(row.valid) & to_ref(row.is_spec)):
@@ -224,7 +224,7 @@ class RsvBase(Module):
     def on_bypass(self, *bypasses: RsvBypass):
         """Writeback broadcasts: a waiting source whose physical index matches
         captures the value and becomes ready."""
-        for row_idx in self.row_idxs():
+        for row_idx in self.all_row_idxs():
             row = self.table[row_idx]
             for atm_operand in self.wake_operands:
                 valid_f  = field_name(VALID,  atm_operand)

@@ -37,11 +37,10 @@ class RsvIOR(RsvBase):
     """A station that issues its head entry."""
 
     def __init__(self,
-                 config      : CPUO3_Config,
-                 rsv_spec    : RsvSpec,
-                 name        : str = "",
-                 rsv_idx     : int = 0,
-                 write_ports : int = 0):
+                 config   : CPUO3_Config,
+                 rsv_spec : RsvSpec,
+                 name     : str = "",
+                 rsv_idx  : int = 0):
 
         if rsv_spec.issue_o3:
             raise ValueError(
@@ -58,17 +57,16 @@ class RsvIOR(RsvBase):
                 f"station steps two pointers modulo its size, so the size must be a "
                 f"power of two or every step needs its own wrap compare")
 
-        # The effective port count, resolved the way RsvBase resolves it — the
-        # check has to run BEFORE super(), which is what builds the hardware.
-        ports = write_ports or config.fe_lanes
-        if ports > rsv_spec.size:
+        # One write port per front-end lane — the check has to run BEFORE
+        # super(), which is what builds the hardware.
+        if config.fe_lanes > rsv_spec.size:
             raise ValueError(
-                f"RsvIOR '{rsv_spec.label}': {ports} write ports over {rsv_spec.size} "
-                f"entries — the lanes land in a RUN from one pointer, so two of them "
-                f"would come back round onto the same entry and write it twice in a "
-                f"cycle. Deepen the station, or hand it write_ports <= size")
+                f"RsvIOR '{rsv_spec.label}': {config.fe_lanes} write ports over "
+                f"{rsv_spec.size} entries — the lanes land in a RUN from one pointer, "
+                f"so two of them would come back round onto the same entry and write "
+                f"it twice in a cycle. Deepen the station to at least fe_lanes")
 
-        super().__init__(config, rsv_spec, name, rsv_idx, write_ports)
+        super().__init__(config, rsv_spec, name, rsv_idx)
 
     @init
     def ior_declare(self):
@@ -93,9 +91,9 @@ class RsvIOR(RsvBase):
         # Where each write port lands. Built on the first free_slots call, like
         # RsvO3's: a second build would double-drive the same wires.
         self.free_ok  = [wire(1, f"{self.label}_free_ok{port}")
-                         for port in range(self.write_ports)]
+                         for port in range(self.config.fe_lanes)]
         self.free_idx = [wire(self.idx_width, f"{self.label}_free_idx{port}")
-                         for port in range(self.write_ports)]
+                         for port in range(self.config.fe_lanes)]
         self._free_built = False
 
     # --- dispatch ---------------------------------------------------------------
@@ -106,23 +104,24 @@ class RsvIOR(RsvBase):
         the answer instead of searching for it: port k takes the pointer plus
         however many EARLIER lanes are dispatching here.
 
-        The offset counts the lanes that WANT in, not the ones that land. Those
-        differ only when an earlier lane was refused for want of room — and a
-        refused lane blocks every later one anyway (`on_dispatch`), so the
-        offset can only be wrong on a port that is taking nothing.
+        The offset counts the lanes TARGETING this station, not the ones that
+        land. Those differ only when an earlier lane was refused for want of
+        room — and a refused lane blocks every later one anyway
+        (`on_dispatch`), so the offset can only be wrong on a port that is
+        taking nothing.
 
         The index is that offset MODULO the table, and two wanting lanes would
         share a row only if their offsets differed by a whole table — which the
-        `write_ports <= size` refused at construction makes impossible, since
+        `fe_lanes <= size` refused at construction makes impossible, since
         the largest difference is then size - 1.
         """
         if self._free_built:
             return list(zip(self.free_ok, self.free_idx))
 
-        wants = self.lanes_for_me(dispatch)
-        alloc = self.alloc_ptr
-        for port in range(self.write_ports):
-            offset = None if port == 0 else sum_cnt(wants[:port])
+        targets_me = self.lanes_for_me(dispatch)
+        alloc      = self.alloc_ptr
+        for port in range(self.config.fe_lanes):
+            offset = None if port == 0 else sum_cnt(targets_me[:port])
             self.free_idx[port] *= alloc if offset is None else alloc + offset
             self.free_ok[port]  *= ~to_ref(
                 self.table[self.free_idx[port]].valid)
@@ -136,14 +135,15 @@ class RsvIOR(RsvBase):
         A lane may only land if every earlier lane bound for this station did.
         The pointer then moves on by however many were taken.
         """
-        wants             = self.lanes_for_me(dispatch)
+        targets_me        = self.lanes_for_me(dispatch)
         accepted, blocked = [], None
         for port, (free, idx) in enumerate(self.free_slots(dispatch)):
-            accept = wants[port] & free
+            accept = targets_me[port] & free
             if blocked is not None:
                 accept = accept & ~blocked
-            # An earlier lane that wanted in and could not blocks the rest.
-            missed  = wants[port] & ~accept
+            # An earlier lane that targeted this station and could not land
+            # blocks the rest.
+            missed  = targets_me[port] & ~accept
             blocked = missed if blocked is None else blocked | missed
 
             accepted.append(accept)
@@ -194,7 +194,7 @@ class RsvIOR(RsvBase):
 
         survivors = [to_ref(self.table[row_idx].valid)
                      & ~self.entry_squashed(self.table[row_idx], fix_tag)
-                     for row_idx in self.row_idxs()]
+                     for row_idx in self.all_row_idxs()]
 
         with priority(PRI_MIS_PRED):
             self.alloc_ptr |= self.head_ptr + sum_cnt(survivors)

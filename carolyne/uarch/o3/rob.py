@@ -191,9 +191,9 @@ class Rob(Module):
     def write_entry(self, idx, src_row):
         """Fill one entry. Nothing has written back yet, whatever the bus says."""
         with priority(PRI_RENAME):
-            self.table[idx] |= self.row_fields(src_row, wb_fin=0)
+            self.table[idx] |= self.read_row_fields(src_row, wb_fin=0)
 
-    def row_fields(self, src_row, **overrides) -> dict:
+    def read_row_fields(self, src_row: KarrayRef, **overrides) -> dict:
         """One row's fields by name, with some replaced — one write, so nothing
         depends on the order two writes of equal priority are emitted in."""
         entry_cls, fields = rob_entry_shape(self.config)

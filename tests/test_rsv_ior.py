@@ -78,7 +78,7 @@ def test_in_order_lanes_land_in_a_run_and_leave_no_hole():
     # hole would be an entry issuing before one dispatched ahead of it.
     host  = _drive(RsvIOR, IOR_SPEC, rsv_idx=1)
     slots = host.station.free_slots(host.dispatch)
-    assert len(slots) == host.station.write_ports
+    assert len(slots) == host.station.config.fe_lanes
 
 
 def test_an_in_order_station_refuses_an_out_of_order_spec():
@@ -97,22 +97,20 @@ def test_an_in_order_station_needs_a_power_of_two():
         RsvIOR(cfg, RsvSpec(False, 6, (ISA.unit("mem"),), RsvType.RSV_LD_ST), "bad")
 
 
-def test_more_write_ports_than_entries_is_refused():
-    # The slot index is the offset MODULO the table, so on a 4-entry station
-    # lane 0 and lane 4 would both land on alloc — two writes to one row at
-    # equal priority, which is not statement order. The bound is <= size, not
-    # < size: at exactly size the largest offset difference is size - 1, which
-    # cannot be a whole table.
+def test_more_lanes_than_entries_is_refused():
+    # One write port per front-end lane, and the slot index is the offset
+    # MODULO the table, so on a 4-entry station lane 0 and lane 4 would both
+    # land on alloc — two writes to one row at equal priority, which is not
+    # statement order. The bound is <= size, not < size: at exactly size the
+    # largest offset difference is size - 1, which cannot be a whole table.
     cfg = _cfg(fe_lanes=6)
     reset()
     with pytest.raises(ValueError, match="write ports over"):
         RsvIOR(cfg, IOR_SPEC, "too_wide")
 
-    # Four lanes over four entries is fine, and so is a narrower port count.
+    # Four lanes over four entries is fine.
     reset()
     RsvIOR(_cfg(fe_lanes=4), IOR_SPEC, "exactly_full")
-    reset()
-    RsvIOR(_cfg(fe_lanes=6), IOR_SPEC, "narrowed", write_ports=4)
 
 
 def test_a_one_entry_in_order_station_is_refused_at_construction():

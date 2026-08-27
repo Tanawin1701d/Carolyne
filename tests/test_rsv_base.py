@@ -31,7 +31,7 @@ class OldestFirst(RsvBase):
     """The policy a station has to supply: here, the lowest ready row issues."""
 
     def build_issue(self, issue_en):
-        for row_idx in self.row_idxs():
+        for row_idx in self.all_row_idxs():
             row = self.table[row_idx]
             with zif(issue_en.land(self.slot_ready(row))):
                 self.on_issue(row_idx, row)
@@ -121,7 +121,7 @@ def test_an_in_order_station_builds_the_same_way():
     assert host.station.rsv_spec.issue_o3 is False
 
 
-def test_row_idxs_covers_the_table():
+def test_all_row_idxs_covers_the_table():
     cfg  = _cfg()
     host = _drive(cfg, RsvSpec(True, 4, (ALU,), RsvType.RSV_EXEC))
-    assert list(host.station.row_idxs()) == [0, 1, 2, 3]
+    assert list(host.station.all_row_idxs()) == [0, 1, 2, 3]

@@ -66,7 +66,6 @@ def test_a_station_has_one_write_port_per_front_end_lane():
     # Every lane may dispatch in the same cycle and any of them may be aimed
     # here, so the write side is as wide as the front end. Issue stays single.
     host = _drive(RsvO3, O3_SPEC, fe_lanes=3)
-    assert host.station.write_ports == 3
     assert len(host.station.free_ok) == 3 and len(host.station.free_idx) == 3
 
 
@@ -158,5 +157,5 @@ def test_more_lanes_than_entries_is_safe_out_of_order():
     # simply find nothing free and those ports accept nothing.
     small = RsvSpec(True, 2, (ISA.unit("alu"), ISA.unit("control")), RsvType.RSV_BRANCH)
     host  = _drive(RsvO3, small, fe_lanes=4)
-    assert host.station.size == 2 and host.station.write_ports == 4
+    assert host.station.size == 2 and len(host.station.free_ok) == 4
     assert len(host.station.free_slots(host.dispatch)) == 4

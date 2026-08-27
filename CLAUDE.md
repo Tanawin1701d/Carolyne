@@ -731,14 +731,19 @@ Kathryn as "dynamic index needs >= 1 bits, got 0").
 The modulo is also where the lane run can bite: a port's slot is
 `alloc + count(wants[:port])` MOD size, and two WANTING ports collide exactly
 when their offsets differ by a multiple of the table — which needs MORE write
-ports than entries, since the largest difference is `write_ports - 1`. Decision:
-refuse `write_ports > size` at construction rather than test `offset < size` per
+ports than entries, since the largest difference is `fe_lanes - 1`. Decision:
+refuse `fe_lanes > size` at construction rather than test `offset < size` per
 port in hardware. The bound is `<=`, not `<`: at exactly `size` the largest
 difference is `size - 1`, which cannot be a whole table. A runtime guard was
 built first and removed — it cost a comparator on every port past the table to
 buy a configuration (a station shallower than the front end is wide) that can
 only take `size` lanes a cycle anyway, and refusing is the bargain this file
 already makes twice over for the power-of-two size and the two-entry floor.
+Decision (2026-08-27): the `write_ports` constructor knob is GONE — the port
+count IS `config.fe_lanes`, read at the use sites, never stored. The knob only
+ever narrowed a station below the front end, a configuration nothing wanted,
+and its default-0-means-fe_lanes resolution restated a fact the config already
+holds; don't restore it from git.
 `RsvO3` needs no bound at all: port k's fold drops what earlier lanes took, so
 once the rows run out the later folds find nothing free and those ports accept
 nothing.
@@ -776,7 +781,7 @@ on purpose.
 Shared additions on `RsvBase`: `rsv_idx` + `try_write_entry(target_idx, ...)`
 (the C++ `RSV_IDX` / `tryWriteEntry`, for a dispatch bus that names one
 station), an abstract `free_slot()` (where a dispatch lands is policy too), and
-`row_fields(src_row, **overrides)` — the spelling for "copy this row but say
+`read_row_fields(src_row, **overrides)` — the spelling for "copy this row but say
 something else about two of its fields". Both `write_entry` (stamping the age)
 and `on_issue` (the `tryOwSpecBit` fixup, clearing a speculation that resolves
 in the issue cycle) use it, because layering a second write on a whole-row copy
