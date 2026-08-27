@@ -7,7 +7,9 @@
 # - the skipped fields are the RENAME half — pr_idx_<n>, rob_des_idx, rsv_id,
 #   is_spec/spec_tag, is_store — and Kathryn's skip warning at elaboration is
 #   the honest list of what this stage does not fill yet
-# - the bus rows are WIRES: a lane means something only in the grant cycle
+# - the bus rows are WIRES, driven at WARM time (warm_rsvs): a station's
+#   wants read them before the grant; the granted zync is where the readers
+#   commit their content into state
 
 from kathryn import *
 from kathryn.signal import to_ref
@@ -155,18 +157,25 @@ class Dispatch(Module):
         return fits
 
     def warm_rsvs(self):
-        """Ask every station whether the cycle's lanes can land — wires only.
+        """Convert the lanes onto the bus, then ask every station whether
+        the cycle's lanes can land — wires only.
 
+        - the conversion runs HERE, not in the granted zync: the bus rows
+          are wires, so driving them at warm time is what lets a station's
+          wants read valid before the grant they help decide
         - free_slots builds each station's allocation wires and answers
           all_ok: every lane aimed at that station gets an entry, or is not
           aimed there at all
         - nothing commits here: update_rsvs (on the grant) is what writes
           the entries
-        - LIMIT: the stations' wants read the bus's valid/rsv_id, which
-          nothing drives before the grant yet — the answer is honest the
-          day dispatch fills those pre-grant
+        - LIMIT: rsv_id is still on convert_lane's skip list, so it reads
+          implicit zero and every valid lane names station 0 until the
+          routing rule fills it
         - returns READY: the AND of every station's all_ok
         """
+        for lane in range(self.config.fe_lanes):
+            self.convert_lane(self.decode[lane], self.dispatch[lane])
+
         ok = val(1, 1)
         for rsv in self.rsvs:
             all_ok, _slots = rsv.free_slots(self.dispatch)
@@ -245,8 +254,6 @@ class Dispatch(Module):
                 self.update_rts()
                 self.update_rob()
                 self.update_rsvs()
-                for lane in range(self.config.fe_lanes):
-                    self.convert_lane(self.decode[lane], self.dispatch[lane])
 
     def convert_lane(self,
                      decode_entry  : DecodeEntryBase,

@@ -1180,13 +1180,18 @@ lives in the STATION (`free_slots`' `(all_ok, slots)` shape above), so
 dispatch only collects. `rsvs` is the sixth connect() slot. A first version
 built the check in dispatch itself — pre-grant `RsvRoute(valid, rsv_id)`
 rows plus a uop_idx→station routing decode (`route_uops_to_rsvs`) — and was
-reverted whole the same day; don't restore it from the scratchpad. LIMIT,
-stated in the docstring: the stations' wants read the bus's `valid`/
-`rsv_id`, which nothing drives before the grant yet — how a lane's station
-becomes knowable pre-grant (the routing question) is still open, and the
-free_slots caches (`_free_built`, `_lane_targets_me`) mean whatever rows
-the warm call feeds are also the wants `update_rsvs`'s `on_dispatch(bus)`
-will reuse. `update_rsvs` is still a stub.
+reverted whole the same day; don't restore it from the scratchpad. Later
+the same day **`convert_lane` moved OUT of the granted zync into
+`warm_rsvs`**, superseding the Dispatch entry above: the bus rows are
+wires, so driving them at warm time is what lets a station's wants read
+the decode-fed `valid` before the grant they help decide, and the granted
+zync keeps only the update_* calls — the bus states the cycle's candidate,
+the grant is what commits it into state. The free_slots caches
+(`_free_built`, `_lane_targets_me`) mean these are also the wants
+`update_rsvs`'s `on_dispatch(bus)` will reuse. LIMIT, narrowed to routing
+alone: `rsv_id` is still on the k2k skip list, so it reads implicit zero
+and every valid lane names station 0 until the µop→station rule fills it.
+`update_rsvs` is still a stub.
 
 FOUND ON THE WAY: `Rt.on_normal_flow` walked `sptag_len` rows of
 `temp_dispatch`, which is `(rename_ports, amount)` — out of bounds whenever the
