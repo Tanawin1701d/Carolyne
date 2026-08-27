@@ -116,18 +116,22 @@ class RsvIOR(RsvBase):
         the largest difference is then size - 1.
         """
         if self._free_built:
-            return list(zip(self.free_ok, self.free_idx))
+            return self.all_ok, list(zip(self.free_ok, self.free_idx))
 
         targets_me = self.lanes_for_me(dispatch)
         alloc      = self.alloc_ptr
+        all_ok     = val(1, 1)
         for port in range(self.config.fe_lanes):
             offset = None if port == 0 else sum_cnt(targets_me[:port])
             self.free_idx[port] *= alloc if offset is None else alloc + offset
             self.free_ok[port]  *= ~to_ref(
                 self.table[self.free_idx[port]].valid)
+            # A lane bound elsewhere holds nothing against this station.
+            all_ok = all_ok & (self.free_ok[port] | ~targets_me[port])
+        self.all_ok *= all_ok
 
         self._free_built = True
-        return list(zip(self.free_ok, self.free_idx))
+        return self.all_ok, list(zip(self.free_ok, self.free_idx))
 
     def on_dispatch(self, dispatch):
         """Take the lanes aimed at this station, in order, from the pointer on.
@@ -137,7 +141,8 @@ class RsvIOR(RsvBase):
         """
         targets_me        = self.lanes_for_me(dispatch)
         accepted, blocked = [], None
-        for port, (free, idx) in enumerate(self.free_slots(dispatch)):
+        _all_ok, slots    = self.free_slots(dispatch)
+        for port, (free, idx) in enumerate(slots):
             accept = targets_me[port] & free
             if blocked is not None:
                 accept = accept & ~blocked

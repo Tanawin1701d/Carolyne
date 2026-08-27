@@ -76,8 +76,8 @@ def test_an_in_order_station_is_two_pointers():
 def test_in_order_lanes_land_in_a_run_and_leave_no_hole():
     # Port k takes alloc + k, and may only land if every earlier lane did: a
     # hole would be an entry issuing before one dispatched ahead of it.
-    host  = _drive(RsvIOR, IOR_SPEC, rsv_idx=1)
-    slots = host.station.free_slots(host.dispatch)
+    host = _drive(RsvIOR, IOR_SPEC, rsv_idx=1)
+    _all_ok, slots = host.station.free_slots(host.dispatch)
     assert len(slots) == host.station.config.fe_lanes
 
 

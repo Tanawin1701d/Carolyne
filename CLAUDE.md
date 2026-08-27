@@ -677,6 +677,13 @@ old rather than oldest. That costs order, never correctness — what issues is
 always ready, so the age track is a heuristic and this is the price of not
 reading the RRF.
 
+`free_slots` returns **`(all_ok, [(free_ok, free_idx)])`** (2026-08-27):
+`all_ok` is the AND over ports of "this lane can land here, or is not aimed
+here at all" (`free_ok | ~targets_me`) — the station's own contribution to
+dispatch's go/stall AND, the `Rob.free_slots` `(fits, …)` shape read per
+station, on a 1-bit `all_ok` wire declared in `RsvBase` so both call paths
+return the same signal.
+
 `free_slots(dispatch)` gives each port its own entry, and it takes the DISPATCH
 BUS to do it: a port IS a lane, fixed to it, and a lane may be carrying a µop
 for another station this cycle, so what an earlier port actually takes here is
@@ -1166,6 +1173,20 @@ case. Post-own-rename is the deliberate choice: `on_mis_pred` restores
 the branch's own mapping must survive the rollback — a pre-rename snapshot
 would fail commit's renamed/prf_idx fixup and leak the physical register. A
 port with no booking raises, naming the port.
+
+**`warm_rsvs`** (2026-08-27): one `free_slots(self.dispatch)` per station,
+its `all_ok` bits AND-ed into the READY the call returns — the sizing check
+lives in the STATION (`free_slots`' `(all_ok, slots)` shape above), so
+dispatch only collects. `rsvs` is the sixth connect() slot. A first version
+built the check in dispatch itself — pre-grant `RsvRoute(valid, rsv_id)`
+rows plus a uop_idx→station routing decode (`route_uops_to_rsvs`) — and was
+reverted whole the same day; don't restore it from the scratchpad. LIMIT,
+stated in the docstring: the stations' wants read the bus's `valid`/
+`rsv_id`, which nothing drives before the grant yet — how a lane's station
+becomes knowable pre-grant (the routing question) is still open, and the
+free_slots caches (`_free_built`, `_lane_targets_me`) mean whatever rows
+the warm call feeds are also the wants `update_rsvs`'s `on_dispatch(bus)`
+will reuse. `update_rsvs` is still a stub.
 
 FOUND ON THE WAY: `Rt.on_normal_flow` walked `sptag_len` rows of
 `temp_dispatch`, which is `(rename_ports, amount)` — out of bounds whenever the

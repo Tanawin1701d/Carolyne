@@ -54,6 +54,7 @@ class Dispatch(Module):
         self.reg_arch_mng = None    # ARF/PRF/RT per class, from connect()
         self.tag_gen      = None    # the speculation-tag allocator, from connect()
         self.rob          = None    # the reorder buffer, from connect()
+        self.rsvs         = None    # the reservation stations, from connect()
 
 
     # warm system means wire connect / no update register typically used for protocol handshake and give promiss data
@@ -154,7 +155,23 @@ class Dispatch(Module):
         return fits
 
     def warm_rsvs(self):
-        pass
+        """Ask every station whether the cycle's lanes can land — wires only.
+
+        - free_slots builds each station's allocation wires and answers
+          all_ok: every lane aimed at that station gets an entry, or is not
+          aimed there at all
+        - nothing commits here: update_rsvs (on the grant) is what writes
+          the entries
+        - LIMIT: the stations' wants read the bus's valid/rsv_id, which
+          nothing drives before the grant yet — the answer is honest the
+          day dispatch fills those pre-grant
+        - returns READY: the AND of every station's all_ok
+        """
+        ok = val(1, 1)
+        for rsv in self.rsvs:
+            all_ok, _slots = rsv.free_slots(self.dispatch)
+            ok = ok & all_ok
+        return ok
 
     # it is used when everything is good and ready to go to
 
@@ -217,8 +234,8 @@ class Dispatch(Module):
         prf_ok = self.warm_prfs()
         rt_ok  = self.warm_rts()
         rob_ok = self.warm_rob()
-        self.warm_rsvs()
-        self.ready_to_go *= tag_ok & prf_ok & rt_ok & rob_ok
+        rsv_ok = self.warm_rsvs()
+        self.ready_to_go *= tag_ok & prf_ok & rt_ok & rob_ok & rsv_ok
 
         with pip(self.dispatch_meta):
             # inside the zync: everything here fires on the grant only

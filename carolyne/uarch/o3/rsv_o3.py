@@ -93,10 +93,11 @@ class RsvO3(RsvBase):
         `claimed` carries: (accepted, index) per earlier port.
         """
         if self._free_built:
-            return list(zip(self.free_ok, self.free_idx))
+            return self.all_ok, list(zip(self.free_ok, self.free_idx))
 
         targets_me = self.lanes_for_me(dispatch)
         claimed    = []
+        all_ok     = val(1, 1)
         for port in range(self.config.fe_lanes):
             found, idx = self._find_free(claimed)
             self.free_ok[port]  *= found
@@ -104,9 +105,12 @@ class RsvO3(RsvBase):
             # This lane takes it only if it is dispatching here at all.
             claimed.append((self.free_ok[port] & targets_me[port],
                             self.free_idx[port]))
+            # A lane bound elsewhere holds nothing against this station.
+            all_ok = all_ok & (self.free_ok[port] | ~targets_me[port])
+        self.all_ok *= all_ok
 
         self._free_built = True
-        return list(zip(self.free_ok, self.free_idx))
+        return self.all_ok, list(zip(self.free_ok, self.free_idx))
 
     def _find_free(self, claimed):
         """(a free entry exists, which one) — the free bit reduced with its
@@ -161,9 +165,10 @@ class RsvO3(RsvBase):
 
     def on_dispatch(self, dispatch):
         """Take every dispatch lane aimed at this station, all in one cycle."""
-        targets_me = self.lanes_for_me(dispatch)
-        accepted   = []
-        for port, (free_ok, free_idx) in enumerate(self.free_slots(dispatch)):
+        targets_me     = self.lanes_for_me(dispatch)
+        accepted       = []
+        _all_ok, slots = self.free_slots(dispatch)
+        for port, (free_ok, free_idx) in enumerate(slots):
             accept = free_ok & targets_me[port]
             accepted.append(accept)
             with zif(accept):

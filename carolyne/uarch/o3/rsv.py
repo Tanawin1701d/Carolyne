@@ -78,6 +78,10 @@ class RsvBase(Module):
         self.entry_fields  = rsv_field_names(self.config, self.rsv_spec)
         self._lane_targets_me = None    # built on the first lanes_for_me call
 
+        # free_slots' aggregate answer: every lane aimed here can land — the
+        # station's own contribution to the dispatch go/stall bit.
+        self.all_ok = wire(1, f"{self.label}_all_ok")
+
     # --- reads -----------------------------------------------------------------
     def slot_ready(self, row):
         """This entry is occupied and every source it waits on has landed."""
@@ -117,7 +121,10 @@ class RsvBase(Module):
             f"order — so a subclass has to say")
 
     def free_slots(self, dispatch):
-        """One free entry per write port: [(this port has a slot, where)].
+        """(all_ok, [(this port has a slot, where)]) — one entry per write
+        port, and the aggregate: `all_ok` is the AND over ports of "this lane
+        can land here, or it is not aimed here at all", the Rob.free_slots
+        shape read per station.
 
         Takes the dispatch bus because a port is a LANE, fixed to it, and a
         lane may be carrying a µop for another station this cycle — so what an

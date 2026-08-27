@@ -74,11 +74,13 @@ def test_each_write_port_searches_the_table_and_skips_what_earlier_lanes_took():
     # its index, log2(size) deep — and the leaves of port k's fold exclude the
     # entries earlier lanes are ACTUALLY taking here. A lane bound for another
     # station takes nothing, so it excludes nothing.
-    host  = _drive(RsvO3, O3_SPEC, fe_lanes=2)
-    slots = host.station.free_slots(host.dispatch)
+    host = _drive(RsvO3, O3_SPEC, fe_lanes=2)
+    all_ok, slots = host.station.free_slots(host.dispatch)
     assert len(slots) == 2
     # One-hot per port, one bit per row.
     assert all(idx is not None for _ok, idx in slots)
+    # The aggregate: every lane aimed here can land, or is not aimed here.
+    assert all_ok is host.station.all_ok
 
 
 def test_the_dispatch_bus_says_which_station_a_lane_is_for():
@@ -104,8 +106,9 @@ def test_the_free_slot_wires_are_built_once():
 
         @flow
         def run(self):
-            first  = self.station.free_slots(self.dispatch)
-            second = self.station.free_slots(self.dispatch)
+            first_all,  first  = self.station.free_slots(self.dispatch)
+            second_all, second = self.station.free_slots(self.dispatch)
+            assert first_all is second_all
             assert [ok for ok, _ in first] == [ok for ok, _ in second]
 
     set_top(Host())
@@ -156,6 +159,7 @@ def test_more_lanes_than_entries_is_safe_out_of_order():
     # what earlier lanes took, so with more lanes than rows the later folds
     # simply find nothing free and those ports accept nothing.
     small = RsvSpec(True, 2, (ISA.unit("alu"), ISA.unit("control")), RsvType.RSV_BRANCH)
-    host  = _drive(RsvO3, small, fe_lanes=4)
+    host = _drive(RsvO3, small, fe_lanes=4)
     assert host.station.size == 2 and len(host.station.free_ok) == 4
-    assert len(host.station.free_slots(host.dispatch)) == 4
+    _all_ok, slots = host.station.free_slots(host.dispatch)
+    assert len(slots) == 4
