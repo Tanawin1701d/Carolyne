@@ -941,9 +941,12 @@ neither, and a one-register class still drops `ar_idx` on the 0-width rule.
 `SRC_KINDS`/`DEST_KINDS` are the two tuples and `dispatch_operand_kinds()` is
 the one place the target narrows them. Decision (2026-08-23): `DispatchEntryBase`
 (named `DispatchBase` until 2026-08-24 — the record-class naming every other
-table already has) now DECLARES the machine half beside the operand groups — `valid`, `is_spec` +
-`spec_tag`, `uop_idx`, `rob_des_idx`, `rsv_id`, `is_branch` + `is_store`,
-`pc` + `npc`. It is the UNION of what the readers keep, not a copy of any one
+table already has) now DECLARES the machine half beside the operand groups —
+since 2026-08-27 in TWO labeled groups: the DECODE half (`valid`, `pc`,
+`npc`, `uop_idx`, `is_branch`, `is_store`, `rsv_id`, in `DecodeEntryBase`'s
+own order — what convert_lane's k2k copy fills) and the RENAME half
+(`is_spec`, `spec_tag`, `rob_des_idx` — what rename/allocation overlays).
+It is the UNION of what the readers keep, not a copy of any one
 of them, because a lane is shaped before it is routed and the same row is read
 by the ROB (`is_branch`/`is_store`/`pc`), by a station (`is_spec`/`spec_tag`/
 `uop_idx`/`rob_des_idx`, plus `pc`/`npc` if its KIND carries them) and by every
@@ -1194,11 +1197,49 @@ the grant is what commits it into state. The free_slots caches
 **`is_store` and `rsv_id` joined `DecodeEntryBase`'s fixed half** — the
 `is_branch` precedent: store-ness and routing are decode's to supply —
 with `rsv_id` sized `rsv_id_width(config)` so the k2k copy pairs it with
-the bus's field; both left convert_lane's skip list, which is now the
-rename half proper (`pr_idx_<n>`, `rob_des_idx`, `is_spec`/`spec_tag`,
-`data_src_1`). LIMIT, narrowed to decode's own writes: `uop_decode` writes
-all three zero — every valid lane still names station 0 (and reads
-non-branch, non-store) until the real rules land there.
+the bus's field; both left convert_lane's skip list. And `convert_lane`
+now fills **`rob_des_idx`** itself, from `rob_acquisition`'s per-lane
+promise — a SECOND `*=` on a fresh selection (an augmented assign rebinds
+its handle), legal beside the k2k because the copy skipped the field, so
+nothing is driven twice; `convert_lane(lane)` takes the lane index for
+exactly that fresh selection. What the skip warning still lists and truly
+goes unfilled is the rename half proper (`pr_idx_<n>`, `is_spec`/
+`spec_tag`, `data_src_1`). LIMIT, narrowed to decode's own writes:
+`uop_decode` writes is_branch/is_store/rsv_id zero — every valid lane
+still names station 0 (and reads non-branch, non-store) until the real
+rules land there.
+
+**The rename READ** (2026-08-27, `dispatch.rename_src_operand` +
+`Rt.read_rename`): convert_lane fills each arch SOURCE slot's rename half
+on the bus. Three cases off the decode row, ALL gated on the slot's
+`active_<n>` (decision 2026-08-28: an INACTIVE slot is not rename's
+business — a first version made it valid via the not-renamed path and was
+corrected to not consider it at all): a value IN HAND (`valid_<n>`, an
+immediate) keeps what the copy wrote; active and NOT renamed makes the
+slot ready from architectural state (`valid_<n>`=1, `data_<n>` =
+`Arf.read(ar_idx)`, whose const-reg mux answers x0); active and RENAMED
+splits on the PRF entry's `fin` (2026-08-28, `Prf.on_get_entry(prf_idx)`)
+— already written back reads the value straight out of the PRF
+(`valid_<n>`=1), still in flight leaves valid as decoded and puts the
+RT's `prf_idx` in `pr_idx_<n>`, the index the station wakes on. OPEN, and it bites at issue: decode writes
+`valid_<n>`=0 for a slot the µop does not fill and `RsvBase.slot_ready`
+ANDs EVERY wake operand's valid bit, so an entry with an unfilled arch
+slot cannot issue until someone answers for inactive slots — decode
+writing their valid 1, or slot_ready gating on active.
+`Rt.read_rename(port, ar_idx)` is the new read: lane 0 the commit row
+(master's wire alias plus this cycle's commit fixups), lane k
+`temp_dispatch[k-1]` — the state after earlier lanes' renames, BEFORE its
+own, which is what program order says a source sees. The overlays sit at
+**`PRI_RENAME`** because valid/data collide with the k2k copy's own writes
+— the one-priority-per-layer rule; an unrenamed class skips the RT
+entirely (Arf and nowhere else). NOT a combinational loop: `ready_to_go`
+reads only lane `valid`/`rsv_id` and table occupancy, never the source
+fields these overlays drive. Later the same day the LAST promises joined
+`convert_lane` — one `promised_fields` write per lane carrying
+`rob_des_idx` (warm_rob), `is_spec`/`spec_tag` (warm_tag_gen's booking)
+and every dest `pr_idx_<n>` (warm_prfs' promised register) — so EVERY
+k2k-skipped bus field now has a driver beside the copy and the skip
+warning lists the copy's skips, not unfilled fields.
 `update_rsvs` (wired later the same day) is one `on_dispatch(dispatch_bus)`
 per station inside the granted zync — the update_rob split again, reusing
 the warm-cached wants/slots and taking entry content off the filled lane.
@@ -1274,6 +1315,11 @@ elaboration from a `RegFile` in `uarch`.
 - Assign operators carry intent: `|=` clocked (reg), `*=` combinational
   (wire); bare `=` is rejected. Conditional blocks (`sif` etc.) hold
   sub-blocks, not direct nodes — nest a `seq()` inside.
+- `zif` NESTS inside `zif` (the guards AND), and `zelif`/`zelse` chain
+  alternatives — prefer the chain over restating a shared condition term
+  in parallel zifs (`dispatch.rename_src_operand` is the shape); decode's
+  parallel zifs are a choice its mutual exclusivity justifies, not a
+  limitation.
 - `Karray` is the RAT/PRF primitive: reg/wire-backed multi-dim arrays of
   named fields; `arr[sig]` dynamic index → generated write guards per
   element / mux trees on read; callable index → one-hot writes or reduce

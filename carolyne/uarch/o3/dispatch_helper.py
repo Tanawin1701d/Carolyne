@@ -78,8 +78,8 @@ class DispatchEntryBase(Karray):
     #  wb_required on a plain DEST (only a DEST_W_REQ core stores the bit).
     #  RV32I, whose dest_1 is a plain DEST, builds:
     #
-    #      valid  is_spec  spec_tag  uop_idx  rob_des_idx         <- declared
-    #      rsv_id  is_branch  is_store  pc  npc
+    #      valid  pc  npc  uop_idx  is_branch  is_store  rsv_id  <- declared
+    #      is_spec  spec_tag  rob_des_idx
     #      active_src_1   valid_src_1  data_src_1                 <- added
     #                     pr_idx_src_1  ar_idx_src_1
     #      active_src_2   valid_src_2  data_src_2
@@ -89,21 +89,23 @@ class DispatchEntryBase(Karray):
     #
     #  Which is why a reader downstream copies BY NAME (dispatch_field_names)
     #  and never by position.
+
+    # the DECODE half — what convert_lane's k2k copy fills off the decode
+    # row, declared in DecodeEntryBase's own order so the two records read
+    # alike
     valid       = kaf(1)
-    # speculative
-    is_spec     = kaf(1)
-    spec_tag    = kaf()
-    # operation
-    uop_idx     = kaf()
-    # where it goes: the ROB entry it holds, and the station it is aimed at
-    rob_des_idx = kaf()
-    rsv_id      = kaf()
-    # what commit groups against
-    is_branch   = kaf(1)
-    is_store    = kaf(1)
-    # where it came from, and where the next instruction sits
     pc          = kaf()
     npc         = kaf()
+    uop_idx     = kaf()
+    is_branch   = kaf(1)
+    is_store    = kaf(1)
+    rsv_id      = kaf()     # which station the lane is aimed at
+
+    # the RENAME half — what decode cannot answer; rename/allocation
+    # overlays these at its own rung
+    is_spec     = kaf(1)
+    spec_tag    = kaf()
+    rob_des_idx = kaf()     # the ROB entry the µop belongs to
 
 
 def dispatch_operand_kinds(atm_operand: AtomicOperand) -> tuple:

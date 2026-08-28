@@ -117,6 +117,22 @@ class Rt(Module):
         copy_row(self.master_rt[0], self.temp_dispatch[self.rename_ports - 1],
                  amount, clocked=True)
 
+    def read_rename(self, port_idx: int, arch_dyn_idx):
+        """(renamed, prf_idx) of one architectural register, as rename port
+        `port_idx` sees it: the state AFTER every earlier lane's rename of
+        this cycle and BEFORE its own.
+
+        - port 0 reads the commit row (the master's wire alias, plus this
+          cycle's commit fixups); port k reads the row lane k-1 overlaid —
+          on_normal_flow's chain
+        - a read only, so it works on the wire rows; the overlays it sees
+          are whatever fired this cycle
+        """
+        row = (self.temp_commit[0] if port_idx == 0
+               else self.temp_dispatch[port_idx - 1])
+        entry = row[arch_dyn_idx]
+        return to_ref(entry.renamed), to_ref(entry.prf_idx)
+
     # last_valid_spec_tag is dynamic
     def on_mis_pred(self, last_valid_spec_tag_dyn):
 

@@ -4,9 +4,11 @@
 # - the conversion is ONE k2k assign per lane: Kathryn pairs fields by NAME
 #   AND WIDTH and skips the rest (uop_contract §6 reader rule), so the decode
 #   row fills exactly the overlap
-# - the skipped fields are the RENAME half — pr_idx_<n>, rob_des_idx,
-#   is_spec/spec_tag — and Kathryn's skip warning at elaboration is the
-#   honest list of what this stage does not fill yet
+# - the k2k skips are the RENAME half, and every one is filled beside the
+#   copy from the warm promises: rob_des_idx (warm_rob), the dest pr_idx_<n>
+#   (warm_prfs), is_spec/spec_tag (warm_tag_gen), each arch source's
+#   valid/data/pr_idx (rename_src_operand's RT/Arf read) — the skip warning
+#   at elaboration lists the COPY's skips, not unfilled fields
 # - the bus rows are WIRES, driven at WARM time (warm_rsvs): a station's
 #   wants read them before the grant; the granted zync is where the readers
 #   commit their content into state
@@ -15,9 +17,11 @@ from kathryn import *
 from kathryn.signal import to_ref
 
 from carolyne.uarch.o3.config import CPUO3_Config
-from carolyne.uarch.o3.decode_helper import DecodeEntryBase
-from carolyne.uarch.o3.dispatch_helper import build_dispatch, DispatchEntryBase
-from carolyne.uarch.o3.operand_field import ACTIVE, AR_IDX, field_name
+from carolyne.uarch.o3.dispatch_helper import build_dispatch
+from carolyne.uarch.o3.operand_field import (ACTIVE, AR_IDX, DATA, PR_IDX,
+                                             VALID, field_name,
+                                             named_atomic_operands)
+from carolyne.uarch.o3.priority import PRI_RENAME
 from carolyne.uarch.o3.reg_arch_mng import collect_arch_dest_atm_oprs
 
 
@@ -46,6 +50,13 @@ class Dispatch(Module):
         # physical register for.
         self.arch_dest_atm_oprs = collect_arch_dest_atm_oprs(
             self.config.isa, f"dispatch of ISA '{self.config.isa.name}'")
+
+        # SRC slots with an architectural class — what the rename READ
+        # (rename_src_operand's RT/Arf lookup) serves.
+        self.arch_src_atm_oprs = tuple(
+            atm_opr for atm_opr in named_atomic_operands(
+                self.config.isa, f"dispatch of ISA '{self.config.isa.name}'")
+            if atm_opr.is_src and atm_opr.has_arch)
 
         # every resource this cycle's bundle books is available — the AND of
         # what the warm_* calls return, what the handshake stalls on
@@ -174,7 +185,7 @@ class Dispatch(Module):
         - returns READY: the AND of every station's all_ok
         """
         for lane in range(self.config.fe_lanes):
-            self.convert_lane(self.decode[lane], self.dispatch_bus[lane])
+            self.convert_lane(lane)
 
         ok = val(1, 1)
         for rsv in self.rsvs:
@@ -266,17 +277,116 @@ class Dispatch(Module):
                 self.update_rob()
                 self.update_rsvs()
 
-    def convert_lane(self,
-                     decode_entry  : DecodeEntryBase,
-                     dispatch_entry: DispatchEntryBase):
-        """One decoded row onto one bus lane, as a single k2k assign.
+    def convert_lane(self, lane: int):
+        """One decoded row onto one bus lane.
 
-        - name+width pairing copies valid, pc, npc, uop_idx, is_branch,
-          is_store, rsv_id and the operand groups; the rest is SKIPPED with
-          Kathryn's warning
-        - LIMIT: the skipped fields are rename/allocation's answers — until
-          the update_* half fills them, an unfilled wire reads its implicit
-          zero
+        - the k2k assign: name+width pairing copies valid, pc, npc, uop_idx,
+          is_branch, is_store, rsv_id and the operand groups; the rest is
+          SKIPPED with Kathryn's warning
+        - the k2k-skipped fields are dispatch's OWN answers, written beside
+          the copy from the warm promises: rob_des_idx (warm_rob's entry for
+          this lane) and is_spec/spec_tag (warm_tag_gen's booking) in the
+          promised_fields write, then per operand — each dest slot by
+          rename_dest_operand (warm_prfs' promised register), each arch
+          source by rename_src_operand (the RT/Arf read). Every write names
+          a FRESH selection (an augmented assign rebinds its handle) and a
+          field the others skipped — no field driven twice
         - `*=`, not `|=`: the bus rows are wires
         """
-        dispatch_entry *= decode_entry
+
+        # normal update
+        self.dispatch_bus[lane] *= self.decode[lane]
+        # convert more data
+        _fits, free_idx = self.rob_acquisition
+        _is_branch, is_spec, tag = self.tag_acquisition[lane]
+        promised_fields = {"rob_des_idx": free_idx[lane],
+                           "is_spec"    : is_spec,
+                           "spec_tag"   : tag}
+        self.dispatch_bus[lane] *= promised_fields
+
+        # manage dispatch bus for source operand
+        for atm_opr in self.arch_src_atm_oprs:
+            self.rename_src_operand(lane, atm_opr)
+        # manage dispatch bus for des operand
+        for atm_opr in self.arch_dest_atm_oprs:
+            self.rename_dest_operand(lane, atm_opr)
+
+    def rename_dest_operand(self, lane: int, atm_opr):
+        """Fill one dest slot's rename half on the bus — the promised
+        physical register.
+
+        - warm_prfs' booking for (lane, dest), written under the pr_idx_<n>
+          name the bus carries it as; the request bit stays behind — whether
+          the promise is consumed is the entry's active_<n> business
+        - its own `*=` on a fresh selection, legal beside the other writes:
+          nothing else drives a dest pr_idx
+        """
+        _req, pr_idx = self.prf_acquisition[(lane, id(atm_opr))]
+        self.dispatch_bus[lane] *= {field_name(PR_IDX, atm_opr): pr_idx}
+
+    def rename_src_operand(self, lane: int, atm_opr):
+        """Fill one arch source slot's rename half on the bus — the RT read.
+
+        - an INACTIVE slot is not rename's business: every path carries the
+          `active` term and fills nothing the µop does not read
+        - a value already in hand (decode's valid_<n>: an immediate) keeps
+          exactly what the copy put there
+        - active and NOT renamed: the committed value IS architectural
+          state, so valid_<n>=1 and data_<n> reads the Arf (a const
+          register reads its constant)
+        - active and renamed splits on the PRF entry's fin: already written
+          back -> the value is read straight out of the PRF (valid_<n>=1,
+          data_<n> = storage data); still in flight -> valid stays as
+          decoded and pr_idx_<n> carries the RT's physical index, what the
+          station wakes on
+        - lane k reads the RT state AFTER earlier lanes' renames and BEFORE
+          its own (Rt.read_rename); an unrenamed class lives in the Arf
+          and nowhere else
+        - at PRI_RENAME: valid/data overlay the k2k copy's own writes, the
+          one-priority-per-layer rule
+        """
+        decode_entry = self.decode[lane]
+        arf     = self.reg_arch_mng.arf(atm_opr.reg_file)
+        # the slot's own valid_<n> off the decode row — NOT the lane's valid
+        dec_opr_valid = to_ref(getattr(decode_entry, field_name(VALID, atm_opr)))
+        active  = to_ref(getattr(decode_entry, field_name(ACTIVE, atm_opr)))
+        # a one-register class stores no ar_idx (index_width 0): there is
+        # nothing to choose, that register is 0
+        if atm_opr.reg_file.index_width == 0:
+            ar_idx = 0
+        else:
+            ar_idx = to_ref(getattr(decode_entry, field_name(AR_IDX, atm_opr)))
+        arch_value = arf.read(ar_idx)
+
+        if not atm_opr.reg_file.renamed:
+            with priority(PRI_RENAME):
+                with zif(~dec_opr_valid & active):
+                    self.dispatch_bus[lane] *= {
+                        field_name(VALID, atm_opr): 1,
+                        field_name(DATA, atm_opr) : arch_value}
+            return
+
+        rt  = self.reg_arch_mng.rt(atm_opr.reg_file)
+        prf = self.reg_arch_mng.prf(atm_opr.reg_file)
+        renamed, prf_idx = rt.read_rename(lane, ar_idx)
+        prf_entry = prf.on_get_entry(prf_idx)
+        prf_fin   = to_ref(prf_entry.fin)
+
+        # the slot has no value in hand and the µop reads it: rename answers
+        needs_value = ~dec_opr_valid & active
+        # the value exists somewhere readable NOW — the Arf (not renamed) or
+        # a written-back PRF entry — and the mux says which one hands it over
+        value_ready = ~renamed | prf_fin
+        ready_value = mux(renamed, to_ref(prf_entry.data), arch_value)
+
+        with priority(PRI_RENAME):
+            with zif(needs_value):
+                with zif(value_ready):
+                    self.dispatch_bus[lane] *= {
+                        field_name(VALID, atm_opr): 1,
+                        field_name(DATA, atm_opr) : ready_value}
+                # still in flight: wait on the physical index
+                with zelse():
+                    self.dispatch_bus[lane] *= {
+                        field_name(PR_IDX, atm_opr): prf_idx}
+
