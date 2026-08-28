@@ -18,25 +18,40 @@
 # read and write ports from — and IsaBase holds every µop to them: an
 # instruction may not ask a unit for a slot the unit does not have.
 #
-# THE SEMANTICS ARE A SUBCLASS'S. `stages()` is the pipeline the unit is — one
-# callable per stage, in order — and defaults to a single `build_exec`. A unit
-# that overrides neither is still a legal description object; only a generator
-# building a real function unit demands one, the same bargain AtomicOperand
-# makes with its name. `needs` is what a stage body requires beyond its
-# operands, so a generator can build the right context or refuse early.
+# THE SEMANTICS ARE A SUBCLASS'S. `stage_cnt` declares how many stages the
+# unit's pipeline is, and `exec_stage(stage_idx, src, api)` is one stage's
+# body: NATURAL KATHRYN (|= *= seq par zif scwait ...) over `src`, the Karray
+# record the stage receives, RETURNING the Karray the next stage receives —
+# the last stage's return is the writeback record, its dest slots read by
+# operand field name. A unit that never overrides exec_stage is still a legal
+# description object; only a generator building a real function unit demands
+# one, the same bargain AtomicOperand makes with its name.
 #
-# A stage body is written against the generator's execution context, which is
-# why this layer still imports no hardware: the body names slots by their
-# operand names and combines opaque values with Python operators, so the same
-# body elaborates to Kathryn under the generator and runs on ints under a test.
+# The generator owns the stage skeleton (the pip/zync chain, the kill) and
+# threads rob_des_idx / is_spec / spec_tag between stages ITSELF; everything
+# else a later stage needs, the body carries in the record it returns. What a
+# body cannot reach with raw Kathryn it reaches through the ExecUnitApi
+# (exec_unit_api.py), which the O3 generator overrides. `needs` is what a
+# stage body requires beyond its operands, so a generator can build the right
+# api or refuse early.
+#
+# Since 2026-08-28 this is the ISA layer's sanctioned COMPROMISE of the
+# no-Kathryn rule: description TYPES still import no hardware (this module's
+# hints never evaluate), but a package's semantics — its exec_stage bodies —
+# are hardware code and write Kathryn directly.
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Iterable, Tuple
+from typing import TYPE_CHECKING, Iterable, Tuple
 
 from .atomic_operand import DEST_ROLES, SRC_ROLES, AtomicOperand
 from .uop import Uop
+
+if TYPE_CHECKING:                       # hints only — no runtime Kathryn here
+    from kathryn import Karray
+
+    from .exec_unit_api import ExecUnitApi
 
 
 @dataclass(frozen=True)
@@ -47,10 +62,17 @@ class ExecUnitBase:
     dest_operands : Tuple[AtomicOperand, ...] = ()   # the slots it WRITES
     needs         : Tuple[str, ...] = ()       # facilities a stage body asks for,
                                                # e.g. "mem", "redirect", "trap"
+    stage_cnt     : int = 1                    # pipeline depth: one exec_stage
+                                               # call per stage, in order
 
     def __post_init__(self) -> None:
         if not self.name:
             raise ValueError("ExecUnitBase needs a non-empty name")
+        if isinstance(self.stage_cnt, bool) or not isinstance(self.stage_cnt, int) \
+                or self.stage_cnt < 1:
+            raise ValueError(
+                f"ExecUnit '{self.name}': stage_cnt must be an int >= 1, got "
+                f"{self.stage_cnt!r}")
         object.__setattr__(self, "uops", tuple(self.uops))     # accept any sequence
         if not self.uops:
             raise ValueError(f"ExecUnit '{self.name}': needs at least one µop")
@@ -144,33 +166,28 @@ class ExecUnitBase:
     def uop_names(self) -> Iterable[str]:
         return sorted(u.name for u in self.uops)
 
-    # --- what the unit computes -----------------------------------------------
-    def stages(self):
-        """The pipeline this unit is: one callable per stage, in order.
 
-        One stage by default. A pipelined unit names its own —
-        `return (self.partial, self.reduce, self.round)` — and a generator
-        builds one pipeline stage per entry.
-        """
-        return (self.build_exec,)
+    # --- the semantics --------------------------------------------------------
+    def exec_stage(self, stage_idx: int, src: Karray, api: ExecUnitApi) -> Karray:
+        """One stage of what this unit computes, in natural Kathryn.
 
-    def build_exec(self, ctx) -> None:
-        """What this unit computes, written against the generator's context.
-
-        `ctx` is the execution context the generator supplies: the record
-        reads and writes, plus flow. Values are opaque — Kathryn signals under
-        the real generator, plain ints under a test double — so a body
-        combines them with Python operators and imports nothing.
-
-        Left to a subclass: the shape of a unit is a description fact, but what
-        the bits become is the ISA's to say.
+        - called by the generator INSIDE stage `stage_idx`'s own scope, once
+          per stage 0..stage_cnt-1, so the body's scwait/cwhile compose with
+          the stage's arbiter and back-pressure runs up to the station
+        - `src` is the record this stage receives: stage 0 the station's
+          issued entry, stage k the record stage k-1 RETURNED
+        - returns the record for the next stage; the LAST stage's return is
+          the writeback record, dest slots under their operand field names
+          (`pr_idx_<n>`, `data_<n>` — api.wb_reg reads them there)
+        - the engine threads rob_des_idx / is_spec / spec_tag itself;
+          everything else the body carries forward in what it returns
         """
         raise NotImplementedError(
-            f"{type(self).__name__}.build_exec: what unit '{self.name}' computes is "
-            f"the ISA's to say — override build_exec, or stages() for a pipeline")
+            f"{type(self).__name__}.exec_stage: what unit '{self.name}' computes "
+            f"is the ISA's to say — a semantics subclass overrides this")
 
 
 # The name a unit with no semantics of its own is built under. Same class: a
-# unit that never overrides build_exec is a legal description object, it simply
+# unit that never overrides exec_stage is a legal description object, it simply
 # cannot be turned into a function unit.
 ExecUnit = ExecUnitBase

@@ -401,7 +401,18 @@ def test_a_unit_without_semantics_is_still_a_description():
     # Only a generator building a real function unit demands them — the same
     # bargain AtomicOperand makes with its name.
     isa = _isa()
-    assert len(ALU.stages()) == 1               # one stage by default
-    with pytest.raises(NotImplementedError, match="build_exec"):
-        ALU.build_exec(None)
+    assert ALU.stage_cnt == 1                   # one stage by default
+    with pytest.raises(NotImplementedError, match="exec_stage"):
+        ALU.exec_stage(0, None, None)
     assert isa.unit("alu") is ALU               # and the ISA still builds
+
+
+def test_a_unit_declares_its_stage_count():
+    # The generator builds one pip stage per exec_stage call, so the depth is
+    # a declared fact, held to an int >= 1.
+    deep = ExecUnit("mul", (ADD,), stage_cnt=3)
+    assert deep.stage_cnt == 3
+    with pytest.raises(ValueError, match="stage_cnt"):
+        ExecUnit("bad", (ADD,), stage_cnt=0)
+    with pytest.raises(ValueError, match="stage_cnt"):
+        ExecUnit("bad", (ADD,), stage_cnt=True)

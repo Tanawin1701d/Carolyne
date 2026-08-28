@@ -32,7 +32,10 @@ in-order only).
   consumed at generate time. **No runtime value ever lives in the ISA
   layer** — it holds *rules* for how hardware obtains values at runtime
   (e.g. `FieldRef("rd")` = "index arrives from the decoder's field
-  extractor"). No Kathryn imports anywhere in `carolyne/isa/`.
+  extractor"). No Kathryn imports in `carolyne/isa/`'s description TYPES —
+  since 2026-08-28 a package's SEMANTICS (`exec_stage` bodies) are hardware
+  code and write Kathryn directly, the sanctioned compromise (see the
+  ExecUnitApi entry in §4).
 - **Hardware plane** (run time): after decode the front-end and engine speak
   exclusively in **µop records**. Rule: no raw ISA bits ride along in the
   record — if that happens, the separation is dead.
@@ -56,7 +59,9 @@ contract bug — fix the contract, not the engine.
 | `generated/`                  | emitted Verilog (gitignored)                          |
 | `tests/`                      | pytest; tests double as usage documentation           |
 
-Rules: `isa` never imports `uarch` or `kathryn`. `uarch` may import the
+Rules: `isa` never imports `uarch`; its description types never import
+`kathryn` (a package's semantics modules — `exec_stage` bodies — may, since
+2026-08-28). `uarch` may import the
 description types but must never name a specific ISA. Per-ISA packages
 contain description data only — no hardware code. There is no `contract`
 package: the ISA↔µarch boundary is a DOCUMENT, and the one interface it needs
@@ -468,14 +473,30 @@ runs **one-way**, reading an `Operand`; and it could not tell RV32I's
 `ImmTarget` from a real µtemp, which is the same open gap as `Uop` having no
 `imm`.
 
-**`carolyne/isa/exec_context.py`** — REMOVED 2026-08-28: Tanawin is
-revising the interface, and the file, the `ExecContext` export, every type
-annotation on `build_exec(ctx)` and the fake context's isinstance test went
-with it — bodies keep an untyped `ctx` and the three ground rules (opaque
-values, truncating writes, the body always executes) survive as prose in
-`isa/exec_unit.py` and the fake-context test meanwhile. Don't restore it
-from git; the revision replaces it. The entry below is kept as the record
-of what the interface was. — **`ExecContext`** (2026-08-22): the
+**`carolyne/isa/exec_context.py`** — REMOVED 2026-08-28 and REPLACED the
+same day by **`exec_stage` + `ExecUnitApi`** (`isa/exec_unit_api.py`,
+exported): a stage body is now NATURAL KATHRYN (`|= *= seq par zif
+scwait`), not opaque-value Python. Decisions, all Tanawin's: the
+no-Kathryn rule is COMPROMISED — description types stay import-free
+(`exec_unit.py`'s hints ride TYPE_CHECKING), a package's semantics write
+Kathryn directly (§2/§3 amended); `ExecUnitBase.stage_cnt` (int ≥ 1,
+default 1) DECLARES the pipeline depth, replacing `stages()`/`build_exec`;
+`exec_stage(stage_idx, src, api)` is one stage's body, called by the O3
+generator INSIDE that stage's own scope — the generator owns the pip/zync
+skeleton and the kill — receiving the record the previous stage RETURNED
+(stage 0: the station's issued entry) and returning the next stage's; the
+LAST return is the writeback record, dest slots under their operand field
+names. The engine auto-threads EXACTLY `rob_des_idx` / `is_spec` /
+`spec_tag`; everything else — dest `pr_idx_<n>` included — the body
+carries in what it returns. `ExecUnitApi` is the engine half a body cannot
+reach with raw Kathryn, base-raises, O3 overrides (fu.py), one instance
+per stage invocation: `declare_mis_pred`/`declare_suc_pred(dyn_cond)`,
+`zync_with_next_stage()`, `declare_fin()`, `wb_reg(atm_opr)` — the
+declare_* calls REGISTER intents the engine builds against the returned
+record (`wb_reg` reads `pr_idx_<n>`/`data_<n>` there). PENDING: `AluUnit`
+still carries its old `build_exec(ctx)` body and the fake-int test — both
+pass as subclass-own code and die together when the Kathryn rewrite lands.
+The entry below is kept as the record of what the old interface was. — **`ExecContext`** (2026-08-22): the
 interface a unit's stage body (`build_exec`, each entry of `stages()`) is
 written against, FU-plan step 2. Decision: it lives in **`isa/`**, not a
 `contract` package of its own — the ISA layer is who WRITES bodies against it,
