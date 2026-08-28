@@ -6,7 +6,6 @@
 from .reg import RegFile, Intermediate
 from .atomic_operand import AtomicOperand, OperandRole, TargetKind
 from .operand import FieldRef, Operand
-from .exec_context import ExecContext
 from .exec_unit import ExecUnit
 from .uop import Uop
 from .field_match import InstrFieldMatch, InstrValueMatch, check_matcher_pair
@@ -15,7 +14,7 @@ from .isa import IsaBase
 
 __all__ = [
     "RegFile", "Intermediate", "FieldRef", "Operand", "AtomicOperand",
-    "OperandRole", "TargetKind", "ExecContext",
+    "OperandRole", "TargetKind",
     "ExecUnit", "Uop", "InstrFieldMatch", "InstrValueMatch",
     "check_matcher_pair", "UopSeq", "Mop", "IsaBase",
 ]

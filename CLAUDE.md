@@ -468,7 +468,14 @@ runs **one-way**, reading an `Operand`; and it could not tell RV32I's
 `ImmTarget` from a real µtemp, which is the same open gap as `Uop` having no
 `imm`.
 
-**`carolyne/isa/exec_context.py`** — **`ExecContext`** (2026-08-22): the
+**`carolyne/isa/exec_context.py`** — REMOVED 2026-08-28: Tanawin is
+revising the interface, and the file, the `ExecContext` export, every type
+annotation on `build_exec(ctx)` and the fake context's isinstance test went
+with it — bodies keep an untyped `ctx` and the three ground rules (opaque
+values, truncating writes, the body always executes) survive as prose in
+`isa/exec_unit.py` and the fake-context test meanwhile. Don't restore it
+from git; the revision replaces it. The entry below is kept as the record
+of what the interface was. — **`ExecContext`** (2026-08-22): the
 interface a unit's stage body (`build_exec`, each entry of `stages()`) is
 written against, FU-plan step 2. Decision: it lives in **`isa/`**, not a
 `contract` package of its own — the ISA layer is who WRITES bodies against it,

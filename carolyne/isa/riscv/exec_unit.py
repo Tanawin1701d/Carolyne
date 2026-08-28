@@ -14,8 +14,8 @@
 # which IsaBase then holds every µop to — so a name the ALU body reads is a
 # name the record is guaranteed to have.
 #
-# AluUnit is the ISA's first SEMANTICS, written against the ExecContext
-# (isa/exec_context.py). mem/control/system stay plain ExecUnit: their bodies
+# AluUnit is the ISA's first SEMANTICS, written against the generator's
+# execution context. mem/control/system stay plain ExecUnit: their bodies
 # need the mem/redirect/trap facilities, which have no contract yet, so `needs`
 # declares the request meanwhile.
 
@@ -23,7 +23,6 @@ from __future__ import annotations
 
 from typing import Tuple
 
-from ..exec_context import ExecContext
 from ..exec_unit import ExecUnit, ExecUnitBase
 from ..uop import Uop
 from . import uop as U
@@ -43,7 +42,7 @@ class AluUnit(ExecUnitBase):
     immediate forms of one operation are listed TOGETHER: they compute the same
     thing off src_2, which is rs2 in one and the immediate in the other."""
 
-    def build_exec(self, ctx: ExecContext) -> None:
+    def build_exec(self, ctx) -> None:
         a, b = ctx.src("src_1"), ctx.src("src_2")
         sh   = b & (X_LEN - 1)               # shift count is src2[4:0]
         sign = 1 << (X_LEN - 1)

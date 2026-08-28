@@ -3,7 +3,7 @@
 # It supplies the deliverables of uop_contract.md §6 that have types today:
 #   reg.py     — architectural register classes (§6.1); x only, PC is not one
 #   exec_unit.py — the machine's execution units, and AluUnit: what the
-#                integer µops COMPUTE, written against isa/exec_context.py
+#                integer µops COMPUTE, against the generator's context
 #   field_match.py — where each encoding field lives in the 32-bit word
 #                (§6.2), the six base formats as unions of those fields, and
 #                the addressing group PC_WIDTH / PC_ALIGN / ILEN_BYTES that

@@ -25,7 +25,7 @@
 # makes with its name. `needs` is what a stage body requires beyond its
 # operands, so a generator can build the right context or refuse early.
 #
-# A stage body is written against the ExecContext (exec_context.py), which is
+# A stage body is written against the generator's execution context, which is
 # why this layer still imports no hardware: the body names slots by their
 # operand names and combines opaque values with Python operators, so the same
 # body elaborates to Kathryn under the generator and runs on ints under a test.
@@ -36,7 +36,6 @@ from dataclasses import dataclass
 from typing import Iterable, Tuple
 
 from .atomic_operand import DEST_ROLES, SRC_ROLES, AtomicOperand
-from .exec_context import ExecContext
 from .uop import Uop
 
 
@@ -155,13 +154,13 @@ class ExecUnitBase:
         """
         return (self.build_exec,)
 
-    def build_exec(self, ctx: ExecContext) -> None:
+    def build_exec(self, ctx) -> None:
         """What this unit computes, written against the generator's context.
 
-        `ctx` is the ExecContext (exec_context.py): the record reads and
-        writes, plus flow. Values are opaque — Kathryn signals under the real
-        generator, plain ints under a test double — so a body combines them
-        with Python operators and imports nothing.
+        `ctx` is the execution context the generator supplies: the record
+        reads and writes, plus flow. Values are opaque — Kathryn signals under
+        the real generator, plain ints under a test double — so a body
+        combines them with Python operators and imports nothing.
 
         Left to a subclass: the shape of a unit is a description fact, but what
         the bits become is the ISA's to say.

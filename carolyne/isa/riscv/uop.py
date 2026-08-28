@@ -38,7 +38,7 @@
 #
 # The instruction's own PC is never among the srcs: no operand can name it
 # (reg.py: PC is not a register class), and none needs to — the µop record
-# carries it and a stage body reads it as ctx.pc() (isa/exec_context.py), which
+# carries it and a stage body reads it as ctx.pc() off the generator's context, which
 # is how auipc, jal and jalr get their pc-relative input.
 #
 # KNOWN GAPS carried from the layer below:

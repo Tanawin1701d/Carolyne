@@ -1,7 +1,7 @@
-# RV32I's ALU semantics run against a FAKE ExecContext — plain Python ints,
-# no arena, no Kathryn. This is the cheapest possible test of an ISA's
+# RV32I's ALU semantics run against a FAKE execution context — plain Python
+# ints, no arena, no Kathryn. This is the cheapest possible test of an ISA's
 # arithmetic, and the fake doubles as usage documentation for the interface
-# (carolyne/isa/exec_context.py):
+# a stage body is written against:
 #
 # - the body always EXECUTES: `when(False)` still runs its block in Python,
 #   exactly as elaboration would, and only the write inside is suppressed;
@@ -14,7 +14,6 @@ from contextlib import contextmanager
 
 import pytest
 
-from carolyne.isa import ExecContext
 from carolyne.isa.riscv import uop as U
 from carolyne.isa.riscv.exec_unit import exec_units
 from carolyne.isa.riscv.reg import X_LEN
@@ -23,7 +22,7 @@ MASK = (1 << X_LEN) - 1
 
 
 class FakeCtx:
-    """Pure-Python ExecContext: one µop, one cycle, ints for signals."""
+    """Pure-Python execution context: one µop, one cycle, ints for signals."""
 
     def __init__(self, uop, pc=0, **srcs):
         self.uop_, self.pc_ = uop, pc
@@ -80,10 +79,6 @@ def run(uop, a=0, b=0, pc=0):
     ctx = FakeCtx(uop, pc=pc, src_1=a, src_2=b)
     ALU.build_exec(ctx)
     return ctx.writes.get("dest_1")
-
-
-def test_the_fake_satisfies_the_contract():
-    assert isinstance(FakeCtx(U.UOP_ADD), ExecContext)
 
 
 def test_exactly_one_write_per_uop():

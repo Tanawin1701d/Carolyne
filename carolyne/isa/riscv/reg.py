@@ -8,7 +8,7 @@
 # PC is NOT a register class: it is front-end / ROB state, not something the
 # engine renames through a PRF port. Consequence: the pc-relative µops (auipc,
 # the jumps' link value) never name PC as an operand — the µop record carries
-# it, and a stage body reads it as ctx.pc() (isa/exec_context.py).
+# it, and a stage body reads it as ctx.pc() off the generator's context.
 #
 # `RegFile` below is a module-level SHARED INSTANCE with `x_file()` as its
 # builder, because IsaBase matches register files by identity and the operand
