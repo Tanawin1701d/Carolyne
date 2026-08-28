@@ -53,5 +53,5 @@ class AluExecUnit(ExecUnitBase):
         ))
 
         api.wb_reg(AOPR_DEST_1, result)
-        api.declare_fin()
+        api.declare_fin(src)
         return None                                 # last stage: no next

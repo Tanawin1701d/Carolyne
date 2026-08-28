@@ -16,6 +16,7 @@
 from kathryn import *
 from kathryn.signal import to_ref
 
+from carolyne.uarch.o3.common_field import IS_SPEC, ROB_DES_IDX, SPEC_TAG
 from carolyne.uarch.o3.config import CPUO3_Config
 from carolyne.uarch.o3.dispatch_helper import build_dispatch
 from carolyne.uarch.o3.operand_field import (ACTIVE, AR_IDX, DATA, PR_IDX,
@@ -299,9 +300,9 @@ class Dispatch(Module):
         # convert more data
         _fits, free_idx = self.rob_acquisition
         _is_branch, is_spec, tag = self.tag_acquisition[lane]
-        promised_fields = {"rob_des_idx": free_idx[lane],
-                           "is_spec"    : is_spec,
-                           "spec_tag"   : tag}
+        promised_fields = {ROB_DES_IDX: free_idx[lane],
+                           IS_SPEC    : is_spec,
+                           SPEC_TAG   : tag}
         self.dispatch_bus[lane] *= promised_fields
 
         # manage dispatch bus for source operand

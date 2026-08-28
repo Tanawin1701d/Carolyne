@@ -64,17 +64,18 @@ class ExecUnitApi:
                 ...   # the body's writes to `des` — fire on the grant
 
         `src` is the record this stage received, `des` the register record
-        it hands on; the generator transfers the speculation state from src
-        to des inside the block, so `des` must carry it. The body places
-        the block where its own Kathryn structure completes a transfer;
-        work outside it does not move the µop on."""
+        it hands on; the generator transfers the speculation state AND the
+        rob_des_idx from src to des inside the block, so `des` must carry
+        all three. The body places the block where its own Kathryn
+        structure completes a transfer; work outside it does not move the
+        µop on."""
         raise NotImplementedError(
             f"{type(self).__name__}.zync_with_next_stage: the generator supplies this")
 
-    def declare_fin(self):
+    def declare_fin(self, src):
         """This µop is FINISHED — in O3 the engine reports it against the
-        threaded rob_des_idx (Rob.on_write_back), which is what lets it
-        retire."""
+        `rob_des_idx` carried in `src`, the stage's own record
+        (Rob.on_write_back), which is what lets it retire."""
         raise NotImplementedError(
             f"{type(self).__name__}.declare_fin: the generator supplies this")
 

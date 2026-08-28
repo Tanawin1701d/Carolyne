@@ -74,5 +74,5 @@ class BrExecUnit(ExecUnitBase):
 
         api.declare_mis_pred(mis_pred)
         api.declare_suc_pred(suc_pred)
-        api.declare_fin()
+        api.declare_fin(src)
         return None                                 # last stage: no next

@@ -1400,6 +1400,33 @@ writeback (the last stage's pip has no exit until declare_fin/wb_reg
 land), no per-stage kill, the core module still pending — the smoke
 stands the complex in as its own `core`.
 
+**`carolyne/uarch/o3/core.py`** — **`CoreO3`** (2026-08-28), the top CPU
+core module, the block that will contain every block. Built first WITH
+the `ExecUnitApiO3` landing surface, then REVERSED the same day
+(Tanawin): **the api calls back to its OWN execution-unit complex**, so
+the surface lives on `ExecUnitO3` — `declare_mis_pred`/
+`declare_suc_pred(stage_idx, dyn_cond)`, `declare_fin(src, stage_idx)`
+(`src` carries the `rob_des_idx` the report names) and
+`wb_reg(stage_idx, atm_opr, value)`, each raising until its machinery
+lands — and `CoreO3` is a config-holding PLACEHOLDER; nothing joins it
+until designed. With the reversal: the api holds `exu` (not `core`), the
+complex constructs it with `self`, and `zync_with_next_stage(src, des)`
+transfers the TRIPLE `is_spec`/`spec_tag`/`rob_des_idx` from src to des —
+so a body's records carry the ROB entry the fin report will name, moved
+by the engine on every stage hop. Bodies pass `src` to
+`api.declare_fin(src)`. And the triple's FIELD NAMES are CONSTANTS
+(2026-08-28): **`IS_SPEC` / `SPEC_TAG` / `ROB_DES_IDX`** in
+**`uarch/o3/common_field.py`**, their own module — the fields are COMMON
+to the records and the engine's writes (dispatch's `promised_fields`, the
+stations' entries, the api's stage-to-stage transfer), not per-operand,
+so they sit beside `operand_field.py` rather than inside it (they lived
+in `isa/exec_unit_api.py` and then in `operand_field.py` for an hour
+each; Tanawin placed them — the machine owns its record vocabulary). LIMIT: a Karray CLASS BODY names
+fields by attribute (`is_spec = kaf(1)` — the literal is the name), so
+declared records — and ISA-side bodies' own records, which may not import
+uarch — still spell the literal; every string-keyed WRITE uses the
+constants.
+
 FOUND ON THE WAY: `Rt.on_normal_flow` walked `sptag_len` rows of
 `temp_dispatch`, which is `(rename_ports, amount)` — out of bounds whenever the
 two differ, so NO design containing a rename table could elaborate. Fixed to

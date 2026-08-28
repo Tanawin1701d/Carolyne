@@ -16,12 +16,13 @@
 # itself, carrying everything the later stages need (the station owns the
 # first register transition: exec_src) — and the body places its own
 # transfer with `with api.zync_with_next_stage(src, des):`, INSIDE which
-# the api transfers the is_spec/spec_tag pair from src to des (the pair
-# rides in the body's records; the ENGINE writes it). Each stage's api
-# (ExecUnitApiO3, exec_unit_api.py) carries the NEXT stage's arbiter
-# itself and proxies declare_*/wb_reg onto the top CORE module.
-# NOT here yet: writeback (declare_fin/wb_reg cores), the per-stage kill,
-# and who calls build_issue with exec_meta.
+# the api transfers is_spec / spec_tag / rob_des_idx from src to des (the
+# triple rides in the body's records; the ENGINE writes it). Each stage's
+# api (ExecUnitApiO3, exec_unit_api.py) carries the NEXT stage's arbiter
+# itself and proxies declare_*/wb_reg BACK ONTO THIS COMPLEX — the landing
+# stubs below, each raising until its machinery lands.
+# NOT here yet: that machinery (writeback, squash/resolve fan-out), the
+# per-stage kill, and who calls build_issue with exec_meta.
 
 from kathryn import *
 
@@ -92,7 +93,41 @@ class ExecUnitO3(Module):
             PipCon(name=f"{self.label}_s{stage_idx}")
             for stage_idx in range(1, self.exec_unit.stage_cnt)]
 
-        self.core = None    # the top CPU core module, from connect()
+
+    # --- what the api's declare_*/wb_reg land on ----------------------------------
+    # Loud stubs: a body reaching one today fails at elaboration rather than
+    # silently building no hardware; each lands with its machinery.
+
+    def declare_mis_pred(self, stage_idx: int, dyn_cond=None):
+        """A stage resolved a prediction WRONG under `dyn_cond` — squash
+        everything under the µop's tag, core-wide."""
+        raise NotImplementedError(
+            f"ExecUnitO3 '{self.label}'.declare_mis_pred: the squash fan-out "
+            f"is not built yet")
+
+    def declare_suc_pred(self, stage_idx: int, dyn_cond=None):
+        """A stage resolved a prediction CORRECTLY under `dyn_cond` — mask
+        the tag out everywhere it is still open."""
+        raise NotImplementedError(
+            f"ExecUnitO3 '{self.label}'.declare_suc_pred: the resolve fan-out "
+            f"is not built yet")
+
+    def declare_fin(self, src, stage_idx: int):
+        """A µop finished — report it against the `rob_des_idx` carried in
+        `src`, the stage's own record (Rob.on_write_back)."""
+        raise NotImplementedError(
+            f"ExecUnitO3 '{self.label}'.declare_fin: the ROB writeback report "
+            f"is not built yet")
+
+    def wb_reg(self, stage_idx: int, atm_opr, value):
+        """Write `value` back to that dest slot's promised physical register
+        — the class's PRF port plus the bypass broadcast. Must respect the
+        caller's enclosing Kathryn scope (a zif-gated call builds a gated
+        write) and must emit at least one node (an empty zif panics at
+        build_flow)."""
+        raise NotImplementedError(
+            f"ExecUnitO3 '{self.label}'.wb_reg: the PRF write and bypass "
+            f"broadcast are not built yet")
 
     # --- the stage chain ----------------------------------------------------------
     @flow
@@ -118,7 +153,7 @@ class ExecUnitO3(Module):
             next_meta = (self.stage_metas[stage_idx + 1]
                          if stage_idx != last else None)
             with pip(self.stage_metas[stage_idx]):
-                api = ExecUnitApiO3(self.core, stage_idx, next_meta)
+                api = ExecUnitApiO3(self, stage_idx, next_meta)
                 src = self.exec_unit.exec_stage(stage_idx, src, api)
             if stage_idx == last and src is not None:
                 raise ValueError(
