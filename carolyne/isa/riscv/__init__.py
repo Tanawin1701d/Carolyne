@@ -2,8 +2,10 @@
 #
 # It supplies the deliverables of uop_contract.md §6 that have types today:
 #   reg.py     — architectural register classes (§6.1); x only, PC is not one
-#   exec_unit.py — the machine's execution units, and AluUnit: what the
-#                integer µops COMPUTE, against the generator's context
+#   exec_unit.py — the unit FACTORY (exec_units()); each unit's semantics
+#                lives in its own module: exec_unit_alu.py /
+#                exec_unit_br.py / exec_unit_ls.py (body pending), with
+#                the shared body helpers in exec_unit_util.py
 #   field_match.py — where each encoding field lives in the 32-bit word
 #                (§6.2), the six base formats as unions of those fields, and
 #                the addressing group PC_WIDTH / PC_ALIGN / ILEN_BYTES that
@@ -36,7 +38,10 @@
 
 from __future__ import annotations
 
-from .exec_unit import AluUnit, exec_units
+from .exec_unit_alu import AluExecUnit
+from .exec_unit_br import BrExecUnit
+from .exec_unit import exec_units
+from .exec_unit_ls import LSExecUnit
 from .field_match import ILEN_BYTES, PC_ALIGN, PC_WIDTH
 from .operand import (OPR_IMM_B, OPR_IMM_I, OPR_IMM_J, OPR_IMM_S, OPR_IMM_U,
                       OPR_IMM_SHAMT, OPR_IMMS, OPR_RD, OPR_REGS, OPR_RS1,
@@ -47,7 +52,8 @@ from .rv32i import Rv32i
 from .uop import BRANCHES, LOADS, STORES, UOPS
 
 __all__ = [
-    "Rv32i", "MOP_TABLE", "exec_units", "AluUnit",
+    "Rv32i", "MOP_TABLE", "exec_units",
+    "AluExecUnit", "BrExecUnit", "LSExecUnit",
     "PC_WIDTH", "PC_ALIGN", "ILEN_BYTES",
     "RegFile", "ImmTarget", "X_LEN", "x_file",
     "OPR_RD", "OPR_RS1", "OPR_RS2", "OPR_REGS",

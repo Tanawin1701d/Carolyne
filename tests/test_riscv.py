@@ -288,10 +288,15 @@ def test_field_positions_are_32_bit_and_segmented():
 
 
 def test_the_package_is_description_data_only():
-    # CLAUDE.md §3: an ISA package holds data, never hardware — nothing it
-    # imports may come from kathryn or carolyne.uarch. Checked on the actual
-    # import statements, so prose in the header blocks may name them.
+    # CLAUDE.md §3 as amended 2026-08-28: description modules hold data and
+    # never import kathryn; the package's SEMANTICS module (exec_unit.py,
+    # the exec_stage bodies) is the sanctioned exception — hardware code by
+    # nature. carolyne.uarch stays off-limits for EVERY module. Checked on
+    # the actual import statements, so prose in headers may name them.
     import ast, pathlib
+
+    SEMANTICS = {"exec_unit_alu.py", "exec_unit_br.py", "exec_unit_ls.py",
+                 "exec_unit_util.py"}
 
     pkg = pathlib.Path(__file__).resolve().parents[1] / "carolyne" / "isa" / "riscv"
     for source in sorted(pkg.glob("*.py")):
@@ -303,5 +308,6 @@ def test_the_package_is_description_data_only():
             else:
                 continue
             for name in names:
-                assert "kathryn" not in name, f"{source.name}: {name}"
+                if source.name not in SEMANTICS:
+                    assert "kathryn" not in name, f"{source.name}: {name}"
                 assert "uarch" not in name, f"{source.name}: {name}"

@@ -176,11 +176,13 @@ class ExecUnitBase:
           the stage's arbiter and back-pressure runs up to the station
         - `src` is the record this stage receives: stage 0 the station's
           issued entry, stage k the record stage k-1 RETURNED
-        - returns the record for the next stage; the LAST stage's return is
-          the writeback record, dest slots under their operand field names
-          (`pr_idx_<n>`, `data_<n>` — api.wb_reg reads them there)
-        - the engine threads rob_des_idx / is_spec / spec_tag itself;
-          everything else the body carries forward in what it returns
+        - returns a NEW register record for the next stage — never `src`
+          itself: the body creates it and writes it inside its
+          zync_with_next_stage block. The LAST stage returns None: it has
+          no next stage, and its results leave through
+          api.wb_reg(atm_opr, value)
+        - the generator transfers is_spec/spec_tag from src to des inside
+          the sync; everything else the body carries in what it returns
         """
         raise NotImplementedError(
             f"{type(self).__name__}.exec_stage: what unit '{self.name}' computes "

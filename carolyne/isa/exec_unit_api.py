@@ -9,11 +9,18 @@
 # it against the record the stage RETURNS, which is why a body may call them
 # before the value they act on exists in its Python flow.
 #
-# The engine threads rob_des_idx / is_spec / spec_tag between stages by
-# itself; everything else a later stage or a writeback needs — dest pr_idx
-# included — the body carries in the Karray it returns.
+# The body carries everything between stages in the register Karray it
+# returns — dest pr_idx and rob_des_idx included — except the
+# is_spec/spec_tag pair, which the generator transfers from src to des
+# inside zync_with_next_stage.
+#
+# `get_src` is CONCRETE, not generator-supplied: reading a slot by operand
+# is the same under every generator, and the field stem (`data_<name>`,
+# uarch/o3/operand_field.py's vocabulary) is written down here once.
 
 from __future__ import annotations
+
+from kathryn.signal import to_ref
 
 from .atomic_operand import AtomicOperand
 
@@ -21,6 +28,21 @@ from .atomic_operand import AtomicOperand
 class ExecUnitApi:
     """The engine half of a stage body. Subclassed by the O3 generator."""
 
+    # --- record reads (concrete) ---------------------------------------------
+    def get_src(self, src, atm_opr: AtomicOperand):
+        """The value in that source slot: the record's `data_<name>` field.
+
+        An immediate included — an immediate fills a source slot like any
+        other, so there is no separate accessor for one."""
+        if not atm_opr.is_src:
+            raise ValueError(
+                f"get_src: operand '{atm_opr.name}' is a {atm_opr.role} — it "
+                f"names no source slot to read")
+        if not atm_opr.name:
+            raise ValueError("get_src: an unnamed operand has no record field")
+        return to_ref(getattr(src, f"data_{atm_opr.name}"))
+
+    # --- the engine half (generator-supplied) --------------------------------
     def declare_mis_pred(self, dyn_cond=None):
         """This µop resolved a prediction WRONG when `dyn_cond` holds — the
         engine squashes everything under the µop's tag (its threaded
@@ -56,10 +78,15 @@ class ExecUnitApi:
         raise NotImplementedError(
             f"{type(self).__name__}.declare_fin: the generator supplies this")
 
-    def wb_reg(self, atm_opr: AtomicOperand):
-        """Write that dest slot back — in O3 the engine drives the class's
-        PRF port (and the bypass broadcast) from the slot's own fields of
-        the stage's returned record: `pr_idx_<name>` names the register,
-        `data_<name>` the value. The body carries both there itself."""
+    def wb_reg(self, atm_opr: AtomicOperand, value):
+        """Write `value` back to that dest slot — in O3 the engine drives
+        the class's PRF port (and the bypass broadcast) at the slot's
+        promised physical register (`pr_idx_<name>`, carried in the
+        stage's record). The LAST stage of a unit ends this way: it
+        returns None and its results leave through wb_reg.
+
+        RESPECTS THE ENCLOSING KATHRYN SCOPE: a call inside a zif builds a
+        gated write — how a body says only SOME of its µops write the slot
+        (BrExecUnit's jal/jalr link)."""
         raise NotImplementedError(
             f"{type(self).__name__}.wb_reg: the generator supplies this")

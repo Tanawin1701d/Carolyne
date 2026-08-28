@@ -25,7 +25,7 @@
 
 from kathryn import *
 
-from carolyne.uarch.o3.config import CPUO3_Config, RsvSpec
+from carolyne.uarch.o3.config import CPUO3_Config, RsvSpec, rsv_type_fields
 from carolyne.uarch.o3.exec_unit_api import ExecUnitApiO3
 from carolyne.uarch.o3.rsv import RsvBase
 
@@ -62,6 +62,20 @@ class ExecUnitO3(Module):
         self.exec_unit = rsv_spec.exec_unit[0]
         self.label     = name or f"exu_{rsv_spec.label.replace('/', '_')}"
 
+        # A unit's `needs` may name record fields its body reads (pc/npc) —
+        # the station KIND is what carries them, so a kind without them
+        # would hand the body a field that does not exist.
+        kind_fields = {field for field, _ in
+                       rsv_type_fields(rsv_spec.rsv_type, config.pc_width)}
+        for facility in ("pc", "npc"):
+            if facility in self.exec_unit.needs and facility not in kind_fields:
+                raise ValueError(
+                    f"ExecUnitO3 '{rsv_spec.label}': unit "
+                    f"'{self.exec_unit.name}' needs '{facility}', but station "
+                    f"kind {rsv_spec.rsv_type.name} carries "
+                    f"{sorted(kind_fields) or 'no pc fields'} — pick a kind "
+                    f"whose entries have it")
+
         super().__init__()
 
     @init
@@ -86,25 +100,36 @@ class ExecUnitO3(Module):
         """The unit's pipeline: one pip per stage, the body called inside it.
 
         - stage 0's src is the station's issued entry (exec_src) — the
-          station owns that first register transition; stage k's is
-          whatever stage k-1 RETURNED, always a register Karray the body
-          writes itself
-        - the body places its own transfer (api.zync_with_next_stage)
+          station owns that first register transition; stage k's is the
+          NEW register Karray stage k-1 returned, never src passed on
+        - the body places its own transfer (api.zync_with_next_stage);
+          the LAST stage returns None — its results leave through
+          api.wb_reg — and both conventions are ENFORCED here
         - every stage's record lands in self.stage_srcs for debugging:
-          [k] is what stage k received, [-1] the last stage's return —
-          the writeback record
-        - LIMIT: no writeback and no per-stage kill yet — the last stage's
-          pip has no exit until declare_fin/wb_reg land
+          [k] is what stage k received; [-1] is the last stage's None
+        - LIMIT: no writeback core and no per-stage kill yet — the last
+          stage's pip has no exit until declare_fin/wb_reg land
         """
         src = self.rsv.exec_src[0]
         self.stage_srcs = [src]
+        last = self.exec_unit.stage_cnt - 1
         for stage_idx in range(self.exec_unit.stage_cnt):
             # the api carries the NEXT stage's arb itself; None on the last
             next_meta = (self.stage_metas[stage_idx + 1]
-                         if stage_idx + 1 < self.exec_unit.stage_cnt else None)
+                         if stage_idx != last else None)
             with pip(self.stage_metas[stage_idx]):
                 api = ExecUnitApiO3(self.core, stage_idx, next_meta)
                 src = self.exec_unit.exec_stage(stage_idx, src, api)
+            if stage_idx == last and src is not None:
+                raise ValueError(
+                    f"ExecUnitO3 '{self.label}': stage {stage_idx} is the LAST "
+                    f"of unit '{self.exec_unit.name}' and must return None — "
+                    f"results leave through api.wb_reg(atm_opr, value)")
+            if stage_idx != last and src is None:
+                raise ValueError(
+                    f"ExecUnitO3 '{self.label}': stage {stage_idx} of unit "
+                    f"'{self.exec_unit.name}' returned None — a stage before "
+                    f"the last hands a NEW register record to the next stage")
             self.stage_srcs.append(src)
 
 

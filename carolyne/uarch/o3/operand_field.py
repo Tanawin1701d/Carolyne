@@ -29,7 +29,8 @@ from carolyne.uarch.o3.config import CPUO3_Config
 ACTIVE      = "active"
 VALID       = "valid"
 WB_REQUIRED = "wb_required"
-DATA        = "data"
+DATA        = "data"    # isa/exec_unit_api.py restates this stem (get_src) —
+                        # isa cannot import uarch, so a rename here renames there
 PR_IDX      = "pr_idx"
 AR_IDX      = "ar_idx"
 

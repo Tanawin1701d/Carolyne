@@ -389,8 +389,9 @@ Immediates are deliberately NOT an `Operand` target — the µop record carries
 TEMPLATE skeleton: `reg.py` (`x_file()` → x0..x31, x0 via `const_regs`;
 **PC is deliberately not a register class** — it is front-end/ROB state, not
 something the engine renames through a PRF port, so a 1-entry `pc` file was
-drafted and deleted), `exec_unit.py` (`exec_units()` + `AluUnit`, the units the
-machine provides and what the ALU computes), `field_match.py` (32-bit field positions, the addressing group
+drafted and deleted), `exec_unit.py` (`exec_units()` + the semantics classes
+`AluExecUnit`/`BrExecUnit`/`LSExecUnit` — see the 2026-08-28 rebuild entry
+below), `field_match.py` (32-bit field positions, the addressing group
 `PC_WIDTH = X_LEN` / `PC_ALIGN = 4` / `ILEN_BYTES = 4` that `Rv32i` names as its
 three scalar defaults,
 and `FORMATS` = the six base formats R/I/S/B/U/J as `union`s of those fields,
@@ -485,17 +486,19 @@ default 1) DECLARES the pipeline depth, replacing `stages()`/`build_exec`;
 generator INSIDE that stage's own scope — the generator owns the pip/zync
 skeleton and the kill — receiving the record the previous stage RETURNED
 (stage 0: the station's issued entry) and returning the next stage's; the
-LAST return is the writeback record, dest slots under their operand field
-names. The engine auto-threads EXACTLY `rob_des_idx` / `is_spec` /
-`spec_tag`; everything else — dest `pr_idx_<n>` included — the body
-carries in what it returns. `ExecUnitApi` is the engine half a body cannot
-reach with raw Kathryn, base-raises, O3 overrides (fu.py), one instance
-per stage invocation: `declare_mis_pred`/`declare_suc_pred(dyn_cond)`,
-`zync_with_next_stage()`, `declare_fin()`, `wb_reg(atm_opr)` — the
-declare_* calls REGISTER intents the engine builds against the returned
-record (`wb_reg` reads `pr_idx_<n>`/`data_<n>` there). PENDING: `AluUnit`
+LAST stage returns None (revised 2026-08-28, superseding "the last return
+is the writeback record"): its results leave through
+`api.wb_reg(atm_opr, value)`, and `ExecUnitO3.transfer` ENFORCES both
+halves — a stage before the last must return a NEW register record (never
+`src` passed on), the last must return None. `ExecUnitApi` is the engine
+half a body cannot reach with raw Kathryn, base-raises, O3 overrides, one
+instance per stage invocation: `declare_mis_pred`/
+`declare_suc_pred(dyn_cond)`, `zync_with_next_stage(src, des)`,
+`declare_fin()`, `wb_reg(atm_opr, value)` — the declare_* calls REGISTER
+intents the engine builds hardware for. PENDING: `AluUnit`
 still carries its old `build_exec(ctx)` body and the fake-int test — both
-pass as subclass-own code and die together when the Kathryn rewrite lands.
+pass as subclass-own code and die together when the Kathryn rewrite lands
+(LANDED later the same day — the riscv/exec_unit.py rebuild entry below).
 The entry below is kept as the record of what the old interface was. — **`ExecContext`** (2026-08-22): the
 interface a unit's stage body (`build_exec`, each entry of `stages()`) is
 written against, FU-plan step 2. Decision: it lives in **`isa/`**, not a
@@ -1326,13 +1329,73 @@ engine-owned per-stage reg triples/pairs on the complex, and a
 complex-side `zync_with_next_stage` the core would delegate to — the
 station owns the first register transition (`exec_src`) and the complex
 holds no thread regs at all. Every stage's record lands in
-`stage_srcs` ([k] = stage k's input, [-1] = the writeback record) for
+`stage_srcs` ([k] = stage k's input, [-1] = the last stage's None) for
 debugging. FOUND ON THE WAY: an EMPTY pip — and an empty zync — refuse at
 elaboration ("must hold at least one basic node"), so a body builds
 something in every stage and inside every sync block (the api's pair
 transfer already makes a sync block non-empty); and a body CAN declare
 hardware at flow time inside its stage — wire, reg, and a whole
-REG-backed Karray record — natural-Kathryn bodies need no @init. LIMIT: `suc_tag` is unplumbed, no
+REG-backed Karray record — natural-Kathryn bodies need no @init.
+
+**`riscv/exec_unit.py` REBUILT** (2026-08-28): the semantics split into
+one class per unit kind, and later the same day into ONE FILE PER UNIT —
+`exec_unit.py` keeps only the `exec_units()` factory, the classes live in
+`exec_unit_alu.py` / `exec_unit_br.py` / `exec_unit_ls.py`, and the
+shared helpers in `exec_unit_util.py` (their own module because the
+factory imports the unit files, so helpers in the factory would cycle) —
+**`AluExecUnit`** (the 21 integer templates),
+**`BrExecUnit`** (what AUGMENTS the pc: the branches, jal, jalr) and
+**`LSExecUnit`** (loads/stores, exec_stage deliberately NOT implemented —
+the memory story is unfinished, so a complex on it refuses loudly, which
+Part 3 of the smoke pins). Decisions: **AUIPC stays in the ALU** — it
+reads pc as an input but never redirects, and the split is by what
+augments the pc; the unit NAME STRINGS ("alu"/"mem"/"control"/"system")
+are UNCHANGED, since every test and config keys on them — the class
+carries the semantics. Maintainability shape: `uop_hit(src, uops)` (the
+OR-ed group guard against `uop_idx`) and `drive_by_uop(result, src,
+cases)` (one independent zif per (µops, value) row — mutually exclusive
+by construction, no priority) are module helpers all three bodies share,
+so a body reads as the old ctx table did. And **`get_src(src, atm_opr)`
+is a CONCRETE method on `ExecUnitApi`** (2026-08-28): a body reads a
+source slot BY OPERAND (`api.get_src(src, AOPR_SRC_1)`), never by a
+spelled-out field name — concrete because reading a slot is the same
+under every generator, so every api subclass and test double inherits it.
+Tanawin proposed it for `uarch/common`, it lived in `isa/exec_record.py`
+for an hour, and it settled on the api the same day — the bodies are
+isa-side and §3 forbids them importing uarch, which is also why the
+`data_` stem is RESTATED in `isa/exec_unit_api.py` rather than imported
+from `operand_field` (a rename there renames here, said in both places).
+It refuses a non-source or unnamed operand. Both bodies are single-stage,
+so exec_stage returns None and both END by DECLARING: the ALU calls
+`api.wb_reg(AOPR_DEST_1, alu_result)` + `declare_fin()`; Br calls
+`declare_mis_pred(br_mis_pred)` / `declare_suc_pred(br_suc_pred)` — the
+actual-vs-predicted npc compare, `!=`/`==` (a `^ 1` inversion spelled the
+compare the long way and went) — + `declare_fin()`, with "redirect"
+DROPPED from its needs since the declares ARE that facility. The link
+writeback is a **GATED wb_reg**: `zif(uop_hit(src, (JAL, JALR)))` around
+`api.wb_reg(AOPR_DEST_1, link)` — a branch booked no physical register,
+so an unguarded write would land on a garbage pr_idx, and which µops
+write rd is the ISA's own rule. This leans on a CONTRACT line now in the
+api docstring: wb_reg's hardware respects the enclosing Kathryn scope.
+And the core must emit ≥1 node whenever wb_reg is called — an EMPTY zif
+slips the block checks and PANICS at build_flow (`!metas.is_empty()`),
+uglier than pip/zync's clean refusals. LIMIT: the core that builds real
+hardware from the declares and wb_reg is pending. Also 2026-08-28: **a unit's `needs` may
+name the RECORD FIELDS
+its body reads** — `AluExecUnit` declares `("pc",)` (auipc), `BrExecUnit`
+`("pc", "npc")` — and `ExecUnitO3` HOLDS the station kind to
+them at construction (`rsv_type_fields`): a unit needing pc on a kind
+whose entries carry none refuses with the kind named, so a body can never
+read a field the machine's spec choice dropped. The
+ctx-era `AluUnit` + `tests/test_alu_semantics.py` (the fake-int context)
+are DELETED — the bodies are Kathryn now, tested by elaboration —
+and `test_riscv.py`'s data-only guard grew the §3 amendment: kathryn
+imports allowed in the four semantics modules alone (the factory needs
+none), `uarch` forbidden everywhere.
+FOUND ON THE WAY: shift by a SIGNAL count (`a << sh`) elaborates fine
+(the earlier "takes an int operand" note was the narrow reading), and a
+1-bit compare assigned to a 32-bit wire zero-extends with a UserWarning —
+which IS slt/sltu's semantic, so the warning is expected there. LIMIT: `suc_tag` is unplumbed, no
 writeback (the last stage's pip has no exit until declare_fin/wb_reg
 land), no per-stage kill, the core module still pending — the smoke
 stands the complex in as its own `core`.

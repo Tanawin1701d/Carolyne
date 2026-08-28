@@ -62,5 +62,5 @@ class ExecUnitApiO3(ExecUnitApi):
     def declare_fin(self):
         self.core.declare_fin(self.stage_idx)
 
-    def wb_reg(self, atm_opr: AtomicOperand):
-        self.core.wb_reg(self.stage_idx, atm_opr)
+    def wb_reg(self, atm_opr: AtomicOperand, value):
+        self.core.wb_reg(self.stage_idx, atm_opr, value)
