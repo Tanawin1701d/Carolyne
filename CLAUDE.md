@@ -1277,6 +1277,66 @@ into the handshake** — `zync((next_meta, ready_to_go))`, the
 missing any booked resource stalls the transfer instead of granting it;
 the wire's "the handshake will consume" note above is now consumed.
 
+**`carolyne/uarch/o3/exec_unit.py`** — **`ExecUnitO3`** (2026-08-28), the
+function-unit complex behind ONE reservation station, the O3 home of the
+natural-Kathryn `exec_stage` story. Takes `(config, rsv, rsv_spec)` —
+redundant on purpose, and it REFUSES a station built from a different spec
+(identity), since the spec's `exec_unit` set is the kind→FU map both sides
+must read alike. One complex per station because issue is the coupling: a
+station issues one entry per cycle through one arbiter — and THIS VERSION
+runs exactly ONE ISA unit per complex (`exec_unit`, singular; a spec
+feeding more refuses — give each unit its own station), because a
+multi-unit complex needs per-unit routing after issue. SKELETON so far:
+`exec_unit` and `exec_meta` (the arb the station's
+build_issue zyncs against — a busy complex stalls the station); an
+auto-`@flow` `take_issue` that called `rsv.build_issue` itself was built
+and removed the same day — who drives the issue call, and when, is still
+open. **`ExecUnitApiO3`** (same day, its own `exec_unit_api.py` — the uarch
+half of the isa file of the same name): the api a stage body receives, a
+per-stage PROXY holding `(core, stage_idx)` where **`core` is the top CPU
+CORE module — the block that contains every block** (rob, prfs, rts,
+stations, the complexes), NOT the ExecUnitO3 complex (a first version
+proxied onto the complex, with stub core-halves and a `stage_api` factory
+there, and was corrected the same day — the declare_* effects land
+core-wide: a squash fans out, declare_fin reports to the ROB, wb_reg
+drives a class's PRF port and the bypass). Every call forwards
+`core.<method>(stage_idx, ...)`; the core's class does not exist yet, so
+the forwarded methods are what it must supply. `zync_with_next_stage`
+RETURNS the context manager the body holds in a `with` block (the base's
+docstring shows the usage).
+
+**The stage chain** (`ExecUnitO3.transfer`, 2026-08-28): one `pip` per
+stage, and stage 0's arbiter IS `exec_meta` — the station hands the entry
+straight into the first stage's pip, so `stage_metas[0]` is the issue arb
+and stages 1..n-1 get their own PipCons. The body is called INSIDE its
+stage's pip (`exec_stage(stage_idx, src, api)`), stage k receiving what
+stage k-1 RETURNED. Decision (Tanawin, superseding the auto-thread plan):
+`src` is ALWAYS a register Karray and the BODY carries everything itself
+— `rob_des_idx` included — except the `is_spec`/`spec_tag` pair a squash
+matches against, which rides IN THE BODY'S OWN RECORDS but is WRITTEN BY
+THE API: `zync_with_next_stage(src, des)` (the base signature, Tanawin's
+sketch) opens the zync and `|=`s the pair from `src` into `des` inside,
+before yielding to the body's writes, so a body cannot forget the
+speculation state and everything moves on one grant. The sync is the
+api's LOCAL business: `ExecUnitApiO3(core, stage_idx, pip_con)` carries
+the NEXT stage's arbiter itself (None on the last stage, which refuses
+the call — completion is declare_fin/wb_reg's business), so only
+declare_*/wb_reg proxy to the core. Two earlier shapes died the same day:
+engine-owned per-stage reg triples/pairs on the complex, and a
+complex-side `zync_with_next_stage` the core would delegate to — the
+station owns the first register transition (`exec_src`) and the complex
+holds no thread regs at all. Every stage's record lands in
+`stage_srcs` ([k] = stage k's input, [-1] = the writeback record) for
+debugging. FOUND ON THE WAY: an EMPTY pip — and an empty zync — refuse at
+elaboration ("must hold at least one basic node"), so a body builds
+something in every stage and inside every sync block (the api's pair
+transfer already makes a sync block non-empty); and a body CAN declare
+hardware at flow time inside its stage — wire, reg, and a whole
+REG-backed Karray record — natural-Kathryn bodies need no @init. LIMIT: `suc_tag` is unplumbed, no
+writeback (the last stage's pip has no exit until declare_fin/wb_reg
+land), no per-stage kill, the core module still pending — the smoke
+stands the complex in as its own `core`.
+
 FOUND ON THE WAY: `Rt.on_normal_flow` walked `sptag_len` rows of
 `temp_dispatch`, which is `(rename_ports, amount)` — out of bounds whenever the
 two differ, so NO design containing a rename table could elaborate. Fixed to

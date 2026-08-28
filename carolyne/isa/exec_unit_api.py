@@ -34,11 +34,18 @@ class ExecUnitApi:
         raise NotImplementedError(
             f"{type(self).__name__}.declare_suc_pred: the generator supplies this")
 
-    def zync_with_next_stage(self):
+    def zync_with_next_stage(self, src, des):
         """The handshake with the next stage's arbiter — the mirror of the
-        station-issue zync. The body places it where its own Kathryn
-        structure completes a transfer; work outside it does not move the
-        µop on."""
+        station-issue zync, used as a WITH block:
+
+            with api.zync_with_next_stage(src, des):
+                ...   # the body's writes to `des` — fire on the grant
+
+        `src` is the record this stage received, `des` the register record
+        it hands on; the generator transfers the speculation state from src
+        to des inside the block, so `des` must carry it. The body places
+        the block where its own Kathryn structure completes a transfer;
+        work outside it does not move the µop on."""
         raise NotImplementedError(
             f"{type(self).__name__}.zync_with_next_stage: the generator supplies this")
 
