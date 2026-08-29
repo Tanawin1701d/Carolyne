@@ -1596,6 +1596,16 @@ elaboration from a `RegFile` in `uarch`.
 
 ## 7. Conventions
 
+- **Code style applies at WRITE time, every file** — the rules of Tanawin's
+  codestyle skill (`~/.claude/skills/codestyle-skill/SKILL.md`) govern all
+  code written or edited in this repo, not only on request: column-aligned
+  `:` / `=` / dict colons in grouped declarations, aligned dots across
+  parallel calls, dashed section separators, one-line getters, scannable
+  docstrings (one summary line + short bullets; `LIMIT:` / `TODO:` /
+  `NOT here:` markers), names that state the fact they hold (no metaphors;
+  a cache takes its method's name; verb-first helpers), and shared file
+  prefixes for sibling modules (`exec_unit_*`).
+
 - Discuss design decisions before coding them; when a choice is made, record
   the *why* in **§4 of this file** (the design log), never in the source. A
   file's own comments stay CORE: what the code does, plus the Kathryn or
