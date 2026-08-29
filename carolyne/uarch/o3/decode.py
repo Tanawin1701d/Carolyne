@@ -105,6 +105,13 @@ class Decode(Module):
         self.fetch     = None       # the fetch stage's rows, from connect()
         self.next_meta = None       # the consumer's arb, from connect()
 
+    # retrieve data you want
+    def connect(self, fetcher, dispatcher):
+        """Fill the stage's slots from its neighbours: the fetched rows this
+        stage decodes, and the consumer arb its transfer zyncs against."""
+        self.fetch     = fetcher.fetch
+        self.next_meta = dispatcher.dispatch_meta
+
     @flow
     def transfer(self):
         """The stage body: the breadth-first walk over crack levels.

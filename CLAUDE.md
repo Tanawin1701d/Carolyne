@@ -1052,7 +1052,10 @@ decoder has to answer honestly per slot. The table is
 
 **`carolyne/uarch/o3/decode.py`** — **`Decode`** (2026-08-24), the whole
 stage in one Module: the table, `decode_meta`, the two `connect()` slots
-(`fetch`, `next_meta` — the wiring call itself still pending), and the decode
+(`fetch`, `next_meta` — filled by `connect(fetcher, dispatcher)` since
+2026-08-28, the Fetch.connect idiom: take the neighbour, pick what you
+need; Dispatch grew the same-shaped `connect()` for its six slots the same
+day, and CoreO3's `_wire_stages` is the one caller), and the decode
 logic as methods (a separate `laneDecoder` class held them for a day and was
 MERGED in — one stage, one object). A `UopSeq` may
 crack an instruction into SEVERAL µops, and decode walks them BREADTH-FIRST,
@@ -1401,15 +1404,33 @@ land), no per-stage kill, the core module still pending — the smoke
 stands the complex in as its own `core`.
 
 **`carolyne/uarch/o3/core.py`** — **`CoreO3`** (2026-08-28), the top CPU
-core module, the block that will contain every block. Built first WITH
+core module, the block that contains every block. Built first WITH
 the `ExecUnitApiO3` landing surface, then REVERSED the same day
 (Tanawin): **the api calls back to its OWN execution-unit complex**, so
 the surface lives on `ExecUnitO3` — `declare_mis_pred`/
 `declare_suc_pred(stage_idx, dyn_cond)`, `declare_fin(src, stage_idx)`
 (`src` carries the `rob_des_idx` the report names) and
 `wb_reg(stage_idx, atm_opr, value)`, each raising until its machinery
-lands — and `CoreO3` is a config-holding PLACEHOLDER; nothing joins it
-until designed. With the reversal: the api holds `exu` (not `core`), the
+lands. Later the same day CoreO3 became THE ASSEMBLY: `com_declare`
+builds in dependency order through one small builder per subsystem —
+`_build_reg_arch` (TagGen + RegArchMng; rename ports = fe_lanes, commit
+ports = commit_lanes), `_build_back_end` (Rob + `commit_meta`, and one
+station + one complex per RsvSpec, `issue_o3` picking RsvO3/RsvIOR,
+NAMED BY POSITION rsv{k}/exu{k} since position is the rsv_id and two
+specs may read alike), `_build_front_end` (Fetch→Decode→Dispatch and
+`backend_meta`), then **`_wire_stages`, every stage's connect() called in one
+place** so the topology reads as one table. The core adds only the two
+arbiters nobody owns: `commit_meta` (rob.build_commit runs on it, called
+from the core's `run_commit` @flow) and `backend_meta` (what dispatch's
+granted transfer runs against — nothing pips on it yet, the
+backend-acceptance question). The instruction memory is ENVIRONMENT: the
+ctor takes an `EasyMem`, the reconfigurable-component story. THE WHOLE
+CORE ELABORATES end to end (smoke Part 5: real alu/control bodies, stub
+bodies for mem/system, landing stubs on the complexes) — the first full
+fetch→decode→dispatch→stations/complexes→commit elaboration. LIMIT: the
+mispredict is not bound as the commit arb's reset, nothing calls the
+stations' build_issue with the complexes' exec_meta, and nothing pips
+backend_meta. With the reversal: the api holds `exu` (not `core`), the
 complex constructs it with `self`, and `zync_with_next_stage(src, des)`
 transfers the TRIPLE `is_spec`/`spec_tag`/`rob_des_idx` from src to des —
 so a body's records carry the ROB entry the fin report will name, moved

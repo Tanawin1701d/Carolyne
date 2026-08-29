@@ -70,6 +70,18 @@ class Dispatch(Module):
         self.rob          = None    # the reorder buffer, from connect()
         self.rsvs         = None    # the reservation stations, from connect()
 
+    # retrieve data you want
+    def connect(self, decoder, next_meta, reg_arch_mng, tag_gen, rob, rsvs):
+        """Fill the stage's slots: the decoded rows this stage converts, the
+        arb its granted transfer runs against, and every block the warm/
+        update halves book on."""
+        self.decode       = decoder.decode
+        self.next_meta    = next_meta
+        self.reg_arch_mng = reg_arch_mng
+        self.tag_gen      = tag_gen
+        self.rob          = rob
+        self.rsvs         = tuple(rsvs)
+
 
     # warm system means wire connect / no update register typically used for protocol handshake and give promiss data
 
