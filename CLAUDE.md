@@ -1422,15 +1422,21 @@ specs may read alike), `_build_front_end` (Fetch→Decode→Dispatch and
 place** so the topology reads as one table. The core adds only the two
 arbiters nobody owns: `commit_meta` (rob.build_commit runs on it, called
 from the core's `run_commit` @flow) and `backend_meta` (what dispatch's
-granted transfer runs against — nothing pips on it yet, the
-backend-acceptance question). The instruction memory is ENVIRONMENT: the
+granted transfer runs against — declared **`no_pip_master()`** since
+2026-08-31, the Kathryn upgrade's new PipCon call: no pip block masters
+this arb, its master-ack is hard-tied to 1, so dispatch's zync is granted
+the moment it wins arbitration and acceptance is exactly the
+`ready_to_go` condition already bound on that zync — the
+backend-acceptance question is thereby ANSWERED as "the resources' AND",
+not deferred). The instruction memory is ENVIRONMENT: the
 ctor takes an `EasyMem`, the reconfigurable-component story. THE WHOLE
 CORE ELABORATES end to end (smoke Part 5: real alu/control bodies, stub
 bodies for mem/system, landing stubs on the complexes) — the first full
 fetch→decode→dispatch→stations/complexes→commit elaboration. LIMIT: the
-mispredict is not bound as the commit arb's reset, nothing calls the
-stations' build_issue with the complexes' exec_meta, and nothing pips
-backend_meta. With the reversal: the api holds `exu` (not `core`), the
+mispredict is not bound as the commit arb's reset, and nothing calls the
+stations' build_issue with the complexes' exec_meta (backend_meta left
+the list 2026-08-31 — the no_pip_master declaration above IS its
+answer). With the reversal: the api holds `exu` (not `core`), the
 complex constructs it with `self`, and `zync_with_next_stage(src, des)`
 transfers the TRIPLE `is_spec`/`spec_tag`/`rob_des_idx` from src to des —
 so a body's records carry the ROB entry the fin report will name, moved

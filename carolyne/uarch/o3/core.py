@@ -82,12 +82,14 @@ class CoreO3(Module):
     # --- the front end ----------------------------------------------------------
     def _build_front_end(self):
         """Fetch -> Decode -> Dispatch. `backend_meta` is the arb dispatch's
-        granted transfer runs against; LIMIT: nothing pips on it yet — the
-        backend-acceptance story (what grants a bundle out) is open."""
+        granted transfer runs against; no pip masters it (`no_pip_master`),
+        so dispatch's zync is granted the moment it wins arbitration —
+        acceptance is `ready_to_go`'s AND, already bound on the zync."""
         self.fetch        = Fetch(self.config, self.simple_mem)
         self.decode       = Decode(self.config)
         self.dispatch     = Dispatch(self.config)
         self.backend_meta = PipCon(name="backend")
+        self.backend_meta.no_pip_master()
 
     # --- the wiring, all of it in one place -------------------------------------
     def _wire_stages(self):
