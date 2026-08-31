@@ -28,29 +28,84 @@ the effort metric (lines of ISA description vs lines of shared engine).
 
 ## Layout
 
-| path                        | contents                                                        |
-| --------------------------- | --------------------------------------------------------------- |
-| `docs/design/uop_contract.md` | **the normative spec** of the ISA ↔ µarch boundary            |
-| `carolyne/contract/`        | Python object model of that contract (`IsaDescription`, µops)   |
-| `carolyne/isa/`             | ISA packages: `riscv/`, `x86mini/` — contract deliverables only |
-| `carolyne/uarch/`           | the generic OoO engine, built from Kathryn primitives           |
-| `tests/`                    | pytest suite                                                    |
+| path                          | contents                                                        |
+| ----------------------------- | --------------------------------------------------------------- |
+| `docs/design/uop_contract.md` | **the normative spec** of the ISA ↔ µarch boundary              |
+| `carolyne/isa/`               | description types + `ExecUnitApi` + per-ISA packages (`riscv/`) |
+| `carolyne/uarch/`             | the generic OoO engine, built from Kathryn primitives           |
+| `examples/regfile_demo.py`    | smallest end-to-end Kathryn flow (CPU-flavored)                 |
+| `generated/`                  | emitted Verilog (gitignored)                                    |
+| `tests/`                      | pytest suite; tests double as usage documentation               |
 
-Dependency rule: `isa` and `uarch` never import each other; both import only
-`contract`. Nothing in `uarch` may name a specific ISA.
+Dependency rules: `isa` never imports `uarch`; its description TYPES never
+import `kathryn` (a package's semantics modules — `exec_stage` bodies — may).
+`uarch` may import the description types but never names a specific ISA.
+There is no `contract` package: the boundary is a DOCUMENT, and the one
+interface it needs in code (`ExecUnitApi`) lives in `isa/`, because the ISA
+layer is who writes stage bodies against it.
 
 ## Setup
 
-```bash
-# 1. install Kathryn (sibling repo, not on PyPI) into the same environment
-pip install -e ../Kathryn2        # or: cd ../Kathryn2 && maturin develop
+One-time, from this repo's root (fresh machine / fresh venv):
 
-# 2. install Carolyne
+```bash
+# 1. create the venv
+python3.13 -m venv .venv
+source .venv/bin/activate
+
+# 2. install Carolyne + pytest
 pip install -e ".[dev]"
 
-# 3. run tests
-pytest tests
+# 3. install Kathryn (sibling repo, not on PyPI) — editable; pip drives maturin
+pip install -e ../Kathryn2
 
-# 4. run the demo — a 4-entry register file + accumulator, emitted to generated/
+# 4. run tests
+pytest tests -q
+
+# 5. run the demo — a 4-entry register file + accumulator, emitted to generated/
 python examples/regfile_demo.py
 ```
+
+## Updating Kathryn
+
+The editable install is a `.pth` link straight into `../Kathryn2/py/`, so what
+you must do after pulling or editing Kathryn depends on WHICH half changed:
+
+| what changed                               | what to do                               |
+| ------------------------------------------ | ---------------------------------------- |
+| Python side (`Kathryn2/py/kathryn/`)       | nothing — imports pick it up immediately |
+| Rust side (`Kathryn2/src/`, `Cargo.toml`)  | rebuild the `.so` (one command below)    |
+| `Kathryn2/pyproject.toml` (deps, name)     | re-run `pip install -e ../Kathryn2`      |
+
+Rebuilding the `.so` — pick ONE, they end in the same place:
+
+```bash
+# day-to-day: fast debug build (venv MUST be active, or maturin targets the wrong env)
+cd ../Kathryn2 && maturin develop
+
+# rare: redo the whole editable install (fresh machine, broken venv, metadata change)
+.venv/bin/pip install -e ../Kathryn2
+```
+
+- Debug vs release only changes ELABORATION speed (Python calling into Rust);
+  the emitted Verilog is identical. If elaborating a big core feels slow:
+  `maturin develop --release`.
+
+Am I stale? Compare the last Rust-touching commit against the build:
+
+```bash
+git -C ../Kathryn2 log -1 --format='%ad' --date=iso                       # last commit
+ls -l ../Kathryn2/py/kathryn/_kathryn.cpython-313-x86_64-linux-gnu.so     # build time
+```
+
+If the `.so` predates a commit that touched `src/`, rebuild. Quicker
+functional check: `pytest tests -q` — a stale binary shows up as an
+`ImportError` or a missing attribute on a Kathryn type.
+
+Gotchas:
+
+- `pip install -e` never needs re-running for ordinary upgrades — an old
+  dist-info date is normal; only package METADATA changes warrant it.
+- A stale untagged `_kathryn.so` beside the `cpython-313`-tagged one is
+  harmless (Python prefers the tagged file) — but if a rebuild seems to
+  change nothing, delete the untagged leftover.
