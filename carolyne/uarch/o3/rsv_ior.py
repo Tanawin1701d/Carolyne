@@ -174,7 +174,7 @@ class RsvIOR(RsvBase):
         self.issue_row[0] *= self.table[head]
         self.issue_ready  *= self.slot_ready(self.issue_row[0])
 
-        with cwhile(val(1, 1)):
+        with pip(self.issue_meta, auto_req=True, auto_restart=True):
             with zync((exec_meta, self.issue_ready)):
                 self.on_issue(head, self.issue_row[0], suc_tag)
                 self.head_ptr |= head + 1

@@ -39,7 +39,6 @@ def _drive(cfg, commit_ports=None):
             self.rob  = Rob(cfg, self.reg_arch_mng)
             self.disp = build_rob_dispatch(cfg, cfg.fe_lanes, "rob_disp")
 
-            self.commit_arb = PipCon(name="commit_stage")
             self.mis_pred   = wire(1).mark_input("mis_pred")
             self.mis_idx    = wire(cfg.rob_depth.bit_length() - 1).mark_input("mis_idx")
             self.wb_en      = wire(1).mark_input("wb_en")
@@ -50,9 +49,9 @@ def _drive(cfg, commit_ports=None):
             self.rob.on_dispatch(self.disp)
             with zif(self.wb_en):
                 self.rob.on_write_back(self.wb_idx)
-            # The driver owns the arbiter, so IT says a squash stops commit.
-            self.commit_arb.set_reset(self.mis_pred)
-            self.rob.build_commit(self.commit_arb)
+            # The ROB owns the arbiter; on_mis_pred flushes it, so the zif
+            # guard is what says a squash stops commit.
+            self.rob.build_commit()
             with zif(self.mis_pred):
                 self.rob.on_mis_pred(self.mis_idx)
             self.rob.on_update_meta()

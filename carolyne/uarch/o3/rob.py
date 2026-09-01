@@ -89,6 +89,10 @@ class Rob(Module):
 
         self.table = build_rob_table(self.config, self.label)
 
+        # The commit stage's arbiter — the ROB owns it, and its on_mis_pred
+        # binds the squash as the reset, so nothing retires in that cycle.
+        self.commit_meta = PipCon(name=f"{self.label}_commit")
+
         self.alloc_ptr = reg(self.idx_width, f"{self.label}_alloc_ptr")
         self.alloc_ptr.reset(0)
         self.com_ptr   = reg(self.idx_width, f"{self.label}_com_ptr")
@@ -210,19 +214,17 @@ class Rob(Module):
         self.table[idx] |= {"wb_fin": 1}
 
     # --- commit -------------------------------------------------------------------
-    def build_commit(self, commit_meta):
+    def build_commit(self):
         """Retire the head group, inside the commit stage's pip block.
 
         NOTHING RETIRES IN A SQUASHED CYCLE, and the arbiter is what says so:
-        whoever owns `commit_meta` binds the mispredict as its reset, which
-        clears the grant and leaves this block unfired. The ROB does not bind
-        it — an arb takes one reset, and the block that CREATED the arb is the
-        one that knows what else contends on it.
+        the ROB owns `commit_meta`, and its own `on_mis_pred` flushes it —
+        the squash clears the grant and leaves this block unfired.
         """
         for lane in range(self.commit_lanes):
             self.com_row[lane] *= self.table[self.com_ptr + lane]
 
-        with pip(commit_meta, auto_req=True):
+        with pip(self.commit_meta, auto_req=True, auto_restart=True):
             next_may_retire = None
             for lane in range(self.commit_lanes):
                 row = self.com_row[lane]
@@ -301,8 +303,10 @@ class Rob(Module):
 
         The branch itself stays — it still has to retire — so the tail lands one
         past it and the count becomes the run from the head to it inclusive.
-        The head does not move.
+        The head does not move. The commit arb flushes with it, so nothing
+        retires in the squashed cycle.
         """
+        self.commit_meta.flush()
         with priority(PRI_MIS_PRED):
             self.alloc_ptr |= to_ref(rob_idx) + 1
             self.used_entry_cnt |= (to_ref(rob_idx) - self.com_ptr

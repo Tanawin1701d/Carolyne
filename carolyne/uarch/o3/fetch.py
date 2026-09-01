@@ -36,6 +36,10 @@ class Fetch(Module):
     def connect(self, decoder):
         self.decode_meta = decoder.decode_meta
 
+    def on_mis_pred(self):
+        # a squash empties the stage: clear the grant, the pip auto-restarts
+        self.fetch_meta.flush()
+
     def override_pc(self, new_pc, override_priority: int):
         # `|=`, not `=`: a bare assignment rebinds the Python attribute and
         # throws the reg away.
@@ -48,7 +52,7 @@ class Fetch(Module):
     def transfer(self):
         # transfer data
         pip_meta = [ self.decode_meta, *[req[0] for req in  self.mem_req]]
-        with pip(self.fetch_meta, auto_req = True):
+        with pip(self.fetch_meta, auto_req = True, auto_restart = True):
             with zync(pip_meta):
                 # constant
                 lanes = self.config.fe_lanes

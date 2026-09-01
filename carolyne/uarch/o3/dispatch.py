@@ -82,6 +82,15 @@ class Dispatch(Module):
         self.rob          = rob
         self.rsvs         = tuple(rsvs)
 
+    def on_mis_pred(self):
+        # a squash empties the stage: clear the grant, the pip auto-restarts
+        self.dispatch_meta.flush()
+
+    def on_suc_pred(self):
+        # a resolve stalls the stage for the cycle: a booking must never land
+        # beside a resolve (tag_gen's pre-resolve pool read would go stale)
+        self.dispatch_meta.stall()
+
 
     # warm system means wire connect / no update register typically used for protocol handshake and give promiss data
 
@@ -279,7 +288,7 @@ class Dispatch(Module):
         rsv_ok = self.warm_rsvs()
         self.ready_to_go *= tag_ok & prf_ok & rt_ok & rob_ok & rsv_ok
 
-        with pip(self.dispatch_meta):
+        with pip(self.dispatch_meta, auto_restart=True):
             # inside the zync: everything here fires on the grant only, and
             # the handshake itself is gated on ready_to_go — a cycle missing
             # any booked resource stalls instead of transferring

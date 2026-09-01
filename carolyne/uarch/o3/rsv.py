@@ -69,6 +69,10 @@ class RsvBase(Module):
         self.exec_src = build_rsv_slot(self.config, self.rsv_spec,
                                        f"{self.label}_exec")
 
+        # The issue block's own arbiter: always requesting, restarted by a
+        # flush, so build_issue runs as a pip instead of an eternal cwhile.
+        self.issue_meta = PipCon(name=f"{self.label}_issue")
+
         # The atomic operands this station's entries carry, and the subset a
         # writeback can wake: an arch source is the only one with a valid_ bit
         # and a physical index.
@@ -211,7 +215,9 @@ class RsvBase(Module):
 
     def on_mis_pred(self, fix_tag):
         """A prediction was wrong: every entry speculating under a killed tag
-        goes away. `fix_tag` is the one-hot mask of what is being squashed."""
+        goes away, and the issue pip flushes — nothing issues in the squash
+        cycle. `fix_tag` is the one-hot mask of what is being squashed."""
+        self.issue_meta.flush()
         with priority(PRI_MIS_PRED):
             for row_idx in self.all_row_idxs():
                 with zif(self.entry_squashed(self.table[row_idx], fix_tag)):

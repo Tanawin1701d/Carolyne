@@ -25,7 +25,9 @@
 # per-stage kill, and who calls build_issue with exec_meta.
 
 from kathryn import *
+from kathryn.signal import to_ref
 
+from carolyne.uarch.o3.common_field import IS_SPEC, SPEC_TAG
 from carolyne.uarch.o3.config import CPUO3_Config, RsvSpec, rsv_type_fields
 from carolyne.uarch.o3.exec_unit_api import ExecUnitApiO3
 from carolyne.uarch.o3.rsv import RsvBase
@@ -152,7 +154,7 @@ class ExecUnitO3(Module):
             # the api carries the NEXT stage's arb itself; None on the last
             next_meta = (self.stage_metas[stage_idx + 1]
                          if stage_idx != last else None)
-            with pip(self.stage_metas[stage_idx]):
+            with pip(self.stage_metas[stage_idx], auto_restart=True):
                 api = ExecUnitApiO3(self, stage_idx, next_meta)
                 src = self.exec_unit.exec_stage(stage_idx, src, api)
             if stage_idx == last and src is not None:
@@ -166,6 +168,64 @@ class ExecUnitO3(Module):
                     f"'{self.exec_unit.name}' returned None — a stage before "
                     f"the last hands a NEW register record to the next stage")
             self.stage_srcs.append(src)
+
+    # --- mispredict ---------------------------------------------------------------
+    def on_mis_pred(self, fix_tag):
+        """Kill every in-flight µop speculating under a killed tag, per stage.
+
+        - selective: each stage's arb is flushed inside a zif on THAT
+          stage's own record tag, so an older µop the branch never covered
+          keeps running
+        - stage 0's record is the station's issued entry (exec_src), judged
+          by the station's own entry_squashed; later stages carry
+          is_spec/spec_tag on the body's records (the api's transfer)
+        - clearing the grant is the whole kill: the pip's state IS the
+          valid bit, so no writeback fires from a flushed stage
+        - call AFTER transfer for a multi-stage unit — the stage records
+          only exist once the chain is built
+        """
+        for stage_idx, stage_meta in enumerate(self.stage_metas):
+            if stage_idx == 0:
+                src      = self.rsv.exec_src[0]
+                squashed = self.rsv.entry_squashed(src, fix_tag)
+            else:
+                if not hasattr(self, "stage_srcs"):
+                    raise ValueError(
+                        f"ExecUnitO3 '{self.label}': on_mis_pred before "
+                        f"transfer — stage {stage_idx}'s record does not "
+                        f"exist until the stage chain is built")
+                src      = self.stage_srcs[stage_idx]
+                squashed = (to_ref(getattr(src, IS_SPEC))
+                            & ((to_ref(getattr(src, SPEC_TAG)) & fix_tag)
+                               != 0))
+            with zif(squashed):
+                stage_meta.flush()
+
+    def on_suc_pred(self, suc_tag):
+        """A prediction resolved correctly: every stage's record stops
+        speculating under the resolved tag, the RsvBase mask-out idiom.
+
+        - stage 0's record is the station's exec_src; later stages carry
+          IS_SPEC/SPEC_TAG on the body's records (the api's transfer)
+        - call AFTER transfer for a multi-stage unit — the stage records
+          only exist once the chain is built
+        - LIMIT: a record hopping stages in the resolve cycle copies its
+          tag BEFORE the mask lands (the race on_issue solves with
+          substitution) — the api's transfer learns the same substitution
+          when declare_suc_pred's plumbing arrives
+        """
+        for stage_idx in range(self.exec_unit.stage_cnt):
+            if stage_idx == 0:
+                src = self.rsv.exec_src[0]
+            else:
+                if not hasattr(self, "stage_srcs"):
+                    raise ValueError(
+                        f"ExecUnitO3 '{self.label}': on_suc_pred before "
+                        f"transfer — stage {stage_idx}'s record does not "
+                        f"exist until the stage chain is built")
+                src = self.stage_srcs[stage_idx]
+            left = to_ref(getattr(src, SPEC_TAG)) & ~suc_tag
+            src |= {SPEC_TAG: left, IS_SPEC: left != 0}
 
 
 

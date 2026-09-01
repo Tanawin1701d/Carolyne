@@ -112,6 +112,10 @@ class Decode(Module):
         self.fetch     = fetcher.fetch
         self.next_meta = dispatcher.dispatch_meta
 
+    def on_mis_pred(self):
+        # a squash empties the stage: clear the grant, the pip auto-restarts
+        self.decode_meta.flush()
+
     @flow
     def transfer(self):
         """The stage body: the breadth-first walk over crack levels.
@@ -123,7 +127,7 @@ class Decode(Module):
           a level nothing matches hands a bubble (the lane default)
         - named `transfer`, not `decode`: `self.decode` is the TABLE
         """
-        with pip(self.decode_meta):
+        with pip(self.decode_meta, auto_restart=True):
             with seq():
                 for level in range(len(self.levels)):
                     with zync(self.next_meta):

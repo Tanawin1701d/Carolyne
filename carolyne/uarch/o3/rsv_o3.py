@@ -220,7 +220,7 @@ class RsvO3(RsvBase):
         self.issue_oh     *= self._root["oh"]
         self.issue_ready  *= self.slot_ready(self.issue_row[0])
 
-        with cwhile(val(1, 1)):
+        with pip(self.issue_meta, auto_req=True, auto_restart=True):
             with zync((exec_meta, self.issue_ready)):
                 self.on_issue(OH(self.issue_oh), self.issue_row[0], suc_tag)
 

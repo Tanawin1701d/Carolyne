@@ -743,11 +743,15 @@ one fold builds the comparison tree once and drops the winning row on
 `entry_ready` and the one-hot ride up as extras, so a node compares subtree
 answers instead of rebuilding them, and the node whose covered indices are the
 whole table IS the root (a structural test, not an assumption about the order
-the fold visits nodes in). Issue then runs inside `cwhile` + `zync` on the
+the fold visits nodes in). Issue then runs inside a station-owned issue
+pip (`issue_meta` on `RsvBase`, `auto_req` + `auto_restart` — an eternal
+`cwhile(1)` wrapper until 2026-08-31; `RsvBase.on_mis_pred` flushes it,
+so nothing issues in a squash cycle and the restart revives it) +
+`zync` on the
 execution unit's `PipCon`: a busy unit STALLS the station, where a plain `zif`
 would have cleared the entry into a unit that never took it.
 
-**`RsvIOR`** issues the head, through the same `cwhile`/`zync` gate. Its lanes
+**`RsvIOR`** issues the head, through the same issue-pip/`zync` gate. Its lanes
 land in a RUN from `alloc_ptr` that COMPACTS — a port's offset is how many
 earlier lanes are actually dispatching here, so a lane bound elsewhere leaves
 no gap — and a lane may only land if every earlier lane bound for this station did — in order, a hole would be an entry issuing
@@ -921,9 +925,13 @@ stores no `ar_idx` because there is nothing to choose.
 
 The commit body sits in a **`pip`** block on the stage's `PipCon`, and nothing
 retires in a squashed cycle because the mispredict is bound as that arbiter's
-RESET — what the C++ gets from its `PipStage`. The DRIVER binds it, not the
-ROB: an arb takes one reset, and the block that created the arb is the one that
-knows what else contends on it. `on_mis_pred(rob_idx)` then rolls the TAIL back to one past the
+RESET — what the C++ gets from its `PipStage`. Decision REVERSED 2026-08-31
+(Tanawin): the **ROB OWNS `commit_meta`** — declared in its own @init,
+`build_commit()` takes no argument, and `on_mis_pred` flushes the arb itself,
+so the squash and the rollback are one call (the earlier rule was
+driver-binds-it, on "the block that created the arb knows what else contends
+on it"; nothing else ever contended, and each block owning its own squash is
+the shape the whole fan-out took). `on_mis_pred(rob_idx)` rolls the TAIL back to one past the
 branch (the branch still retires) and recomputes the count as the run from the
 head to it inclusive; the head does not move.
 
@@ -1453,6 +1461,82 @@ fields by attribute (`is_spec = kaf(1)` — the literal is the name), so
 declared records — and ISA-side bodies' own records, which may not import
 uarch — still spell the literal; every string-keyed WRITE uses the
 constants.
+
+**The squash fan-out** (`CoreO3.on_mis_pred`, 2026-08-31): one call rolls
+the whole core back, and the **BRANCH EXECUTION COMPLEX is the caller**
+(Tanawin's choice — the eventual declare_mis_pred machinery), inside a
+zif on its own mispredict condition, so every flush wire and write takes
+that guard as its gate. Signature
+`(last_valid_spec_tag_dyn, rob_des_idx_dyn, dest_renames)` — the tag
+alone cannot name the ROB entry or the PRF pointer, and the caller HAS
+both: `rob_des_idx` rides the stage record (the api's triple), and
+`dest_renames` is `(active, atomic_operand, phy_idx)` per dest slot of
+the branch, rolling that class's PRF to just past the branch's own
+allocation (`zif(active)` around `prf.on_mis_pred`; a µtemp or
+non-renamed class refuses). BUILD-ONCE, asserted with a ctor flag: an
+arb reset is set-once, so the one caller ORs every squash condition.
+Decision: the **Mpft consult is a SCAN**, and it lives ON the Mpft
+(`Mpft.get_fix_tag` — it started as a core-side `_consult_mpft` and
+moved the same day, Tanawin's call: the table owns its own read
+semantics), and it is a **COLUMN READ**, structured as one (Tanawin's
+correction of a first row-AND spelling): column c is bit c of every row
+assembled in row order, and the one-hot tag's bit c muxes column c in —
+00001 gets column 0 from all rows. Row u holds the tags u was renamed
+under plus itself (on_rename as written), so the branch's column is set
+in its own row and in every younger row — the branch kills itself for
+free; the selected column lands on a named wire (`mis_pred_fix_tag`). The rejected alternative
+(row t IS the kill list, one dynamic read) would have rewritten
+Mpft.on_rename. Decision: **per-stage kill** (`ExecUnitO3.on_mis_pred`,
+FU-plan step 4 landed): each stage's arb flushed inside a zif on THAT
+stage's own record tag — stage 0 is the station's exec_src judged by
+`rsv.entry_squashed` (the one definition), later stages read
+IS_SPEC/SPEC_TAG off the body's records, the fields the api's transfer
+guarantees; multi-stage units must be killed AFTER transfer (the guard
+raises), single-stage need no order. Clearing the grant is the whole
+kill — the pip's state is the valid bit. The rest of the fan-out, and
+each HOST BLOCK owns its own flush (Tanawin, same day — Fetch/Decode/
+Dispatch each grew a no-arg `on_mis_pred()` flushing their own meta, and
+the commit arb flush rides inside `Rob.on_mis_pred`, see the commit_meta
+ownership reversal in the Rob entry; the branch's own retirement
+survives because the ROB's rollback keeps the branch and squashes only
+younger): `rsv.on_mis_pred(fix_tag)` per station, the RT restore and the
+PRF rollback RIDE TOGETHER in the `dest_renames` loop under each slot's
+`zif(active)` (only dest classes hold rename state, and the caller's
+tuple is what names them — a first version walked
+`collect_arch_dest_atm_oprs` unguarded and was folded in),
+`tag_gen`/`mpft`/`rob` with their own arguments; the
+**Arf is untouched on purpose** — committed state only. FOUND ON THE
+WAY: a flushed pip is DEAD unless built `auto_restart=True` (the reset
+only re-launches when routed into the start signal), so the five pips a
+squash resets grew the flag — fetch, decode, dispatch, the commit pip
+and the exec stage chain. The Mpft is now BUILT (`_build_reg_arch`,
+beside TagGen). LIMIT: mpft BOOKING is unwired — `on_rename` needs the
+current open-tag mask and no block owns that signal yet, so the consult
+reads an unbooked table; LIMIT: a branch with no active dest rolls no
+PRF pointer back, so the squashed youngers' registers leak until a
+per-tag snapshot exists; LIMIT: nothing calls `on_mis_pred` yet — the
+declare_mis_pred machinery is the pending caller (a fake caller in the
+smoke pins that the whole fan-out elaborates and emits).
+
+**The resolve fan-out** (`CoreO3.on_suc_pred`, 2026-08-31): the suc_pred
+half, same caller contract (the branch complex, inside a zif on its
+correct-prediction condition, BUILD-ONCE — the dispatch hold is
+set-once). The order: `Dispatch.on_suc_pred()` STALLS the stage for the
+cycle (`dispatch_meta.stall()`, the TagGen header's caller obligation —
+a booking never lands beside a resolve), `rsv.on_suc_pred(tag)` per
+station, **`ExecUnitO3.on_suc_pred(tag)`** (new) masks the tag out of
+every stage record — stage 0 the exec_src, later stages the body's
+records — then `tag_gen.on_suc_pred(val(1,1))` hands the tag back and
+`mpft.on_suc_pred(tag)` takes it off the table. Decisions (Tanawin):
+the sketch's `des_rename` bullet was DROPPED — a confirmed speculation
+IS the architectural path, RT/PRF keep everything and the tag's
+snapshot dies on rebooking; stations AND complexes both mask, else a
+rebooked tag would false-cover stale entries. `rob_des_idx_dyn` rides
+in the signature for the commit-side resolve work to come (predictor
+update) — ROB entries carry no spec tag, nothing masks there. LIMIT: a
+record hopping stages in the resolve cycle copies its tag BEFORE the
+mask lands — the race on_issue solves with substitution; the api's
+transfer learns it when declare_suc_pred's plumbing arrives.
 
 FOUND ON THE WAY: `Rt.on_normal_flow` walked `sptag_len` rows of
 `temp_dispatch`, which is `(rename_ports, amount)` — out of bounds whenever the
