@@ -1543,11 +1543,28 @@ SPEC_TAG, src's ROB_DES_IDX) }` — WITH the same self-exclusion
 (`_declared_suc_pred`, Tanawin's call, reversing a first no-exclusion
 spelling): the declaring complex's own records stay untouched by its
 own resolve's stage mask. Both fan-outs now run from the
-REAL Br body (its `br_mis_pred`/`br_suc_pred` compares gate them); the
-smoke stubs only declare_fin and wb_reg. Since the declares are built
-INSIDE the stage's pip, every write of both fan-outs is additionally
-gated by that stage's own state & grant — an idle branch stage resolves
-nothing.
+REAL Br body (its `br_mis_pred`/`br_suc_pred` compares gate them).
+Since the declares are built INSIDE the stage's pip, every write of
+both fan-outs is additionally gated by that stage's own state & grant —
+an idle branch stage resolves nothing.
+
+**declare_fin + wb_reg LANDED** (2026-08-31, same day — the complex's
+last stubs): `declare_fin(src, stage_idx)` is one call,
+`rob.on_write_back(src's ROB_DES_IDX)` — built in the caller's scope,
+so wb_fin fires on the stage's grant. `wb_reg(src, stage_idx, atm_opr,
+value)` (the api forwards its stored `src`, the declare precedent; the
+body-facing `api.wb_reg(atm_opr, value)` is unchanged) reads `pr_idx`
+off the stage record's own `pr_idx_<slot>` field — the index rename
+promised at dispatch — writes the class's PRF (`Prf.on_wb`: value +
+fin), and BROADCASTS: one `RsvBypass(reg_file, wb_live, pr_idx, value)`
+to every station's `on_bypass`, with `wb_live` a wire driven 1 in the
+enclosing scope, so a gated-out cycle (the Br link write's JAL/JALR
+zif) broadcasts nothing. NO landing stubs remain — the smoke runs the
+real ExecUnitO3 whole; only the mem/system unit BODIES stay stubbed
+(their semantics are unwritten). LIMIT: two complexes writing one PRF
+element in one cycle is unarbitrated (equal-priority dynamic writes) —
+by construction each physical register has one producer, so this is a
+structural hazard only a rename bug could trigger.
 
 **The resolve fan-out** (`CoreO3.on_suc_pred`, 2026-08-31): the suc_pred
 half, same caller contract (the branch complex, inside a zif on its

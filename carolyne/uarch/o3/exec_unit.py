@@ -30,7 +30,8 @@ from kathryn.signal import to_ref
 from carolyne.uarch.o3.common_field import IS_SPEC, ROB_DES_IDX, SPEC_TAG
 from carolyne.uarch.o3.config import CPUO3_Config, RsvSpec, rsv_type_fields
 from carolyne.uarch.o3.exec_unit_api import ExecUnitApiO3
-from carolyne.uarch.o3.rsv import RsvBase
+from carolyne.uarch.o3.operand_field import PR_IDX, field_name
+from carolyne.uarch.o3.rsv import RsvBase, RsvBypass
 
 
 class ExecUnitO3(Module):
@@ -157,20 +158,36 @@ class ExecUnitO3(Module):
 
     def declare_fin(self, src, stage_idx: int):
         """A µop finished — report it against the `rob_des_idx` carried in
-        `src`, the stage's own record (Rob.on_write_back)."""
-        raise NotImplementedError(
-            f"ExecUnitO3 '{self.label}'.declare_fin: the ROB writeback report "
-            f"is not built yet")
+        `src`, the stage's own record (Rob.on_write_back).
 
-    def wb_reg(self, stage_idx: int, atm_opr, value):
+        - built in the caller's scope: the wb_fin write fires on this
+          stage's grant, and on any body zif around the call
+        """
+        self._core.rob.on_write_back(to_ref(getattr(src, ROB_DES_IDX)))
+
+    def wb_reg(self, src, stage_idx: int, atm_opr, value):
         """Write `value` back to that dest slot's promised physical register
-        — the class's PRF port plus the bypass broadcast. Must respect the
-        caller's enclosing Kathryn scope (a zif-gated call builds a gated
-        write) and must emit at least one node (an empty zif panics at
-        build_flow)."""
-        raise NotImplementedError(
-            f"ExecUnitO3 '{self.label}'.wb_reg: the PRF write and bypass "
-            f"broadcast are not built yet")
+        — the class's PRF entry plus the bypass broadcast to every station.
+
+        - `pr_idx` is the stage record's own field for the slot, the index
+          rename promised at dispatch
+        - the PRF entry takes the value and its `fin`; the broadcast wakes
+          every station's waiting sources naming that class
+        - respects the enclosing Kathryn scope: a zif-gated call builds
+          gated writes, and the broadcast's live bit is driven in that
+          same scope, so a gated-out cycle broadcasts nothing
+        """
+
+        # TODO we will come back to manage it again
+
+        pr_idx = to_ref(getattr(src, field_name(PR_IDX, atm_opr)))
+        self._core.reg_arch_mng.prf(atm_opr.reg_file).on_wb(pr_idx, value)
+
+        wb_live  = wire(1, f"{self.label}_wb_live_s{stage_idx}_{atm_opr.name}")
+        wb_live *= val(1, 1)
+        bypass = RsvBypass(atm_opr.reg_file, wb_live, pr_idx, value)
+        for rsv in self._core.rsvs:
+            rsv.on_bypass(bypass)
 
     # --- the stage chain ----------------------------------------------------------
     @flow
@@ -185,8 +202,6 @@ class ExecUnitO3(Module):
           api.wb_reg — and both conventions are ENFORCED here
         - every stage's record lands in self.stage_srcs for debugging:
           [k] is what stage k received; [-1] is the last stage's None
-        - LIMIT: no writeback core and no per-stage kill yet — the last
-          stage's pip has no exit until declare_fin/wb_reg land
         """
         src = self.rsv.exec_src[0]
         self.stage_srcs = [src]
