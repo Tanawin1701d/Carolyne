@@ -1514,9 +1514,40 @@ beside TagGen). LIMIT: mpft BOOKING is unwired — `on_rename` needs the
 current open-tag mask and no block owns that signal yet, so the consult
 reads an unbooked table; LIMIT: a branch with no active dest rolls no
 PRF pointer back, so the squashed youngers' registers leak until a
-per-tag snapshot exists; LIMIT: nothing calls `on_mis_pred` yet — the
-declare_mis_pred machinery is the pending caller (a fake caller in the
-smoke pins that the whole fan-out elaborates and emits).
+per-tag snapshot exists.
+
+**declare_mis_pred LANDED** (2026-08-31, later the same day): the branch
+complex is now the REAL caller. `ExecUnitO3.declare_mis_pred(src,
+stage_idx, dyn_cond)` builds `zif(dyn_cond){ core.on_mis_pred(src's
+SPEC_TAG, src's ROB_DES_IDX) }` — the record the stage carries has both
+arguments, which is why the API hands its stage's record in
+(`ExecUnitApiO3` stores `src` at construction; the body's
+`api.declare_mis_pred(cond)` signature is unchanged). The complex
+reaches the core through `connect(core)`, wired in `_wire_stages` with
+the other topology — stored UNDERSCORED (`_core`), because the new sim
+manifest walks public module attributes and a public ancestor back-ref
+reads as an attribute cycle (`sim manifest: module attribute cycle`,
+found the hard way). Decision (Tanawin): the DECLARING COMPLEX EXCLUDES
+ITSELF from the per-stage kill — `declare_mis_pred` sets
+`_declared_mis_pred` before calling the core, and `on_mis_pred` returns
+immediately on it: the mispredicting branch is older than everything
+the squash covers and still has to finish and report its fin. A
+condition-less declare refuses (an unconditional squash is nonsense).
+LIMIT: the declare passes `dest_renames` EMPTY — a station record
+cannot say whether the branch writes its dest (no per-dest active bit),
+so no RT/PRF pointer rolls back on a declared squash until that bit or
+the per-tag snapshot exists. **declare_suc_pred LANDED the same way**
+(same day): `(src, stage_idx, dyn_cond)`, the api hands `src` in, a
+condition-less declare refuses, `zif(dyn_cond){ core.on_suc_pred(src's
+SPEC_TAG, src's ROB_DES_IDX) }` — WITH the same self-exclusion
+(`_declared_suc_pred`, Tanawin's call, reversing a first no-exclusion
+spelling): the declaring complex's own records stay untouched by its
+own resolve's stage mask. Both fan-outs now run from the
+REAL Br body (its `br_mis_pred`/`br_suc_pred` compares gate them); the
+smoke stubs only declare_fin and wb_reg. Since the declares are built
+INSIDE the stage's pip, every write of both fan-outs is additionally
+gated by that stage's own state & grant — an idle branch stage resolves
+nothing.
 
 **The resolve fan-out** (`CoreO3.on_suc_pred`, 2026-08-31): the suc_pred
 half, same caller contract (the branch complex, inside a zif on its

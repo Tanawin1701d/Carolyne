@@ -103,6 +103,8 @@ class CoreO3(Module):
         self.dispatch.connect(self.decode      , self.backend_meta,
                               self.reg_arch_mng, self.tag_gen     ,
                               self.rob         , self.rsvs)
+        for exu in self.exus:
+            exu.connect(self)       # the declare fan-outs land core-wide
 
     # --- commit -----------------------------------------------------------------
     @flow

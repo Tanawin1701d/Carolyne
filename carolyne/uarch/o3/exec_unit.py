@@ -27,7 +27,7 @@
 from kathryn import *
 from kathryn.signal import to_ref
 
-from carolyne.uarch.o3.common_field import IS_SPEC, SPEC_TAG
+from carolyne.uarch.o3.common_field import IS_SPEC, ROB_DES_IDX, SPEC_TAG
 from carolyne.uarch.o3.config import CPUO3_Config, RsvSpec, rsv_type_fields
 from carolyne.uarch.o3.exec_unit_api import ExecUnitApiO3
 from carolyne.uarch.o3.rsv import RsvBase
@@ -64,6 +64,15 @@ class ExecUnitO3(Module):
         # a multi-unit complex needs per-unit routing after issue.
         self.exec_unit = rsv_spec.exec_unit[0]
         self.label     = name or f"exu_{rsv_spec.label.replace('/', '_')}"
+        # The top core module, from connect(). Underscored: it is a BACK
+        # reference, and the sim manifest walks public module attributes —
+        # a public ancestor ref would read as an attribute cycle.
+        self._core     = None
+        # Set by declare_mis_pred / declare_suc_pred: this complex is the
+        # fan-out's caller, so on_mis_pred / on_suc_pred exclude it (the
+        # declaring branch itself must finish untouched).
+        self._declared_mis_pred = False
+        self._declared_suc_pred = False
 
         # A unit's `needs` may name record fields its body reads (pc/npc) —
         # the station KIND is what carries them, so a kind without them
@@ -96,23 +105,55 @@ class ExecUnitO3(Module):
             for stage_idx in range(1, self.exec_unit.stage_cnt)]
 
 
+    def connect(self, core):
+        """The top core module — where the declare fan-outs land."""
+        self._core = core
+
     # --- what the api's declare_*/wb_reg land on ----------------------------------
     # Loud stubs: a body reaching one today fails at elaboration rather than
     # silently building no hardware; each lands with its machinery.
 
-    def declare_mis_pred(self, stage_idx: int, dyn_cond=None):
-        """A stage resolved a prediction WRONG under `dyn_cond` — squash
-        everything under the µop's tag, core-wide."""
-        raise NotImplementedError(
-            f"ExecUnitO3 '{self.label}'.declare_mis_pred: the squash fan-out "
-            f"is not built yet")
+    def declare_mis_pred(self, src, stage_idx: int, dyn_cond=None):
+        """A stage resolved a prediction WRONG under `dyn_cond`: the whole
+        core rolls back, keyed by the record this stage carries.
 
-    def declare_suc_pred(self, stage_idx: int, dyn_cond=None):
-        """A stage resolved a prediction CORRECTLY under `dyn_cond` — mask
-        the tag out everywhere it is still open."""
-        raise NotImplementedError(
-            f"ExecUnitO3 '{self.label}'.declare_suc_pred: the resolve fan-out "
-            f"is not built yet")
+        - `src`'s SPEC_TAG is the branch's own tag, ROB_DES_IDX its entry —
+          the two the fan-out needs (the api hands its stage's record in)
+        - the zif is what scopes the squash: every flush wire and rollback
+          write the core builds takes `dyn_cond` as its gate
+        - this complex EXCLUDES ITSELF from the per-stage kill (see
+          on_mis_pred): the mispredicting branch is older than everything
+          the squash kills, and it still has to finish and report
+        - LIMIT: `dest_renames` rides empty — the record cannot say whether
+          the branch writes its dest, so no RT/PRF pointer rolls back yet
+        """
+        if dyn_cond is None:
+            raise ValueError(
+                f"ExecUnitO3 '{self.label}'.declare_mis_pred: needs the "
+                f"mispredict condition — an unconditional squash is nonsense")
+        self._declared_mis_pred = True
+        with zif(dyn_cond):
+            self._core.on_mis_pred(to_ref(getattr(src, SPEC_TAG)),
+                                   to_ref(getattr(src, ROB_DES_IDX)))
+
+    def declare_suc_pred(self, src, dyn_cond=None):
+        """A stage resolved a prediction CORRECTLY under `dyn_cond`: the tag
+        stops covering anything, core-wide (CoreO3.on_suc_pred).
+
+        - `src`'s SPEC_TAG is the branch's own tag, ROB_DES_IDX its entry —
+          the api hands its stage's record in, exactly the declare_mis_pred
+          shape
+        - this complex EXCLUDES ITSELF from the stage mask (see
+          on_suc_pred), the declare_mis_pred symmetry
+        """
+        if dyn_cond is None:
+            raise ValueError(
+                f"ExecUnitO3 '{self.label}'.declare_suc_pred: needs the "
+                f"resolve condition — an unconditional resolve is nonsense")
+        self._declared_suc_pred = True
+        with zif(dyn_cond):
+            self._core.on_suc_pred(to_ref(getattr(src, SPEC_TAG)),
+                                   to_ref(getattr(src, ROB_DES_IDX)))
 
     def declare_fin(self, src, stage_idx: int):
         """A µop finished — report it against the `rob_des_idx` carried in
@@ -155,7 +196,7 @@ class ExecUnitO3(Module):
             next_meta = (self.stage_metas[stage_idx + 1]
                          if stage_idx != last else None)
             with pip(self.stage_metas[stage_idx], auto_restart=True):
-                api = ExecUnitApiO3(self, stage_idx, next_meta)
+                api = ExecUnitApiO3(self, stage_idx, next_meta, src)
                 src = self.exec_unit.exec_stage(stage_idx, src, api)
             if stage_idx == last and src is not None:
                 raise ValueError(
@@ -183,7 +224,12 @@ class ExecUnitO3(Module):
           valid bit, so no writeback fires from a flushed stage
         - call AFTER transfer for a multi-stage unit — the stage records
           only exist once the chain is built
+        - the complex that DECLARED the squash returns immediately: the
+          mispredicting branch is older than everything the kill covers,
+          and it still has to finish and report its fin
         """
+        if self._declared_mis_pred:
+            return
         for stage_idx, stage_meta in enumerate(self.stage_metas):
             if stage_idx == 0:
                 src      = self.rsv.exec_src[0]
@@ -209,11 +255,15 @@ class ExecUnitO3(Module):
           IS_SPEC/SPEC_TAG on the body's records (the api's transfer)
         - call AFTER transfer for a multi-stage unit — the stage records
           only exist once the chain is built
+        - the complex that DECLARED the resolve returns immediately, the
+          on_mis_pred symmetry — the declaring branch's own records stay
+          untouched
         - LIMIT: a record hopping stages in the resolve cycle copies its
           tag BEFORE the mask lands (the race on_issue solves with
           substitution) — the api's transfer learns the same substitution
-          when declare_suc_pred's plumbing arrives
         """
+        if self._declared_suc_pred:
+            return
         for stage_idx in range(self.exec_unit.stage_cnt):
             if stage_idx == 0:
                 src = self.rsv.exec_src[0]

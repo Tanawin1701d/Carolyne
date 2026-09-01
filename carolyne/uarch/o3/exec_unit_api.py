@@ -27,16 +27,19 @@ class ExecUnitApiO3(ExecUnitApi):
     """The O3 api a stage body receives: one per stage, proxying back onto
     its own complex and carrying its own next-stage arbiter."""
 
-    def __init__(self, exu, stage_idx: int, pip_con: PipCon | None = None):
+    def __init__(self, exu, stage_idx: int, pip_con: PipCon | None = None,
+                 src=None):
         self.exu       = exu         # the ExecUnitO3 complex this stage is of
         self.stage_idx = stage_idx
         self.pip_con   = pip_con     # the NEXT stage's arb; None on the last
+        self.src       = src         # this stage's own record (the declares
+                                     # read its tag / rob_des_idx off it)
 
     def declare_mis_pred(self, dyn_cond=None):
-        self.exu.declare_mis_pred(self.stage_idx, dyn_cond)
+        self.exu.declare_mis_pred(self.src, self.stage_idx, dyn_cond)
 
     def declare_suc_pred(self, dyn_cond=None):
-        self.exu.declare_suc_pred(self.stage_idx, dyn_cond)
+        self.exu.declare_suc_pred(self.src, dyn_cond)
 
     @contextmanager
     def zync_with_next_stage(self, src, des):
