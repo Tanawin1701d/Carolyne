@@ -26,7 +26,13 @@ from .atomic_operand import AtomicOperand
 
 
 class ExecUnitApi:
-    """The engine half of a stage body. Subclassed by the O3 generator."""
+    """The engine half of a stage body. Subclassed by the O3 generator.
+
+    EVERY `src`/`des` here is the stage record's KARRAY, not an element —
+    the api indexes inside, so a body hands on what exec_stage handed it
+    (`api.declare_fin(src)`, `return res`) and never pre-indexes for a
+    call. Its own field reads still index: `src[0].loaded_word`.
+    """
 
     # --- record reads (concrete) ---------------------------------------------
     def get_src(self, src, atm_opr: AtomicOperand):
@@ -40,7 +46,35 @@ class ExecUnitApi:
                 f"names no source slot to read")
         if not atm_opr.name:
             raise ValueError("get_src: an unnamed operand has no record field")
-        return to_ref(getattr(src, f"data_{atm_opr.name}"))
+        return to_ref(getattr(src[0], f"data_{atm_opr.name}"))
+
+    def field_width(self, src, field: str) -> int:
+        """How wide that record field is — what sizes a body's OWN next-stage
+        record so the engine's transfer (spec pair, rob_des_idx) never
+        truncates. Concrete: a width is the same under every generator.
+
+        `.size`, not `.stop`: stop is an upper BIT INDEX, and the two agree
+        only on a whole signal (start 0). A slice view would read wrong.
+        """
+        return to_ref(getattr(src[0], field))._slice.size
+
+    def next_stage_fields(self, src, *dest_oprs: AtomicOperand) -> dict:
+        """The MACHINE's fields for a body's next-stage record, ready to
+        splat into the Karray call — `LdStResult(REG, (1,), "n", **api
+        .next_stage_fields(src, AOPR_DEST_1))`.
+
+        - a multi-stage body declares only its OWN data in the class body;
+          the engine's fields ARRIVE from here, so no ISA package spells a
+          uarch field name or sizes a machine-derived width
+        - what the generator declares here it also CARRIES: the same set
+          moves from src to des inside zync_with_next_stage
+        - name a dest ONLY if a later stage writes it back — that is what
+          asks for its promised physical register
+        - generator-supplied: the names ARE the machine's record
+          vocabulary, so the generator that owns them answers this
+        """
+        raise NotImplementedError(
+            f"{type(self).__name__}.next_stage_fields: the generator supplies this")
 
     # --- the engine half (generator-supplied) --------------------------------
     def declare_mis_pred(self, dyn_cond=None):
@@ -56,7 +90,7 @@ class ExecUnitApi:
         raise NotImplementedError(
             f"{type(self).__name__}.declare_suc_pred: the generator supplies this")
 
-    def zync_with_next_stage(self, src, des):
+    def zync_with_next_stage(self, src, des, cond=None):
         """The handshake with the next stage's arbiter — the mirror of the
         station-issue zync, used as a WITH block:
 
@@ -68,7 +102,8 @@ class ExecUnitApi:
         rob_des_idx from src to des inside the block, so `des` must carry
         all three. The body places the block where its own Kathryn
         structure completes a transfer; work outside it does not move the
-        µop on."""
+        µop on. `cond` gates the handshake itself: while it is low the µop
+        STALLS in this stage (a store waiting on a full store buffer)."""
         raise NotImplementedError(
             f"{type(self).__name__}.zync_with_next_stage: the generator supplies this")
 
@@ -91,3 +126,28 @@ class ExecUnitApi:
         (BrExecUnit's jal/jalr link)."""
         raise NotImplementedError(
             f"{type(self).__name__}.wb_reg: the generator supplies this")
+
+    # --- the load/store queue (units with needs=("mem",)) ---------------------
+    def lsq_is_full(self):
+        """1-bit: the store buffer cannot take another store. A body gates
+        its stage handshake on `is_load | ~full` so a store stalls."""
+        raise NotImplementedError(
+            f"{type(self).__name__}.lsq_is_full: the generator supplies this")
+
+    def lsq_push_store(self, mem_addr, data):
+        """An executed store enters the buffer; it reaches memory only
+        after the ROB retires it. The engine reads the speculation pair
+        off the stage's record itself. Respects the enclosing scope."""
+        raise NotImplementedError(
+            f"{type(self).__name__}.lsq_push_store: the generator supplies this")
+
+    def lsq_search(self, mem_addr):
+        """Store-to-load forwarding: (hit, data) of the NEWEST buffered
+        store at that word address — newer than memory whenever hit."""
+        raise NotImplementedError(
+            f"{type(self).__name__}.lsq_search: the generator supplies this")
+
+    def mem_read(self, mem_addr):
+        """The data memory word at that address (combinational read)."""
+        raise NotImplementedError(
+            f"{type(self).__name__}.mem_read: the generator supplies this")

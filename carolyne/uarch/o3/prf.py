@@ -41,6 +41,7 @@
 from kathryn import *
 
 from carolyne.isa import RegFile
+from carolyne.util import is_power_of_two
 # One rung of the engine-wide ladder (priority.py): a mispredict write overrides
 # the rename/commit write of the same cycle.
 from carolyne.uarch.o3.priority import PRI_MIS_PRED
@@ -64,7 +65,7 @@ class Prf(Module):
                  rename_ports : int,
                  commit_ports : int):
         # Plain-Python configuration only — see the header on @init.
-        if phy_amount < 2 or (phy_amount & (phy_amount - 1)):
+        if phy_amount < 2 or not is_power_of_two(phy_amount):
             raise ValueError(
                 f"Prf '{isa_reg_file.name}': phy_amount must be a power of two "
                 f"(the allocation pointer wraps mod phy_amount), got {phy_amount}")

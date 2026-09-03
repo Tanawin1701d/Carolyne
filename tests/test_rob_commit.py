@@ -11,18 +11,25 @@ from kathryn import (Module, PipCon, build_flow, flow, gen_flow, init, reset,
 
 from carolyne.isa.riscv import Rv32i
 from carolyne.uarch.o3.config import CPUO3_Config, RsvSpec, RsvType
+from carolyne.uarch.o3.easy_mem import EasyMem
 from carolyne.uarch.o3.reg_arch_mng import RegArchMng
 from carolyne.uarch.o3.rob import Rob
 from carolyne.uarch.o3.rob_helper import build_rob_dispatch
+from carolyne.uarch.o3.store_buf import StoreBuf
 
 ISA = Rv32i()
 X   = ISA.reg_file("x")
 
 
+def _store_buf(cfg):
+    """A ROB needs one: a store reaches memory only when commit says so."""
+    return StoreBuf(cfg, EasyMem(blk_request=1))
+
+
 def _cfg(**overrides):
     kwargs = dict(isa=ISA, fe_lanes=2, commit_lanes=2, phy_specs=((X, 64),),
                   rsv_specs=(RsvSpec(True, 8, ISA.exec_units, RsvType.RSV_BRANCH),),
-                  rob_depth=8, sptag_len=4)
+                  rob_depth=8, sptag_len=4, st_buf_depth=4)
     kwargs.update(overrides)
     return CPUO3_Config(**kwargs)
 
@@ -36,8 +43,9 @@ def _drive(cfg, commit_ports=None):
         def decl(self):
             self.reg_arch_mng = RegArchMng(cfg, rename_ports=cfg.fe_lanes,
                                    commit_ports=commit_ports or cfg.commit_lanes)
-            self.rob  = Rob(cfg, self.reg_arch_mng)
-            self.disp = build_rob_dispatch(cfg, cfg.fe_lanes, "rob_disp")
+            self.st_buf = _store_buf(cfg)
+            self.rob    = Rob(cfg, self.reg_arch_mng, self.st_buf)
+            self.disp   = build_rob_dispatch(cfg, cfg.fe_lanes, "rob_disp")
 
             self.mis_pred   = wire(1).mark_input("mis_pred")
             self.mis_idx    = wire(cfg.rob_depth.bit_length() - 1).mark_input("mis_idx")
@@ -49,9 +57,9 @@ def _drive(cfg, commit_ports=None):
             self.rob.on_dispatch(self.disp)
             with zif(self.wb_en):
                 self.rob.on_write_back(self.wb_idx)
-            # The ROB owns the arbiter; on_mis_pred flushes it, so the zif
-            # guard is what says a squash stops commit.
-            self.rob.build_commit()
+            # Commit is the ROB's OWN @flow (it owns the arbiter), so nothing
+            # calls it here; on_mis_pred flushes that arb, and the zif guard
+            # is what says a squash stops commit.
             with zif(self.mis_pred):
                 self.rob.on_mis_pred(self.mis_idx)
             self.rob.on_update_meta()
@@ -102,7 +110,7 @@ def test_a_group_wider_than_the_buffer_is_refused():
     cfg = _cfg(fe_lanes=16, commit_lanes=2, rob_depth=8)
     reset()
     with pytest.raises(ValueError, match="could never dispatch"):
-        Rob(cfg, RegArchMng(cfg, rename_ports=16, commit_ports=2))
+        Rob(cfg, RegArchMng(cfg, rename_ports=16, commit_ports=2), _store_buf(cfg))
 
 
 def test_a_rob_needs_a_power_of_two_depth():
@@ -111,14 +119,14 @@ def test_a_rob_needs_a_power_of_two_depth():
     cfg = _cfg(rob_depth=12, commit_lanes=2)
     reset()
     with pytest.raises(ValueError, match="power of two"):
-        Rob(cfg, RegArchMng(cfg, rename_ports=2, commit_ports=2))
+        Rob(cfg, RegArchMng(cfg, rename_ports=2, commit_ports=2), _store_buf(cfg))
 
 
 def test_a_one_entry_rob_is_refused():
     cfg = _cfg(rob_depth=1, commit_lanes=1)
     reset()
     with pytest.raises(ValueError, match="0 bits wide"):
-        Rob(cfg, RegArchMng(cfg, rename_ports=2, commit_ports=1))
+        Rob(cfg, RegArchMng(cfg, rename_ports=2, commit_ports=1), _store_buf(cfg))
 
 
 def test_a_commit_lane_and_a_commit_port_are_one_number():
@@ -127,18 +135,18 @@ def test_a_commit_lane_and_a_commit_port_are_one_number():
     cfg = _cfg(commit_lanes=4, rob_depth=8)
     reset()
     with pytest.raises(ValueError, match="commit ports"):
-        Rob(cfg, RegArchMng(cfg, rename_ports=2, commit_ports=2))   # too few
+        Rob(cfg, RegArchMng(cfg, rename_ports=2, commit_ports=2), _store_buf(cfg))   # too few
     reset()
     with pytest.raises(ValueError, match="commit ports"):
-        Rob(cfg, RegArchMng(cfg, rename_ports=2, commit_ports=6))   # too many
+        Rob(cfg, RegArchMng(cfg, rename_ports=2, commit_ports=6), _store_buf(cfg))   # too many
     reset()
-    Rob(cfg, RegArchMng(cfg, rename_ports=2, commit_ports=4))       # exactly
+    Rob(cfg, RegArchMng(cfg, rename_ports=2, commit_ports=4), _store_buf(cfg))       # exactly
 
 
 def test_a_rename_table_elaborates_when_the_widths_differ():
     # Regression: Rt's stage chain is one row per RENAME PORT, and it used to
     # walk sptag_len of them — which indexes past the array whenever the two
     # differ, as they do here (2 rename ports, 4 tag bits).
-    cfg = _cfg(fe_lanes=2, sptag_len=4)
+    cfg = _cfg(fe_lanes=2, sptag_len=4, st_buf_depth=4)
     assert cfg.fe_lanes != cfg.sptag_len
     _drive(cfg)                                  # elaborating IS the assertion

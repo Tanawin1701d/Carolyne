@@ -49,7 +49,7 @@ class AluExecUnit(ExecUnitBase):
             ((U.UOP_SLT,  U.UOP_SLTI),  (a ^ SIGN) < (b ^ SIGN)),
             ((U.UOP_SLTU, U.UOP_SLTIU), a < b),
             (U.UOP_LUI,   b),                       # assembled U-imm in src_2
-            (U.UOP_AUIPC, to_ref(src.pc) + b),      # pc of THIS µop
+            (U.UOP_AUIPC, to_ref(src[0].pc) + b),      # pc of THIS µop
         ))
 
         api.wb_reg(AOPR_DEST_1, result)

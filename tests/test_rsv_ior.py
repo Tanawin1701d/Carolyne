@@ -26,7 +26,7 @@ IOR_SPEC = RsvSpec(False, 4, (ISA.unit("mem"), ISA.unit("system")), RsvType.RSV_
 def _cfg(fe_lanes=2):
     return CPUO3_Config(isa=ISA, fe_lanes=fe_lanes, commit_lanes=2,
                         phy_specs=((X, 64),),
-                        rsv_specs=(O3_SPEC, IOR_SPEC), rob_depth=32, sptag_len=4)
+                        rsv_specs=(O3_SPEC, IOR_SPEC), rob_depth=32, sptag_len=4, st_buf_depth=4)
 
 
 def _drive(station_cls, spec, rsv_idx=0, fe_lanes=2):

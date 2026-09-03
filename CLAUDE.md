@@ -55,6 +55,7 @@ contract bug — fix the contract, not the engine.
 | `docs/design/uop_contract.md` | normative ISA↔µarch boundary spec                     |
 | `carolyne/isa/`               | description types + `ExecContext` + per-ISA packages   |
 | `carolyne/uarch/`             | generic OoO engine, Kathryn code lives here           |
+| `carolyne/util/`              | helpers BOTH planes reach — no kathryn, no isa/uarch  |
 | `examples/regfile_demo.py`    | smallest end-to-end Kathryn flow (CPU-flavored)       |
 | `generated/`                  | emitted Verilog (gitignored)                          |
 | `tests/`                      | pytest; tests double as usage documentation           |
@@ -68,6 +69,22 @@ package: the ISA↔µarch boundary is a DOCUMENT, and the one interface it needs
 in code (`ExecContext`) lives in `isa/` because that is who writes bodies
 against it. A `carolyne/contract/` existed on 2026-08-22 holding exactly that
 one file and was folded in the same day; don't recreate it.
+
+**`carolyne/util/`** (2026-09-03, Tanawin's placement) is the one package
+BOTH planes may import: it imports nothing — no kathryn, no `isa`, no
+`uarch`, no ISA name — and that emptiness is what makes it legal for `isa/`
+to reach, which `uarch/common/` is not. It exists because a fact both planes
+ask had nowhere to live: `is_power_of_two` (`util/bit_checking.py`) was
+written inline five times, in `isa/isa.py` (pc_align) AND in four uarch
+blocks (Rob, RsvIOR, Prf, the config's st_buf_depth). Decision: a
+PREDICATE, not a raiser — each caller refuses for its own hardware reason (a
+pointer wrapping mod its table, an alignment used as a mask) and that reason
+is the caller's message to keep; only the bit trick is shared. It answers
+FALSE for 0, where the bare `v & (v - 1)` idiom every site had written
+answers "power of two" — the one behavior change, and the reason a shared
+predicate beats a repeated expression. `uarch/common/` keeps the uarch-only
+arithmetic (`ceil_log2`, the word readers); a helper moves here only when
+`isa/` asks it too.
 
 ## 4. What exists so far (`carolyne/isa/`)
 
@@ -927,7 +944,8 @@ The commit body sits in a **`pip`** block on the stage's `PipCon`, and nothing
 retires in a squashed cycle because the mispredict is bound as that arbiter's
 RESET — what the C++ gets from its `PipStage`. Decision REVERSED 2026-08-31
 (Tanawin): the **ROB OWNS `commit_meta`** — declared in its own @init,
-`build_commit()` takes no argument, and `on_mis_pred` flushes the arb itself,
+commit is its own **`@flow` (`run_commit`, renamed from `build_commit`, no
+argument and no caller — gen_flow runs it)**, and `on_mis_pred` flushes the arb itself,
 so the squash and the rollback are one call (the earlier rule was
 driver-binds-it, on "the block that created the arb knows what else contends
 on it"; nothing else ever contended, and each block owning its own squash is
@@ -1422,14 +1440,15 @@ the surface lives on `ExecUnitO3` — `declare_mis_pred`/
 lands. Later the same day CoreO3 became THE ASSEMBLY: `com_declare`
 builds in dependency order through one small builder per subsystem —
 `_build_reg_arch` (TagGen + RegArchMng; rename ports = fe_lanes, commit
-ports = commit_lanes), `_build_back_end` (Rob + `commit_meta`, and one
+ports = commit_lanes), `_build_back_end` (Rob + StoreBuf, and one
 station + one complex per RsvSpec, `issue_o3` picking RsvO3/RsvIOR,
 NAMED BY POSITION rsv{k}/exu{k} since position is the rsv_id and two
 specs may read alike), `_build_front_end` (Fetch→Decode→Dispatch and
 `backend_meta`), then **`_wire_stages`, every stage's connect() called in one
-place** so the topology reads as one table. The core adds only the two
-arbiters nobody owns: `commit_meta` (rob.build_commit runs on it, called
-from the core's `run_commit` @flow) and `backend_meta` (what dispatch's
+place** so the topology reads as one table. The core adds only the ONE
+arbiter nobody owns (`commit_meta` went to the ROB 2026-08-31, and the
+core's `run_commit` @flow went with it — every block drives its own):
+`backend_meta` (what dispatch's
 granted transfer runs against — declared **`no_pip_master()`** since
 2026-08-31, the Kathryn upgrade's new PipCon call: no pip block masters
 this arb, its master-ack is hard-tied to 1, so dispatch's zync is granted
@@ -1585,6 +1604,94 @@ update) — ROB entries carry no spec tag, nothing masks there. LIMIT: a
 record hopping stages in the resolve cycle copies its tag BEFORE the
 mask lands — the race on_issue solves with substitution; the api's
 transfer learns it when declare_suc_pred's plumbing arrives.
+
+**The load/store queue** (2026-08-31, from the C++ `storeBuf.h` /
+`execLdSt.h`): **`uarch/o3/store_buf.py` — `StoreBuf`**, the store half
+of the LSQ: every executed store waits here until the ROB retires it,
+and only then reaches memory; loads read around it through
+`search_newest` (store-to-load forwarding). THREE POINTERS walk one
+circular table — `fin_ptr` (executed store lands), `com_ptr` (the ROB's
+`on_commit` marks complete), `ret_ptr` (`run_retire`, StoreBuf's own
+@flow, writes the head's committed store to memory, one per cycle) —
+depth from the new **`CPUO3_Config.st_buf_depth`** knob (Tanawin's
+choice over an RsvSpec field; power of two >= 2, the pointer-wrap
+bargain). Decisions, each a deliberate departure from the C++:
+`on_mis_pred` recomputes the tail as `ret + sum_cnt(survivors)` (the
+RsvIOR bargain — the original searched bit patterns); `on_suc_pred` is
+the RsvBase MASK-OUT, not the original's equality compare;
+`search_newest` is a **reduce read** (`table[pick_newest]`), the C++
+`findMBO_BIDX` shape Tanawin asked for over a first linear mux chain: a
+leaf augments itself with the user predicate and with `alloc_ptr <= idx`
+— which side of the WRAP it sits on — and the comparator prefers a hit
+over a miss, then the post-wrap (newer) side; inside one side the fold's
+ascending order leaves the higher index standing. Both terms ride up as
+extras, so a node compares subtree answers instead of rebuilding them
+(the `RsvO3._folded` idiom). The HIT is re-evaluated on the winning row
+rather than folded up — the tree always yields some row, and only its
+own predicate says whether it is a real match, which is what the C++
+does too. Buys a log-depth comparison tree over the chain's linear one;
+the address is still truncated to the memory's index width first —
+mixed-width compares are where that dies. Validated by modelling the
+fold in Python against a walk-back-from-the-tail reference over 200k
+random buffer states, since the wrap logic is where this goes wrong.
+The core's ctor is now `(config, instr_mem, data_mem)` — BOTH memories
+ENVIRONMENT; the buffer is a REQUIRED ctor argument of the ROB
+(`Rob(config, reg_arch_mng, store_buf)`, refusing a non-StoreBuf —
+Tanawin: a CPU cannot exist without one, so the slot is structural, not
+a `connect()` that might go uncalled; a `Rob.connect(store_buf)` and an
+`is not None` guard in commit lived there for an hour and went)
+(the commit hook fires per lane on `ok & is_store`, and the barrier rule
+means at most one lane can — the buffer pops once); both fan-outs call
+`store_buf.on_mis_pred/on_suc_pred`. **The api grew the LSQ surface**
+(isa base declares, O3 forwards through the complex, the declare
+pattern): `lsq_is_full()`, `lsq_push_store(addr, data)` (the engine
+reads the speculation pair off the stage record itself),
+`lsq_search(addr) -> (hit, data)`, `mem_read(addr)`;
+`zync_with_next_stage` took an optional `cond` (the (PipCon, cond) bind
+— a store STALLS in stage 0 while the buffer is full) and the base
+gained concrete **`field_width(src, field)`**, which is how a body
+sizes its own next-stage record off the machine-sized src fields
+(spec_tag/rob_des_idx widths are config facts an ISA cannot know).
+
+**`next_stage_fields(src, *dest_oprs)`** (2026-09-03, Tanawin: "it is
+uarch, we should have api to help add it to the karray") is what a
+multi-stage body actually calls: it RETURNS `{name: kaf(width)}` for
+every machine field — the speculation pair, the ROB entry, `uop_idx`,
+and each named dest's `pr_idx_<name>` — splatted straight into the
+Karray call, so a stage record's CLASS BODY declares only the ISA's own
+data (`LdStResult` is down to mem_word/byte_sh/half_sh) and no ISA
+package spells a uarch field name or sizes a machine-derived width.
+Leans on the call-site-fields rule (§6): a keyword whose VALUE is a
+`kaf()` ADDS that field to one array. It is **GENERATOR-SUPPLIED, not
+concrete** (Tanawin's correction of a first isa-base implementation):
+the names ARE the machine's record vocabulary, so the O3 half implements
+it and IMPORTS the real constants (`common_field`, which gained
+`UOP_IDX`, plus `operand_field.field_name(PR_IDX, …)`) instead of
+restating them — which is what makes `isa/exec_unit_api.py` spell NO
+uarch field name at all now but `data_` in get_src. Decision: **what the
+api DECLARES, the api CARRIES** — `_carried` on the O3 api is the triple
+by default and next_stage_fields widens it to everything it declared, so
+`zync_with_next_stage` transfers exactly that set. Without it the two
+halves drift silently: the body stopped hand-copying `uop_idx` /
+`pr_idx_dest_1` and, until the transfer widened, they would have read
+zero — every stage-1 `uop_hit` missing and the writeback landing on
+physical register 0.
+**`riscv/exec_unit_ls.py` is REAL** — `stage_cnt=2`, FULL sub-word
+width (Tanawin's scope choice): stage 0 resolves the word once for both
+directions (effAddr; `mux(fwd_hit, fwd_data, mem_read)`), a sub-word
+store MERGES its bytes into that word and pushes a full word — RMW
+through the same forwarding path a load uses, so the buffer never needs
+a byte mask — and stage 1 extracts/sign-extends (`(v ^ sign) - sign`)
+and writes rd back gated on the load group. Decision, departing from
+the C++ (which reads dmem in stage 2): the WORD IS CAPTURED AT STAGE 0
+into the record — safe exactly because the LS station issues IN ORDER,
+so no older store can execute after this µop's stage 0; `ExecUnitO3`
+now REFUSES a mem-needing unit on an issue_o3 station for that reason.
+LIMIT: decode still writes `is_store`/`rsv_id` zero, so no µop routes
+to the mem station at runtime — the LS path is structurally complete
+and idle until decode's routing rules land; LIMIT: a store pushed in
+the same cycle its tag resolves keeps the stale tag (the on_issue
+substitution race, same family as the stage-hop one).
 
 FOUND ON THE WAY: `Rt.on_normal_flow` walked `sptag_len` rows of
 `temp_dispatch`, which is `(rename_ports, amount)` — out of bounds whenever the

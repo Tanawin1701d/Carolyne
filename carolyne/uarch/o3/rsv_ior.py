@@ -27,6 +27,7 @@ from kathryn import *
 from kathryn.signal import to_ref
 
 from carolyne.uarch.common import ceil_log2
+from carolyne.util import is_power_of_two
 from carolyne.uarch.o3.config import CPUO3_Config, RsvSpec
 from carolyne.uarch.o3.priority import PRI_MIS_PRED, PRI_RENAME
 from carolyne.uarch.o3.rsv import RsvBase
@@ -51,7 +52,7 @@ class RsvIOR(RsvBase):
                 f"RsvIOR '{rsv_spec.label}': {rsv_spec.size} entry — an in-order "
                 f"station addresses its table with two pointers, and one entry "
                 f"leaves them 0 bits wide")
-        if rsv_spec.size & (rsv_spec.size - 1):
+        if not is_power_of_two(rsv_spec.size):
             raise ValueError(
                 f"RsvIOR '{rsv_spec.label}': {rsv_spec.size} entries — an in-order "
                 f"station steps two pointers modulo its size, so the size must be a "

@@ -51,10 +51,12 @@ def exec_units() -> Tuple[ExecUnit, ...]:
                         src_operands=(AOPR_SRC_1, AOPR_SRC_2),
                         dest_operands=(AOPR_DEST_1,),
                         needs=("pc",)),              # auipc reads it
+            # two stages: address/forward/merge, then extract/writeback
             LSExecUnit("mem", (*U.LOADS, *U.STORES),
                        src_operands=(AOPR_SRC_1, AOPR_SRC_2, AOPR_SRC_3),
                        dest_operands=(AOPR_DEST_1,),
-                       needs=("mem",)),
+                       needs=("mem",),
+                       stage_cnt=2),
             # pc for the target adder and the link, npc to compare the
             # prediction against — the record fields its body reads.
             BrExecUnit("control", (*U.BRANCHES, U.UOP_JAL, U.UOP_JALR),

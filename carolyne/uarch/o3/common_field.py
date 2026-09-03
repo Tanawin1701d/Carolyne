@@ -11,3 +11,4 @@
 IS_SPEC     = "is_spec"
 SPEC_TAG    = "spec_tag"
 ROB_DES_IDX = "rob_des_idx"
+UOP_IDX     = "uop_idx"

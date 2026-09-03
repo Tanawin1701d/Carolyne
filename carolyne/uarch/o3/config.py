@@ -41,6 +41,7 @@ from enum import Enum
 from typing import Tuple
 
 from ...isa import ExecUnit, IsaBase, RegFile, Uop
+from ...util import is_power_of_two
 from ..common import ceil_log2
 
 # The map from a register class to its physical file size. A dict is impossible
@@ -191,13 +192,15 @@ class CPUO3_Config:
     rsv_specs    : Tuple[RsvSpec, ...]# one per reservation station
     rob_depth    : int                # in-flight instructions
     sptag_len    : int                # speculative tag width, in BITS
+    st_buf_depth : int                # store-buffer entries (the LSQ's store half)
 
 
     def __post_init__(self) -> None:
         if not isinstance(self.isa, IsaBase):
             raise TypeError(
                 f"CPUO3_Config: isa must be an IsaBase, got {type(self.isa).__name__}")
-        for field in ("fe_lanes", "commit_lanes", "rob_depth", "sptag_len"):
+        for field in ("fe_lanes", "commit_lanes", "rob_depth", "sptag_len",
+                      "st_buf_depth"):
             value = getattr(self, field)
             if isinstance(value, bool) or not isinstance(value, int):
                 raise TypeError(
@@ -209,6 +212,13 @@ class CPUO3_Config:
                 f"CPUO3_Config: {self.commit_lanes} commit lanes over a "
                 f"{self.rob_depth}-entry ROB — a cycle cannot retire more "
                 f"instructions than the buffer can hold")
+        # The pointer-wrap bargain RsvIOR and the ROB already make: circular
+        # pointers step modulo the table, so the size is a power of two, and
+        # one entry would leave them 0 bits wide.
+        if self.st_buf_depth < 2 or not is_power_of_two(self.st_buf_depth):
+            raise ValueError(
+                f"CPUO3_Config: st_buf_depth must be a power of two >= 2, "
+                f"got {self.st_buf_depth}")
         object.__setattr__(self, "phy_specs", tuple(self.phy_specs))
         object.__setattr__(self, "rsv_specs", tuple(self.rsv_specs))
         self._check_phy_specs()

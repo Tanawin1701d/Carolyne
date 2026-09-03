@@ -175,11 +175,14 @@ class ExecUnitBase:
           per stage 0..stage_cnt-1, so the body's scwait/cwhile compose with
           the stage's arbiter and back-pressure runs up to the station
         - `src` is the record this stage receives: stage 0 the station's
-          issued entry, stage k the record stage k-1 RETURNED
-        - returns a NEW register record for the next stage — never `src`
-          itself: the body creates it and writes it inside its
-          zync_with_next_stage block. The LAST stage returns None: it has
-          no next stage, and its results leave through
+          issued entry, stage k the record stage k-1 RETURNED. It is the
+          KARRAY, not an element — every api call takes it that way and
+          indexes inside; a body reading a field of its own does the
+          indexing itself (`src[0].loaded_word`)
+        - returns a NEW register record for the next stage — the Karray
+          again, never `src` itself: the body creates it and writes it
+          inside its zync_with_next_stage block. The LAST stage returns
+          None: it has no next stage, and its results leave through
           api.wb_reg(atm_opr, value)
         - the generator transfers is_spec/spec_tag from src to des inside
           the sync; everything else the body carries in what it returns

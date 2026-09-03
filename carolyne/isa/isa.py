@@ -31,6 +31,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Tuple
 
+from ..util import is_power_of_two
 from .atomic_operand import (AtomicOperand, DEST_ROLES, OperandRole,
                              SRC_ROLES)
 from .exec_unit import ExecUnit
@@ -112,7 +113,7 @@ class IsaBase:
                 raise ValueError(
                     f"IsaBase '{self.name}': {field} must be >= 1, got {value}")
 
-        if self.pc_align & (self.pc_align - 1):
+        if not is_power_of_two(self.pc_align):
             raise ValueError(
                 f"IsaBase '{self.name}': pc_align must be a power of two "
                 f"(alignment is a mask), got {self.pc_align}")

@@ -32,11 +32,13 @@ from kathryn import *
 from kathryn.signal import to_ref
 
 from carolyne.uarch.common import ceil_log2
+from carolyne.util import is_power_of_two
 from carolyne.uarch.o3.config import CPUO3_Config
 from carolyne.uarch.o3.operand_field import (ACTIVE, AR_IDX, PR_IDX, WB_REQUIRED,
                                              field_name)
 from carolyne.uarch.o3.priority import PRI_MIS_PRED, PRI_RENAME
 from carolyne.uarch.o3.reg_arch_mng import RegArchMng
+from carolyne.uarch.o3.store_buf import StoreBuf
 from carolyne.uarch.o3.rob_helper import (build_rob_table, rob_dest_operands,
                                           rob_entry_shape)
 
@@ -47,6 +49,7 @@ class Rob(Module):
     def __init__(self,
                  config       : CPUO3_Config,
                  reg_arch_mng : RegArchMng,
+                 store_buf    : StoreBuf,
                  name         : str = "rob"):
 
         depth = config.rob_depth
@@ -54,7 +57,7 @@ class Rob(Module):
             raise ValueError(
                 f"Rob: {depth} entry — the buffer is addressed by two pointers, and "
                 f"one entry leaves them 0 bits wide")
-        if depth & (depth - 1):
+        if not is_power_of_two(depth):
             raise ValueError(
                 f"Rob: {depth} entries — both pointers step modulo the buffer, so the "
                 f"depth must be a power of two or every step needs its own wrap compare")
@@ -70,8 +73,16 @@ class Rob(Module):
                 f"lane IS a port, one returning the physical register the other "
                 f"retires, so the two are one number and must be stated as one")
 
+        if not isinstance(store_buf, StoreBuf):
+            raise TypeError(
+                f"Rob: store_buf must be a StoreBuf, got "
+                f"{type(store_buf).__name__} — a store reaches memory ONLY on "
+                f"retirement, so the buffer is what commit reports into and a "
+                f"core cannot run without one")
+
         self.config       = config
         self.reg_arch_mng = reg_arch_mng
+        self.store_buf    = store_buf
         self.label        = name
 
         super().__init__()
@@ -214,12 +225,16 @@ class Rob(Module):
         self.table[idx] |= {"wb_fin": 1}
 
     # --- commit -------------------------------------------------------------------
-    def build_commit(self):
+    @flow
+    def run_commit(self):
         """Retire the head group, inside the commit stage's pip block.
 
+        The ROB's OWN flow: it owns `commit_meta`, so it owns the block that
+        runs on it — nobody calls this, gen_flow does.
+
         NOTHING RETIRES IN A SQUASHED CYCLE, and the arbiter is what says so:
-        the ROB owns `commit_meta`, and its own `on_mis_pred` flushes it —
-        the squash clears the grant and leaves this block unfired.
+        `on_mis_pred` flushes that arb, which clears the grant and leaves
+        this block unfired.
         """
         for lane in range(self.commit_lanes):
             self.com_row[lane] *= self.table[self.com_ptr + lane]
@@ -236,6 +251,11 @@ class Rob(Module):
                 # store buffer pops once a cycle and so does the predictor.
                 next_may_retire = (ok & ~to_ref(row.is_branch)
                                       & ~to_ref(row.is_store))
+
+                # The store's memory write may now go. At most one lane fires
+                # (a store is last of its group), so the buffer pops once.
+                with zif(ok & to_ref(row.is_store)):
+                    self.store_buf.on_commit()
 
                 self._retire(lane, row)
 
@@ -279,8 +299,6 @@ class Rob(Module):
                 data = to_ref(prf.on_get_entry(pr_idx).data)
                 self.reg_arch_mng.arf(reg_file).write    (ar_idx, data  )
                 self.reg_arch_mng.rt (reg_file).on_commit(ar_idx, pr_idx)
-
-            # TODO do not forget to link with store buffer
 
             self.reg_arch_mng.prf(reg_file).on_commit(lane, frees_phy_reg)
 

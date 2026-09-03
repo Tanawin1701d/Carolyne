@@ -29,7 +29,7 @@ SYSTEM  = ISA.unit("system")        # ecall/ebreak: no operands at all
 def _cfg(**overrides):
     kwargs = dict(isa=ISA, fe_lanes=2, commit_lanes=2, phy_specs=((X, 64),),
                   rsv_specs=(RsvSpec(True, 16, ISA.exec_units, RsvType.RSV_BRANCH),),
-                  rob_depth=32, sptag_len=8)
+                  rob_depth=32, sptag_len=8, st_buf_depth=4)
     kwargs.update(overrides)
     return CPUO3_Config(**kwargs)
 

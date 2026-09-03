@@ -89,6 +89,15 @@ class ExecUnitO3(Module):
                     f"{sorted(kind_fields) or 'no pc fields'} — pick a kind "
                     f"whose entries have it")
 
+        # The store buffer's forwarding answers "the newest OLDER store",
+        # which is only true when memory µops execute in program order.
+        if "mem" in self.exec_unit.needs and rsv_spec.issue_o3:
+            raise ValueError(
+                f"ExecUnitO3 '{rsv_spec.label}': unit "
+                f"'{self.exec_unit.name}' needs 'mem' on an OUT-OF-ORDER "
+                f"station — store-to-load forwarding leans on in-order "
+                f"issue, so a memory station must be issue_o3=False")
+
         super().__init__()
 
     @init
@@ -134,8 +143,8 @@ class ExecUnitO3(Module):
                 f"mispredict condition — an unconditional squash is nonsense")
         self._declared_mis_pred = True
         with zif(dyn_cond):
-            self._core.on_mis_pred(to_ref(getattr(src, SPEC_TAG)),
-                                   to_ref(getattr(src, ROB_DES_IDX)))
+            self._core.on_mis_pred(to_ref(getattr(src[0], SPEC_TAG)),
+                                   to_ref(getattr(src[0], ROB_DES_IDX)))
 
     def declare_suc_pred(self, src, dyn_cond=None):
         """A stage resolved a prediction CORRECTLY under `dyn_cond`: the tag
@@ -153,8 +162,8 @@ class ExecUnitO3(Module):
                 f"resolve condition — an unconditional resolve is nonsense")
         self._declared_suc_pred = True
         with zif(dyn_cond):
-            self._core.on_suc_pred(to_ref(getattr(src, SPEC_TAG)),
-                                   to_ref(getattr(src, ROB_DES_IDX)))
+            self._core.on_suc_pred(to_ref(getattr(src[0], SPEC_TAG)),
+                                   to_ref(getattr(src[0], ROB_DES_IDX)))
 
     def declare_fin(self, src, stage_idx: int):
         """A µop finished — report it against the `rob_des_idx` carried in
@@ -163,7 +172,7 @@ class ExecUnitO3(Module):
         - built in the caller's scope: the wb_fin write fires on this
           stage's grant, and on any body zif around the call
         """
-        self._core.rob.on_write_back(to_ref(getattr(src, ROB_DES_IDX)))
+        self._core.rob.on_write_back(to_ref(getattr(src[0], ROB_DES_IDX)))
 
     def wb_reg(self, src, stage_idx: int, atm_opr, value):
         """Write `value` back to that dest slot's promised physical register
@@ -180,7 +189,7 @@ class ExecUnitO3(Module):
 
         # TODO we will come back to manage it again
 
-        pr_idx = to_ref(getattr(src, field_name(PR_IDX, atm_opr)))
+        pr_idx = to_ref(getattr(src[0], field_name(PR_IDX, atm_opr)))
         self._core.reg_arch_mng.prf(atm_opr.reg_file).on_wb(pr_idx, value)
 
         wb_live  = wire(1, f"{self.label}_wb_live_s{stage_idx}_{atm_opr.name}")
@@ -188,6 +197,23 @@ class ExecUnitO3(Module):
         bypass = RsvBypass(atm_opr.reg_file, wb_live, pr_idx, value)
         for rsv in self._core.rsvs:
             rsv.on_bypass(bypass)
+
+    # --- the load/store queue (api forwards, the declare pattern) ------------------
+    def lsq_is_full(self):
+        return self._core.store_buf.is_full()
+
+    def lsq_push_store(self, src, mem_addr, data):
+        # The speculation pair rides the stage record — the engine reads it,
+        # so a body cannot push a store that forgets its tags.
+        self._core.store_buf.on_new_entry(to_ref(getattr(src[0], IS_SPEC)),
+                                          to_ref(getattr(src[0], SPEC_TAG)),
+                                          mem_addr, data)
+
+    def lsq_search(self, mem_addr):
+        return self._core.store_buf.search_newest(mem_addr)
+
+    def mem_read(self, mem_addr):
+        return self._core.data_mem.read(0, mem_addr)
 
     # --- the stage chain ----------------------------------------------------------
     @flow
@@ -203,7 +229,7 @@ class ExecUnitO3(Module):
         - every stage's record lands in self.stage_srcs for debugging:
           [k] is what stage k received; [-1] is the last stage's None
         """
-        src = self.rsv.exec_src[0]
+        src = self.rsv.exec_src
         self.stage_srcs = [src]
         last = self.exec_unit.stage_cnt - 1
         for stage_idx in range(self.exec_unit.stage_cnt):
@@ -255,7 +281,7 @@ class ExecUnitO3(Module):
                         f"ExecUnitO3 '{self.label}': on_mis_pred before "
                         f"transfer — stage {stage_idx}'s record does not "
                         f"exist until the stage chain is built")
-                src      = self.stage_srcs[stage_idx]
+                src      = self.stage_srcs[stage_idx][0]
                 squashed = (to_ref(getattr(src, IS_SPEC))
                             & ((to_ref(getattr(src, SPEC_TAG)) & fix_tag)
                                != 0))
@@ -288,10 +314,6 @@ class ExecUnitO3(Module):
                         f"ExecUnitO3 '{self.label}': on_suc_pred before "
                         f"transfer — stage {stage_idx}'s record does not "
                         f"exist until the stage chain is built")
-                src = self.stage_srcs[stage_idx]
+                src = self.stage_srcs[stage_idx][0]
             left = to_ref(getattr(src, SPEC_TAG)) & ~suc_tag
             src |= {SPEC_TAG: left, IS_SPEC: left != 0}
-
-
-
-

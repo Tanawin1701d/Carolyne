@@ -33,7 +33,7 @@ class BrExecUnit(ExecUnitBase):
         a   = api.get_src(src, AOPR_SRC_1)
         b   = api.get_src(src, AOPR_SRC_2)   # rs2, or jal/jalr's immediate
         imm = api.get_src(src, AOPR_SRC_3)   # the branches' immediate
-        pc  = to_ref(src.pc)
+        pc  = to_ref(src[0].pc)
 
         taken = wire(1, "br_taken")
         drive_by_uop(taken, src, (
@@ -58,9 +58,9 @@ class BrExecUnit(ExecUnitBase):
         # a mispredict IS "actual differs from predicted".
         actual_npc = mux(to_ref(taken), to_ref(target), pc + ILEN_BYTES)
         mis_pred   = wire(1, "br_mis_pred")
-        mis_pred  *= actual_npc != to_ref(src.npc)
+        mis_pred  *= actual_npc != to_ref(src[0].npc)
         suc_pred   = wire(1, "br_suc_pred")
-        suc_pred  *= actual_npc == to_ref(src.npc)
+        suc_pred  *= actual_npc == to_ref(src[0].npc)
 
         # jal/jalr's rd: the return path, pc of the NEXT instruction. GATED
         # on the jump µops — a branch booked no physical register, so an

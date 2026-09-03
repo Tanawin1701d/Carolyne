@@ -19,7 +19,7 @@ def uop_hit(src, uops):
     one operation encoded twice (add/addi), so it shares one guard."""
     hit = None
     for uop in ((uops,) if isinstance(uops, Uop) else uops):
-        term = to_ref(src.uop_idx) == uop.uop_idx
+        term = to_ref(src[0].uop_idx) == uop.uop_idx
         hit  = term if hit is None else hit | term
     return hit
 

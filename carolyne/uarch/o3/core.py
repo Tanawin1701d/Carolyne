@@ -5,7 +5,7 @@
 # the machine reads as a table of parts:
 #
 #   _build_reg_arch()    TagGen + RegArchMng — what dispatch books against
-#   _build_back_end()    Rob + the commit arbiter; one station + one exec
+#   _build_back_end()    Rob + StoreBuf; one station + one exec
 #                        complex per RsvSpec (the spec's own issue_o3 picks
 #                        RsvO3/RsvIOR, its POSITION is the rsv_id a lane names)
 #   _build_front_end()   Fetch -> Decode -> Dispatch, and backend_meta
@@ -32,17 +32,22 @@ from carolyne.uarch.o3.reg_arch_mng import RegArchMng
 from carolyne.uarch.o3.rob import Rob
 from carolyne.uarch.o3.rsv_ior import RsvIOR
 from carolyne.uarch.o3.rsv_o3 import RsvO3
+from carolyne.uarch.o3.store_buf import StoreBuf
 from carolyne.uarch.o3.tag_gen import TagGen
 
 
 class CoreO3(Module):
     """The whole core: every block, built from one config, wired once."""
 
-    def __init__(self, config: CPUO3_Config, simple_mem: EasyMem):
+    def __init__(self,
+                 config    : CPUO3_Config,
+                 instr_mem : EasyMem,
+                 data_mem  : EasyMem):
         self.config          = config
-        self.simple_mem      = simple_mem
-        self._mis_pred_built = False    # on_mis_pred is build-once (arb resets)
-        self._suc_pred_built = False    # on_suc_pred too (the hold is set-once)
+        self.instr_mem       = instr_mem     # both memories are ENVIRONMENT:
+        self.data_mem        = data_mem      # a machine hands them in
+        self._mis_pred_built = False         # on_mis_pred is build-once (arb resets)
+        self._suc_pred_built = False         # on_suc_pred too (the hold is set-once)
         super().__init__()
 
     @init
@@ -66,11 +71,13 @@ class CoreO3(Module):
 
     # --- the back end -----------------------------------------------------------
     def _build_back_end(self):
-        """The ROB with its commit arbiter, and one station + one exec
-        complex per RsvSpec — named by POSITION (rsv{k}/exu{k}), since the
-        position is the rsv_id a dispatch lane names and two specs may
-        otherwise read alike."""
-        self.rob = Rob(self.config, self.reg_arch_mng)
+        """The ROB and the store buffer, and one station + one exec complex
+        per RsvSpec — named by POSITION (rsv{k}/exu{k}), since the position
+        is the rsv_id a dispatch lane names and two specs may otherwise
+        read alike. Commit is the ROB's own flow; the core drives nothing."""
+        self.store_buf = StoreBuf(self.config, self.data_mem)
+        self.rob       = Rob     (self.config, self.reg_arch_mng,
+                                  self.store_buf)
 
         rsvs, exus = [], []
         for rsv_idx, rsv_spec in enumerate(self.config.rsv_specs):
@@ -88,7 +95,7 @@ class CoreO3(Module):
         granted transfer runs against; no pip masters it (`no_pip_master`),
         so dispatch's zync is granted the moment it wins arbitration —
         acceptance is `ready_to_go`'s AND, already bound on the zync."""
-        self.fetch        = Fetch(self.config, self.simple_mem)
+        self.fetch        = Fetch(self.config, self.instr_mem)
         self.decode       = Decode(self.config)
         self.dispatch     = Dispatch(self.config)
         self.backend_meta = PipCon(name="backend")
@@ -106,19 +113,7 @@ class CoreO3(Module):
         for exu in self.exus:
             exu.connect(self)       # the declare fan-outs land core-wide
 
-    # --- commit -----------------------------------------------------------------
-    @flow
-    def run_commit(self):
-        """The commit stage: the ROB drains into architectural state inside
-        its own commit arbiter's pip (the ROB owns `commit_meta`, and its
-        on_mis_pred flushes it).
-
-        LIMIT: nothing calls the stations' build_issue with the complexes'
-        exec_meta — open on purpose.
-        """
-        self.rob.build_commit()
-
-    # --- mispredict ---------------------------------------------------------------
+    # --- mispredict -------------------------------------------------------------
     def on_mis_pred(self, last_valid_spec_tag_dyn, rob_des_idx_dyn,
                     dest_renames=()):
         """CALL ONCE — the squash fan-out: one call rolls the whole core back.
@@ -157,11 +152,13 @@ class CoreO3(Module):
         self.decode  .on_mis_pred()
         self.dispatch.on_mis_pred()
 
-        # every entry and in-flight µop under a killed tag goes away
+        # every entry and in-flight µop under a killed tag goes away — a
+        # buffered speculative store with it
         for rsv in self.rsvs:
             rsv.on_mis_pred(fix_tag)
         for exu in self.exus:
             exu.on_mis_pred(fix_tag)
+        self.store_buf.on_mis_pred(fix_tag)
 
         # the bookkeepers roll back to the branch
         self.tag_gen.on_mis_pred(last_valid_spec_tag_dyn)
@@ -177,6 +174,7 @@ class CoreO3(Module):
                 rt .on_mis_pred(last_valid_spec_tag_dyn)
                 prf.on_mis_pred(phy_idx)
 
+    # --- resolve ----------------------------------------------------------------
     def on_suc_pred(self, last_valid_spec_tag_dyn, rob_des_idx_dyn):
         """CALL ONCE — the resolve fan-out: the tag stops covering anything.
 
@@ -201,11 +199,13 @@ class CoreO3(Module):
         # a booking never lands beside a resolve: dispatch stalls the cycle
         self.dispatch.on_suc_pred()
 
-        # every waiting entry and in-flight µop stops speculating under it
+        # every waiting entry and in-flight µop stops speculating under it —
+        # a buffered store with them
         for rsv in self.rsvs:
             rsv.on_suc_pred(last_valid_spec_tag_dyn)
         for exu in self.exus:
             exu.on_suc_pred(last_valid_spec_tag_dyn)
+        self.store_buf.on_suc_pred(last_valid_spec_tag_dyn)
 
         # the bookkeepers: the tag goes back to the pool and off the table
         self.tag_gen.on_suc_pred(val(1, 1))

@@ -24,7 +24,7 @@ def _cfg():
     return CPUO3_Config(isa=ISA, fe_lanes=2, commit_lanes=2,
                         phy_specs=((X, 64),),
                         rsv_specs=(RsvSpec(True, 8, ISA.exec_units, RsvType.RSV_BRANCH),),
-                        rob_depth=32, sptag_len=4)
+                        rob_depth=32, sptag_len=4, st_buf_depth=4)
 
 
 class OldestFirst(RsvBase):
