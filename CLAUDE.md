@@ -53,6 +53,7 @@ contract bug — fix the contract, not the engine.
 | path                          | contents                                              |
 | ----------------------------- | ----------------------------------------------------- |
 | `docs/design/uop_contract.md` | normative ISA↔µarch boundary spec                     |
+| `docs/open_items.md`          | every known gap: what, where, what closes it          |
 | `carolyne/isa/`               | description types + `ExecContext` + per-ISA packages   |
 | `carolyne/uarch/`             | generic OoO engine, Kathryn code lives here           |
 | `carolyne/util/`              | helpers BOTH planes reach — no kathryn, no isa/uarch  |
