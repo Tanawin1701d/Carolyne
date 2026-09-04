@@ -39,12 +39,13 @@
 # Backwards, it silently truncates.
 
 from kathryn import *
+from kathryn.signal import to_ref
 
 from carolyne.isa import RegFile
 from carolyne.util import is_power_of_two
 # One rung of the engine-wide ladder (priority.py): a mispredict write overrides
 # the rename/commit write of the same cycle.
-from carolyne.uarch.o3.priority import PRI_MIS_PRED
+from carolyne.uarch.o3.priority import PRI_ISSUE, PRI_MIS_PRED
 
 
 class PrfEntry(Karray):
@@ -100,6 +101,17 @@ class Prf(Module):
         self.storage = PrfEntry(
             HwComponentType.REG,
             (self.phy_amount,), "prf" + self.isa_reg_file.name,
+            data=self.isa_reg_file.width)
+
+        # The READ VIEW: storage as a reader must see it THIS cycle. A
+        # writeback writes the register, which only lands at the edge, so a
+        # read in the same cycle would take the stale value. `run_read_lane`
+        # copies storage in plainly and `on_wb` overrides the written entry
+        # at PRI_ISSUE — the pre_issue/issue_lane shape RsvBase uses, one
+        # array wide.
+        self.read_lane = PrfEntry(
+            HwComponentType.WIRE,
+            (self.phy_amount,), "prf_read_" + self.isa_reg_file.name,
             data=self.isa_reg_file.width)
 
         # free counter — every entry starts free
@@ -188,12 +200,57 @@ class Prf(Module):
         return free, next_index, over_terms
 
     # ---- read / write back -------------------------------------------------------
+    @flow
+    def run_read_lane(self):
+        """The read view, driven every cycle: storage as it stands.
+
+        Prf's own flow, plain priority — `on_wb` overlays this cycle's
+        writeback on top at PRI_ISSUE.
+
+        A LOOP, not `read_lane *= storage`: a Karray selection must index
+        every dimension, so an unkeyed whole-array assign is refused. The
+        emitted wires are the same either way.
+        """
+        for idx in range(self.phy_amount):
+            self.read_lane[idx] *= self.storage[idx]
+
     def on_get_entry(self, dyn_idx):
+        """The entry as the REGISTER holds it — the plain read.
+
+        Right for a reader whose value is necessarily at least a cycle old:
+        the ROB's commit gates on a wb_fin the writeback set in an EARLIER
+        cycle, so nothing can be landing on that entry now. A reader that
+        CAN race a writeback wants `on_get_entry_with_bp`."""
         return self.storage[dyn_idx]
 
+    def on_get_entry_with_bp(self, dyn_idx):
+        """The entry as a reader must see it NOW: the register, or this
+        cycle's writeback if one is landing on that index.
+
+        Right for dispatch's rename read, where a source may name a register
+        a unit is writing back this very cycle. Costs the read-lane fan-out,
+        so a reader that cannot race one takes `on_get_entry` instead."""
+        return self.read_lane[dyn_idx]
+
     def on_wb(self, dyn_idx, data):
+        """Write `data` back, and bypass it to every read of this cycle.
+
+        The register write lands at the edge, so a reader in the same cycle
+        would take the stale value — the bypass is what closes that, at
+        PRI_ISSUE over run_read_lane's plain copy.
+
+        STATIC index + guard, not `read_lane[dyn_idx] *=`: a runtime-indexed
+        write needs a reg backing and the read view is wire, so the decode
+        is written out. Costs one guarded override per entry per writeback.
+        """
+        dyn_idx = to_ref(dyn_idx)          # resolved ONCE, not per entry
         self.storage[dyn_idx].fin  |= 1
         self.storage[dyn_idx].data |= data
+
+        with priority(PRI_ISSUE):
+            for idx in range(self.phy_amount):
+                with zif(dyn_idx == idx):
+                    self.read_lane[idx] *= {"fin": 1, "data": data}
 
     # ---- mispredict ---------------------------------------------------------------
     def on_mis_pred(self, last_phy_idx):

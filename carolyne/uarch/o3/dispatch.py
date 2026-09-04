@@ -272,9 +272,16 @@ class Dispatch(Module):
         - passes the BUS rows: free_slots already built its wants and slots
           at warm time (warm_rsvs), so on_dispatch reuses those and takes
           each entry's content off the filled lane
+        - at PRI_RENAME: a dispatch IS the rename moment, so the whole call
+          runs on the rung write_entry already names. What it adds is the
+          plain writes (RsvO3's track_ptr), which now match RsvIOR's
+          alloc_ptr. roll_track_epoch keeps PRI_TRACK_ROLL — priority
+          restores on exit — and so still LOSES to the entry write, which
+          is what puts a same-cycle dispatch in the new epoch
         """
-        for rsv in self.rsvs:
-            rsv.on_dispatch(self.dispatch_bus)
+        with priority(PRI_RENAME):
+            for rsv in self.rsvs:
+                rsv.on_dispatch(self.dispatch_bus)
 
 
 
@@ -370,10 +377,10 @@ class Dispatch(Module):
           one-priority-per-layer rule
         """
         decode_entry = self.decode[lane]
-        arf     = self.reg_arch_mng.arf(atm_opr.reg_file)
+        arf          = self.reg_arch_mng.arf(atm_opr.reg_file)
         # the slot's own valid_<n> off the decode row — NOT the lane's valid
         dec_opr_valid = to_ref(getattr(decode_entry, field_name(VALID, atm_opr)))
-        active  = to_ref(getattr(decode_entry, field_name(ACTIVE, atm_opr)))
+        active        = to_ref(getattr(decode_entry, field_name(ACTIVE, atm_opr)))
         # a one-register class stores no ar_idx (index_width 0): there is
         # nothing to choose, that register is 0
         if atm_opr.reg_file.index_width == 0:
@@ -393,7 +400,7 @@ class Dispatch(Module):
         rt  = self.reg_arch_mng.rt(atm_opr.reg_file)
         prf = self.reg_arch_mng.prf(atm_opr.reg_file)
         renamed, prf_idx = rt.read_rename(lane, ar_idx)
-        prf_entry = prf.on_get_entry(prf_idx)
+        prf_entry = prf.on_get_entry_with_bp(prf_idx)
         prf_fin   = to_ref(prf_entry.fin)
 
         # the slot has no value in hand and the µop reads it: rename answers

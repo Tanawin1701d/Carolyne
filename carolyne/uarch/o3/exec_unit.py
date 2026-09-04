@@ -183,12 +183,10 @@ class ExecUnitO3(Module):
         - the PRF entry takes the value and its `fin`; the broadcast wakes
           every station's waiting sources naming that class
         - respects the enclosing Kathryn scope: a zif-gated call builds
-          gated writes, and the broadcast's live bit is driven in that
-          same scope, so a gated-out cycle broadcasts nothing
+          gated writes, so a gated-out cycle writes and broadcasts nothing
+        - Prf.on_wb bypasses the value into its read view, so a reader in
+          THIS cycle sees it rather than the stale register
         """
-
-        # TODO we will come back to manage it again
-
         pr_idx = to_ref(getattr(src[0], field_name(PR_IDX, atm_opr)))
         self._core.reg_arch_mng.prf(atm_opr.reg_file).on_wb(pr_idx, value)
 

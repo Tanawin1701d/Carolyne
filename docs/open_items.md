@@ -82,30 +82,3 @@ here; a decision already made and recorded goes in CLAUDE.md §4, not here.
       no caller connects the two — so no entry ever issues into an execution
       unit.
       *Where:* `uarch/o3/core.py`, `uarch/o3/rsv_o3.py` / `rsv_ior.py`.
-
-## To revise
-
-Not gaps — these are built and elaborate. Tanawin wants the DESIGN
-re-examined before it hardens; the notes under each are what a reader might
-start from, not a verdict.
-
-- [ ] **The bypass system.** A writeback broadcasts one `RsvBypass` per
-      register class to EVERY station, and each station walks every row ×
-      every wake operand comparing `pr_idx`.
-      *Where:* `uarch/o3/rsv.py` (`RsvBypass`, `on_bypass`),
-      `uarch/o3/exec_unit.py` (`wb_reg`).
-      *Worth looking at:* the comparator count grows as
-      stations × rows × wake-operands; whether a µop issuing in the SAME
-      cycle as the broadcast sees it; and that the PRF write and the
-      broadcast are two paths carrying one value.
-
-- [ ] **The successful-prediction system.** `on_suc_pred` stalls dispatch for
-      the cycle, masks the tag out of every station and every stage record,
-      hands the tag back to `TagGen` and clears it from the Mpft.
-      *Where:* `uarch/o3/core.py` (`on_suc_pred`),
-      `uarch/o3/exec_unit.py` (`declare_suc_pred`), `uarch/o3/tag_gen.py`.
-      *Worth looking at:* the dispatch stall fires on every CORRECTLY
-      predicted branch — the common case — so it costs a dispatch slot per
-      resolve; `tag_gen.on_suc_pred(val(1,1))` passes a constant where the
-      port is an enable; and `rob_des_idx_dyn` is accepted but unused,
-      reserved for the predictor update that does not exist yet.

@@ -296,6 +296,9 @@ class Rob(Module):
 
             with zif(writes):
                 prf  = self.reg_arch_mng.prf(reg_file)
+                # the register, not the bypassed view: commit gates on a
+                # wb_fin the writeback set in an EARLIER cycle, so nothing
+                # can be landing on this entry now
                 data = to_ref(prf.on_get_entry(pr_idx).data)
                 self.reg_arch_mng.arf(reg_file).write    (ar_idx, data  )
                 self.reg_arch_mng.rt (reg_file).on_commit(ar_idx, pr_idx)
