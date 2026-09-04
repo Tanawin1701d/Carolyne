@@ -156,7 +156,8 @@ class RsvIOR(RsvBase):
             self.alloc_ptr |= self.alloc_ptr + sum_cnt(accepted)
 
     # --- issue ------------------------------------------------------------------
-    def build_issue(self, exec_meta):
+    @flow
+    def build_issue(self):
         """The head issues when its sources have landed and the unit will take
         it. Nothing younger may overtake — that is the whole difference from
         RsvO3, and it is why this needs no comparison tree, only a pointer.
@@ -167,13 +168,14 @@ class RsvIOR(RsvBase):
         unit STALL the station: the entry stays, where a plain `zif` would have
         cleared it into a unit that never took it.
         """
+        self.require_exec_meta()
         head = self.head_ptr
         self.pre_issue [0] *= self.table[head]
         self.issue_lane[0] *= self.pre_issue[0]
         self.issue_ready  *= self.slot_ready(self.pre_issue[0])
 
         with pip(self.issue_meta, auto_req=True, auto_restart=True):
-            with zync((exec_meta, self.issue_ready)):
+            with zync((self.exec_meta, self.issue_ready)):
                 self.on_issue(head, self.issue_lane[0])
                 self.head_ptr |= head + 1
 

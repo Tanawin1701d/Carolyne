@@ -103,6 +103,11 @@ class RsvBase(Module):
         # station's own contribution to the dispatch go/stall bit.
         self.all_ok = wire(1, f"{self.label}_all_ok")
 
+        # The execution complex's arbiter, from connect(). The ARB, not the
+        # complex: a station holds no reference back to the block that holds
+        # it, or the sim manifest reads the pair as an attribute cycle.
+        self.exec_meta = None
+
     # --- reads -----------------------------------------------------------------
     def slot_ready(self, row):
         """This entry is occupied and every source it waits on has landed."""
@@ -133,6 +138,21 @@ class RsvBase(Module):
                   for name in self.entry_fields if name not in overrides}
         fields.update(overrides)
         return fields
+
+    def connect(self, exec_meta):
+        """The arbiter of the complex this station issues into — what
+        build_issue zyncs against, so a busy unit stalls the station."""
+        self.exec_meta = exec_meta
+
+    def require_exec_meta(self):
+        """connect() has been called. build_issue is this station's OWN flow,
+        so it runs whether or not anything wired it — an unconnected station
+        would otherwise die inside Kathryn on a None arbiter."""
+        if self.exec_meta is None:
+            raise ValueError(
+                f"{type(self).__name__} '{self.label}': no execution complex "
+                f"connected — build_issue runs as this station's own flow and "
+                f"needs the arb it issues into (rsv.connect(exu.exec_meta))")
 
     # --- the policy a subclass owns --------------------------------------------
     def build_issue(self, *args, **kwargs):

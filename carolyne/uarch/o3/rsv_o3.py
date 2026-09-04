@@ -202,7 +202,8 @@ class RsvO3(RsvBase):
                 self.table[row_idx] |= {"is_lower_track": 1}
 
     # --- issue ------------------------------------------------------------------
-    def build_issue(self, exec_meta):
+    @flow
+    def build_issue(self):
         """The oldest ready entry issues, when the execution unit will take it.
 
         ONE reduce read does the choosing: the fold carries the whole record,
@@ -211,6 +212,7 @@ class RsvO3(RsvBase):
         entry in the table instead of losing it, which is the difference from
         writing the issue as a plain `zif`.
         """
+        self.require_exec_meta()
         self._root = None
         self.pre_issue[0] *= self.table[self._select_oldest]
         self.issue_lane[0] *= self.pre_issue[0]
@@ -218,7 +220,7 @@ class RsvO3(RsvBase):
         self.issue_ready  *= self.slot_ready(self.pre_issue[0])
 
         with pip(self.issue_meta, auto_req=True, auto_restart=True):
-            with zync((exec_meta, self.issue_ready)):
+            with zync((self.exec_meta, self.issue_ready)):
                 self.on_issue(OH(self.issue_oh), self.issue_lane[0])
 
     def _select_oldest(self, lhs, rhs, level):

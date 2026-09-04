@@ -40,6 +40,7 @@ def _drive(station_cls, spec, rsv_idx=0, fe_lanes=2):
             self.station  = station_cls(cfg, spec, "rsv_test", rsv_idx)
             self.dispatch = build_dispatch(cfg, cfg.fe_lanes, "disp")
             self.exec_arb = PipCon(name="exec_unit")
+            self.station.connect(self.exec_arb)
             self.fix_tag  = wire(cfg.sptag_len).mark_input("fix_tag")
             self.suc_tag  = wire(cfg.sptag_len).mark_input("suc_tag")
             self.bp_valid = wire(1).mark_input("bp_valid")
@@ -50,7 +51,6 @@ def _drive(station_cls, spec, rsv_idx=0, fe_lanes=2):
         def run(self):
             st = self.station
             st.on_dispatch(self.dispatch)
-            st.build_issue(self.exec_arb)
             # the resolve is its own event now — it overrides the issued
             # slot at PRI_SUC_PRED instead of riding into on_issue
             st.on_suc_pred(self.suc_tag)

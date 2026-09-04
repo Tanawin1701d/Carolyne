@@ -110,8 +110,11 @@ class CoreO3(Module):
         self.dispatch.connect(self.decode      , self.backend_meta,
                               self.reg_arch_mng, self.tag_gen     ,
                               self.rob         , self.rsvs)
-        for exu in self.exus:
-            exu.connect(self)       # the declare fan-outs land core-wide
+        # Station <-> complex, by position: the complex reaches the core for
+        # the declare fan-outs, the station takes the arb its issue zyncs on.
+        for rsv, exu in zip(self.rsvs, self.exus):
+            exu.connect(self)               # declare fan-outs land core-wide
+            rsv.connect(exu.exec_meta)      # a busy unit stalls the station
 
     # --- mispredict -------------------------------------------------------------
     def on_mis_pred(self, last_valid_spec_tag_dyn, rob_des_idx_dyn,
