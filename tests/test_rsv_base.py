@@ -63,7 +63,10 @@ def _drive(cfg, spec, unit_cls=OldestFirst):
             with zif(self.disp_en):
                 st.write_entry(self.disp_idx, self.dispatch[0])
             st.build_issue(self.issue_en)
-            st.on_bypass(RsvBypass(X, self.bp_valid, self.bp_idx, self.bp_data))
+            # the CALLER's scope gates a broadcast now — RsvBypass
+            # carries no valid bit of its own
+            with zif(self.bp_valid):
+                st.on_bypass(RsvBypass(X, self.bp_idx, self.bp_data))
             st.on_suc_pred(self.tag)
             st.on_mis_pred(self.tag)
 
@@ -94,7 +97,7 @@ def test_only_an_arch_source_is_something_to_wait_for():
 
     assert [a.name for a in st.atm_operands]  == ["src_1", "src_2", "src_3",
                                                   "dest_1"]
-    assert [a.name for a in st.wake_operands] == ["src_1", "src_2"]
+    assert [a.name for a in st.has_src_arch_operands] == ["src_1", "src_2"]
 
 
 def test_the_base_refuses_to_guess_the_issue_policy():

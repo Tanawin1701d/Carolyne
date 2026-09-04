@@ -7,7 +7,7 @@
 
 import pytest
 from kathryn import (Module, PipCon, build_flow, flow, gen_flow, init, reset,
-                     set_top, wire)
+                     set_top, wire, zif)
 
 from carolyne.isa.riscv import Rv32i
 from carolyne.uarch.o3.config import CPUO3_Config, RsvSpec, RsvType
@@ -54,7 +54,10 @@ def _drive(station_cls, spec, rsv_idx=0, fe_lanes=2):
             # the resolve is its own event now — it overrides the issued
             # slot at PRI_SUC_PRED instead of riding into on_issue
             st.on_suc_pred(self.suc_tag)
-            st.on_bypass(RsvBypass(X, self.bp_valid, self.bp_idx, self.bp_data))
+            # the CALLER's scope gates a broadcast now — RsvBypass
+            # carries no valid bit of its own
+            with zif(self.bp_valid):
+                st.on_bypass(RsvBypass(X, self.bp_idx, self.bp_data))
             st.on_mis_pred(self.fix_tag)
 
     host = Host()

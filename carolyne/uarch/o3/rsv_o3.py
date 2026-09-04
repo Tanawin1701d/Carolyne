@@ -256,6 +256,6 @@ class RsvO3(RsvBase):
             return view.fields["entry_ready"], view.fields["entry_oh"]
 
         ready = view.fields["valid"]
-        for atm_operand in self.wake_operands:
+        for atm_operand in self.has_src_arch_operands:
             ready = ready & view.fields[field_name(VALID, atm_operand)]
         return ready, val(self.size, 1 << view.indices[0])

@@ -192,9 +192,7 @@ class ExecUnitO3(Module):
         pr_idx = to_ref(getattr(src[0], field_name(PR_IDX, atm_opr)))
         self._core.reg_arch_mng.prf(atm_opr.reg_file).on_wb(pr_idx, value)
 
-        wb_live  = wire(1, f"{self.label}_wb_live_s{stage_idx}_{atm_opr.name}")
-        wb_live *= val(1, 1)
-        bypass = RsvBypass(atm_opr.reg_file, wb_live, pr_idx, value)
+        bypass = RsvBypass(atm_opr.reg_file, pr_idx, value)
         for rsv in self._core.rsvs:
             rsv.on_bypass(bypass)
 

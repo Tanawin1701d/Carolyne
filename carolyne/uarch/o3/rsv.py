@@ -37,9 +37,12 @@ from carolyne.uarch.o3.rsv_helper import (build_rsv_slot, build_rsv_table,
 class RsvBypass:
     """One writeback broadcast: a physical register of `reg_file` now holds a
     value. Per class, because each renamed class has its own PRF and its own
-    index space — a station only wakes the sources that name that class."""
+    index space — a station only wakes the sources that name that class.
+
+    NO valid bit: `on_bypass` builds its writes in the scope wb_reg was
+    called from, so the caller's own zif already gates them. A bit here
+    would say a second time what the enclosing scope says."""
     reg_file : RegFile
-    valid    : object       # 1-bit signal: this broadcast is live
     pr_idx   : object       # which physical register was written
     data     : object       # the value it now holds
 
@@ -89,11 +92,12 @@ class RsvBase(Module):
         # The atomic operands this station's entries carry, and the subset a
         # writeback can wake: an arch source is the only one with a valid_ bit
         # and a physical index.
-        self.atm_operands  = station_atm_operands(self.config.isa, self.rsv_spec)
-        self.wake_operands = tuple(a for a in self.atm_operands
-                                   if a.is_src and a.has_arch)
-        self.entry_fields  = rsv_field_names(self.config, self.rsv_spec)
-        self._lane_targets_me = None    # built on the first lanes_for_me call
+        self.atm_operands          = station_atm_operands(self.config.isa,
+                                                          self.rsv_spec)
+        self.has_src_arch_operands = tuple(a for a in self.atm_operands
+                                           if a.is_src and a.has_arch)
+        self.entry_fields          = rsv_field_names(self.config, self.rsv_spec)
+        self._lane_targets_me      = None   # built on the first lanes_for_me
 
         # free_slots' aggregate answer: every lane aimed here can land — the
         # station's own contribution to the dispatch go/stall bit.
@@ -103,7 +107,7 @@ class RsvBase(Module):
     def slot_ready(self, row):
         """This entry is occupied and every source it waits on has landed."""
         ready = to_ref(row.valid)
-        for atm_operand in self.wake_operands:
+        for atm_operand in self.has_src_arch_operands:
             ready = ready & to_ref(getattr(row, field_name(VALID, atm_operand)))
         return ready
 
@@ -269,7 +273,7 @@ class RsvBase(Module):
         captures the value and becomes ready."""
         for row_idx in self.all_row_idxs():
             row = self.table[row_idx]
-            for atm_operand in self.wake_operands:
+            for atm_operand in self.has_src_arch_operands:
                 valid_f  = field_name(VALID,  atm_operand)
                 pr_idx_f = field_name(PR_IDX, atm_operand)
                 for bypass in bypasses:
@@ -279,7 +283,6 @@ class RsvBase(Module):
                         continue
                     hit = (to_ref(row.valid)
                            & ~to_ref(getattr(row, valid_f))
-                           & bypass.valid
                            & (to_ref(getattr(row, pr_idx_f)) == bypass.pr_idx))
                     with zif(hit):
                         self.table[row_idx] |= {
