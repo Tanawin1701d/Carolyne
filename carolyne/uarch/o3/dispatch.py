@@ -91,6 +91,8 @@ class Dispatch(Module):
         # beside a resolve (tag_gen's pre-resolve pool read would go stale)
         self.dispatch_meta.stall()
 
+        # no need to override the spectag and is_spec because I is stalled already
+
 
     # warm system means wire connect / no update register typically used for protocol handshake and give promiss data
 

@@ -50,7 +50,10 @@ def _drive(station_cls, spec, rsv_idx=0, fe_lanes=2):
         def run(self):
             st = self.station
             st.on_dispatch(self.dispatch)
-            st.build_issue(self.exec_arb, self.suc_tag)
+            st.build_issue(self.exec_arb)
+            # the resolve is its own event now — it overrides the issued
+            # slot at PRI_SUC_PRED instead of riding into on_issue
+            st.on_suc_pred(self.suc_tag)
             st.on_bypass(RsvBypass(X, self.bp_valid, self.bp_idx, self.bp_data))
             st.on_mis_pred(self.fix_tag)
 

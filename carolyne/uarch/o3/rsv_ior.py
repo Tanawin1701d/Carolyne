@@ -31,7 +31,6 @@ from carolyne.util import is_power_of_two
 from carolyne.uarch.o3.config import CPUO3_Config, RsvSpec
 from carolyne.uarch.o3.priority import PRI_MIS_PRED, PRI_RENAME
 from carolyne.uarch.o3.rsv import RsvBase
-from carolyne.uarch.o3.rsv_helper import rsv_entry_shape
 
 
 class RsvIOR(RsvBase):
@@ -84,9 +83,6 @@ class RsvIOR(RsvBase):
 
         # The head's record on a wire row, and whether it can go — the same
         # materialised slot RsvO3 folds its winner onto.
-        entry_cls, fields = rsv_entry_shape(self.config, self.rsv_spec)
-        self.issue_row   = entry_cls(HwComponentType.WIRE, (1,),
-                                     f"{self.label}_issue_row", **fields)
         self.issue_ready = wire(1, f"{self.label}_issue_ready")
 
         # Where each write port lands. Built on the first free_slots call, like
@@ -160,7 +156,7 @@ class RsvIOR(RsvBase):
             self.alloc_ptr |= self.alloc_ptr + sum_cnt(accepted)
 
     # --- issue ------------------------------------------------------------------
-    def build_issue(self, exec_meta, suc_tag=None):
+    def build_issue(self, exec_meta):
         """The head issues when its sources have landed and the unit will take
         it. Nothing younger may overtake — that is the whole difference from
         RsvO3, and it is why this needs no comparison tree, only a pointer.
@@ -172,12 +168,13 @@ class RsvIOR(RsvBase):
         cleared it into a unit that never took it.
         """
         head = self.head_ptr
-        self.issue_row[0] *= self.table[head]
-        self.issue_ready  *= self.slot_ready(self.issue_row[0])
+        self.pre_issue [0] *= self.table[head]
+        self.issue_lane[0] *= self.pre_issue[0]
+        self.issue_ready  *= self.slot_ready(self.pre_issue[0])
 
         with pip(self.issue_meta, auto_req=True, auto_restart=True):
             with zync((exec_meta, self.issue_ready)):
-                self.on_issue(head, self.issue_row[0], suc_tag)
+                self.on_issue(head, self.issue_lane[0])
                 self.head_ptr |= head + 1
 
     # --- squash -----------------------------------------------------------------

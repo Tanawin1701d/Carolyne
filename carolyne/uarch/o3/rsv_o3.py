@@ -24,7 +24,7 @@
 #
 # The winner is chosen by a Karray REDUCE read: one fold over the table carries
 # the whole record, so the comparison tree is built once and the winning row
-# lands on `issue_row` — the wire slot the issue block reads. Its `zync` on the
+# lands on `pre_issue` — the wire slot the issue block reads. Its `zync` on the
 # execution unit's arbiter is what makes a busy unit stall the station instead
 # of dropping the entry.
 
@@ -37,7 +37,6 @@ from carolyne.uarch.o3.config import CPUO3_Config, RsvSpec
 from carolyne.uarch.o3.priority import PRI_RENAME, PRI_TRACK_ROLL
 from carolyne.uarch.o3.operand_field import VALID, field_name
 from carolyne.uarch.o3.rsv import RsvBase
-from carolyne.uarch.o3.rsv_helper import rsv_entry_shape
 
 
 class RsvO3(RsvBase):
@@ -69,9 +68,6 @@ class RsvO3(RsvBase):
         # The winning entry: its whole record on a wire row (what the issue
         # block reads and hands to the FU), plus which row it came from and
         # whether it was ready at all.
-        entry_cls, fields = rsv_entry_shape(self.config, self.rsv_spec)
-        self.issue_row   = entry_cls(HwComponentType.WIRE, (1,),
-                                     f"{self.label}_issue_row", **fields)
         self.issue_oh    = wire(self.size, f"{self.label}_issue_oh")
         self.issue_ready = wire(1, f"{self.label}_issue_ready")
 
@@ -206,23 +202,24 @@ class RsvO3(RsvBase):
                 self.table[row_idx] |= {"is_lower_track": 1}
 
     # --- issue ------------------------------------------------------------------
-    def build_issue(self, exec_meta, suc_tag=None):
+    def build_issue(self, exec_meta):
         """The oldest ready entry issues, when the execution unit will take it.
 
         ONE reduce read does the choosing: the fold carries the whole record,
         so the comparison tree is built once and the winner's row lands on
-        `issue_row`. `zync` then contends for the unit — a busy unit leaves the
+        `pre_issue`. `zync` then contends for the unit — a busy unit leaves the
         entry in the table instead of losing it, which is the difference from
         writing the issue as a plain `zif`.
         """
         self._root = None
-        self.issue_row[0] *= self.table[self._select_oldest]
+        self.pre_issue[0] *= self.table[self._select_oldest]
+        self.issue_lane[0] *= self.pre_issue[0]
         self.issue_oh     *= self._root["oh"]
-        self.issue_ready  *= self.slot_ready(self.issue_row[0])
+        self.issue_ready  *= self.slot_ready(self.pre_issue[0])
 
         with pip(self.issue_meta, auto_req=True, auto_restart=True):
             with zync((exec_meta, self.issue_ready)):
-                self.on_issue(OH(self.issue_oh), self.issue_row[0], suc_tag)
+                self.on_issue(OH(self.issue_oh), self.issue_lane[0])
 
     def _select_oldest(self, lhs, rhs, level):
         """One node of the reduce fold: which of two subtrees issues first.

@@ -26,9 +26,11 @@ from kathryn.signal import to_ref
 from carolyne.isa import RegFile
 from carolyne.uarch.o3.config import CPUO3_Config, RsvSpec
 from carolyne.uarch.o3.operand_field import DATA, PR_IDX, VALID, field_name
-from carolyne.uarch.o3.priority import PRI_MIS_PRED, PRI_RENAME
+from carolyne.uarch.o3.priority import (PRI_ISSUE, PRI_MIS_PRED,
+                                        PRI_RENAME, PRI_SUC_PRED)
 from carolyne.uarch.o3.rsv_helper import (build_rsv_slot, build_rsv_table,
-                                          rsv_field_names, station_atm_operands)
+                                          rsv_entry_shape, rsv_field_names,
+                                          station_atm_operands)
 
 
 @dataclass(frozen=True, eq=False)
@@ -72,6 +74,17 @@ class RsvBase(Module):
         # The issue block's own arbiter: always requesting, restarted by a
         # flush, so build_issue runs as a pip instead of an eternal cwhile.
         self.issue_meta = PipCon(name=f"{self.label}_issue")
+
+        # The entry AS IT WILL LAND: a subclass drives `pre_issue` with its
+        # chosen row, this lane copies it, and a prediction resolving in the
+        # SAME cycle overrides the speculation pair here — combinationally,
+        # before the clocked copy into `exec_src`, so nothing has to race a
+        # register that has not been written yet.
+        entry_cls, fields = rsv_entry_shape(self.config, self.rsv_spec)
+        self.pre_issue    = entry_cls(HwComponentType.WIRE, (1,),
+                                      f"{self.label}_pre_issue", **fields)
+        self.issue_lane   = entry_cls(HwComponentType.WIRE, (1,),
+                                      f"{self.label}_issue_lane", **fields)
 
         # The atomic operands this station's entries carry, and the subset a
         # writeback can wake: an arch source is the only one with a valid_ bit
@@ -195,23 +208,24 @@ class RsvBase(Module):
             f"{type(self).__name__}.on_dispatch: where each lane lands is the "
             f"station's own policy")
 
-    def on_issue(self, idx, src_row, suc_tag=None):
+    def on_issue(self, idx, src_row):
         """One entry leaves for the FU: its contents land in `exec_src` and the
         row frees. `idx` is a plain signal or an OH(...) one-hot — a Karray
         index takes either.
 
-        `suc_tag` is the tag resolving THIS cycle: the entry on its way out
-        stops speculating under it, which is the issued-slot half of
-        `on_suc_pred`. Substituted into the copy rather than written over it,
-        so the two do not race at equal priority.
+        The speculation pair rides in the row, so the copy carries it as it
+        stands — `issue_lane` has already had a tag resolving THIS cycle
+        masked out of it, which is `on_suc_pred`'s business, not this one's.
+
+        At PRI_ISSUE, not plain: a complex masks the tag out of `exec_src`
+        from the register's PREVIOUS contents, so an equal-priority copy
+        could lose to it and a freshly issued entry would take the old
+        entry's tag. The row write rides the same rung, and both still lose
+        to the dispatch that may claim the freed row this cycle.
         """
-        if suc_tag is None:
+        with priority(PRI_ISSUE):
             self.exec_src[0] |= src_row
-        else:
-            left = to_ref(src_row.spec_tag) & ~suc_tag
-            self.exec_src[0] |= self.read_row_fields(src_row, spec_tag=left,
-                                                     is_spec=left != 0)
-        self.table[idx] |= {"valid": 0}
+            self.table[idx]  |= {"valid": 0}
 
     def on_mis_pred(self, fix_tag):
         """A prediction was wrong: every entry speculating under a killed tag
@@ -225,14 +239,30 @@ class RsvBase(Module):
 
     def on_suc_pred(self, suc_tag):
         """A prediction resolved correctly: its tag stops covering anything.
-        An entry stays speculative while any OTHER tag it carries is still
-        open, which is what the mask-out says."""
+
+        - an entry stays speculative while any OTHER tag it carries is still
+          open, which is what the mask-out says
+        - the entry ISSUING this cycle is masked too, on `issue_lane` rather
+          than on `exec_src`: the register is written at the edge, so only
+          the wire carries the value that is actually landing
+        """
         for row_idx in self.all_row_idxs():
             row  = self.table[row_idx]
             left = to_ref(row.spec_tag) & ~suc_tag
             with zif(to_ref(row.valid) & to_ref(row.is_spec)):
                 self.table[row_idx] |= {"spec_tag": left,
                                         "is_spec" : left != 0}
+
+        # The entry issuing THIS cycle is still only a wire — `exec_src` holds
+        # the PREVIOUS one and is written at the edge — so this lands on
+        # `issue_lane`, reading the candidate `pre_issue`, above the plain
+        # whole-row copy that drives it. A tag is ONE-HOT (tag_gen), so an
+        # entry sits under exactly one and `==` is the whole test; there is
+        # no residue to leave behind, which is why the write is a flat 0.
+        cand = self.pre_issue[0]
+        with priority(PRI_SUC_PRED):
+            with zif(cand.is_spec & (cand.spec_tag == suc_tag)):
+                self.issue_lane[0] *= {"spec_tag": 0, "is_spec": 0}
 
     def on_bypass(self, *bypasses: RsvBypass):
         """Writeback broadcasts: a waiting source whose physical index matches

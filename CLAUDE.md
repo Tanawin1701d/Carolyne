@@ -686,9 +686,13 @@ for; `wake_operands` is that subset, computed once at declaration. `on_bypass`
 takes `RsvBypass(reg_file, valid, pr_idx, data)` records and only wakes sources
 naming the SAME class — two PRFs number their entries independently, so a bare
 index would cross-wake. `on_suc_pred` masks the resolved tag out
-(`spec_tag &= ~suc_tag`, `is_spec = spec_tag != 0`) rather than comparing
-equal, because an entry may sit under several open speculations — the same
-idiom `Rt`/`Mpft` already use. Decision: **no new priority rungs**. The C++
+(`spec_tag &= ~suc_tag`, `is_spec = spec_tag != 0`). CORRECTION (2026-09-04,
+Tanawin): the reason recorded here was WRONG — it said an entry may sit under
+several open speculations, but a TAG IS ONE-HOT (`tag_gen`: `next_tag` resets
+to 1 and rotates), and dispatch stores that tag unmodified, so an rsv entry
+sits under exactly ONE. The mask is therefore equivalent to `== suc_tag`, not
+more general than it; `Mpft` rows really do hold multi-tag masks (`on_rename`
+ORs them), which is where the idiom belongs. Decision: **no new priority rungs**. The C++
 ladder (mispredict > writeEntry > the rest) maps exactly onto the engine-wide
 one: a dispatched entry is written at `PRI_RENAME`, since dispatch and rename
 are one instant, and a squash is `PRI_MIS_PRED`. Issue, bypass and a resolved
@@ -837,6 +841,23 @@ field to "the bus, the station, or the machine fills this". It restated in
 Python what k2k already does in the arena, and it put a list of `RsvO3Entry`'s
 field names on `RsvBase`. Don't restore it from git — `rsv.py` is shape-blind
 on purpose.
+
+Decision (2026-09-04, Tanawin): **issue no longer manages `suc_tag`** —
+`on_issue(idx, src_row)` is one plain whole-row copy, and the
+same-cycle resolve is handled by a THREE-STEP WIRE CHAIN the base owns:
+`pre_issue` (the subclass drives its selected row) -> `issue_lane`
+(copied from it plainly) -> `exec_src` (the clocked copy in on_issue).
+`on_suc_pred` masks the pair on `issue_lane`, reading `pre_issue`, at a
+new **`PRI_SUC_PRED`** rung (`DEFAULT_UE_PRI_USER + 2`, above the copy,
+below the squash). Reading `exec_src` there was WRONG and briefly
+shipped: it is a register holding the PREVIOUS entry, so both the guard
+and the masked value would have come from a row that is not the one
+landing. Masking combinationally between the selection and the register
+means nothing races a register that has not been written yet, and
+`exec_src` keeps exactly one writer. `pre_issue` (renamed from
+`issue_row`) and `issue_lane` are declared in `RsvBase` — a base may not
+reach for a subclass attribute, which the minimal test station proved.
+`build_issue` lost its `suc_tag` parameter in both subclasses.
 
 Shared additions on `RsvBase`: `rsv_idx` + `try_write_entry(target_idx, ...)`
 (the C++ `RSV_IDX` / `tryWriteEntry`, for a dispatch bus that names one

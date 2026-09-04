@@ -44,6 +44,20 @@ PRI_DECODE_DEFAULT = DEFAULT_UE_PRI_USER - 1
 # dispatch writes in the same cycle — that entry belongs to the NEW epoch.
 PRI_TRACK_ROLL = DEFAULT_UE_PRI_USER + 1
 
+# A prediction turns out RIGHT: its tag stops covering anything, and the entry
+# issuing in that very cycle must stop too. Above user, because the issue copy
+# into `exec_src` runs plain and this has to override the tag it just carried
+# in; below the squash, which discards that entry outright.
+PRI_SUC_PRED = DEFAULT_UE_PRI_USER + 2
+
+# An entry ISSUES: it lands in `exec_src` and its row frees. Above user,
+# because a complex masking the tag out of `exec_src` runs plain and reads the
+# register's PREVIOUS contents — the issue copy already carries the masked
+# value (`issue_lane`), so it has to win. Shares the rung with PRI_TRACK_ROLL,
+# which touches a different field of a different component; both must LOSE to
+# the dispatch write that may claim the freed row in the same cycle.
+PRI_ISSUE = DEFAULT_UE_PRI_USER + 1
+
 # A mapping retires: the physical register goes back to the free pool, so every
 # structure still naming it has to stop.
 PRI_COMMIT   = DEFAULT_UE_PRI_USER + 3

@@ -50,7 +50,10 @@ def _drive(station_cls, spec, rsv_idx=0, fe_lanes=2):
         def run(self):
             st = self.station
             st.on_dispatch(self.dispatch)
-            st.build_issue(self.exec_arb, self.suc_tag)
+            st.build_issue(self.exec_arb)
+            # the resolve is its own event now — it overrides the issued
+            # slot at PRI_SUC_PRED instead of riding into on_issue
+            st.on_suc_pred(self.suc_tag)
             st.on_bypass(RsvBypass(X, self.bp_valid, self.bp_idx, self.bp_data))
             st.on_mis_pred(self.fix_tag)
 
@@ -126,7 +129,7 @@ def test_an_o3_station_keeps_its_own_age_counter():
     assert st.track_width == 2                  # ceil_log2(4 entries)
     assert st.track_ptr is not None
     # The winner lands on a wire row, with the one-hot of where it came from.
-    assert st.issue_row is not None and st.issue_oh is not None
+    assert st.pre_issue is not None and st.issue_oh is not None
 
 
 def test_the_epoch_rung_has_to_lose_to_a_dispatch():
