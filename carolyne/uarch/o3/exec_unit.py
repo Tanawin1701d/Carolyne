@@ -252,6 +252,20 @@ class ExecUnitO3(Module):
             self.stage_srcs.append(src)
 
     # --- mispredict ---------------------------------------------------------------
+    def _require_stage_record(self, records, stage_idx, where):
+        """Stage `stage_idx` has a record to act on, or refuse.
+
+        Skipping would not merely miss a cycle: the mask / kill hardware
+        for that stage would never be BUILT, so the stage would speculate
+        under a tag nothing can clear. Call these after transfer.
+        """
+        if stage_idx >= len(records):
+            raise ValueError(
+                f"ExecUnitO3 '{self.label}'.{where}: stage {stage_idx} has "
+                f"no record yet ({len(records)} built) - the stage chain is "
+                f"transfer's to build, and acting before it would leave that "
+                f"stage with no hardware to clear its tag")
+
     def on_mis_pred(self, fix_tag):
         """Kill every in-flight µop speculating under a killed tag, per stage.
 
@@ -276,12 +290,10 @@ class ExecUnitO3(Module):
                 src      = self.rsv.exec_src[0]
                 squashed = self.rsv.entry_squashed(src, fix_tag)
             else:
-                if not hasattr(self, "stage_srcs"):
-                    raise ValueError(
-                        f"ExecUnitO3 '{self.label}': on_mis_pred before "
-                        f"transfer — stage {stage_idx}'s record does not "
-                        f"exist until the stage chain is built")
-                src      = self.stage_srcs[stage_idx][0]
+                records  = getattr(self, "stage_srcs", ())
+                self._require_stage_record(records, stage_idx,
+                                           "on_mis_pred")
+                src      = records[stage_idx][0]
                 squashed = (to_ref(getattr(src, IS_SPEC))
                             & ((to_ref(getattr(src, SPEC_TAG)) & fix_tag)
                                != 0))
@@ -289,31 +301,35 @@ class ExecUnitO3(Module):
                 stage_meta.flush()
 
     def on_suc_pred(self, suc_tag):
-        """A prediction resolved correctly: every stage's record stops
-        speculating under the resolved tag, the RsvBase mask-out idiom.
+        """A prediction resolved correctly: every stage record stops
+        speculating under the resolved tag.
 
-        - stage 0's record is the station's exec_src; later stages carry
+        - `suc_tag` is ONE-HOT (tag_gen), so an entry sits under it or
+          it does not: the test is `is_spec & spec_tag == suc_tag` and
+          the write is a flat 0. NOT on_mis_pred's shape, where
+          `fix_tag` is a multi-tag kill MASK needing the overlap test
+        - stage 0 is the station's exec_src; later stages carry
           IS_SPEC/SPEC_TAG on the body's records (the api's transfer)
-        - call AFTER transfer for a multi-stage unit — the stage records
-          only exist once the chain is built
-        - the complex that DECLARED the resolve returns immediately, the
-          on_mis_pred symmetry — the declaring branch's own records stay
-          untouched
-        - LIMIT: a record hopping stages in the resolve cycle copies its
-          tag BEFORE the mask lands (the race on_issue solves with
-          substitution) — the api's transfer learns the same substitution
+        - the complex that DECLARED the resolve returns immediately,
+          the on_mis_pred symmetry
+        - LIMIT: a record hopping stages in the resolve cycle copies
+          its tag BEFORE the mask lands — the race on_issue solves
+          with substitution; the api's transfer learns the same
+        - REFUSES if a later stage's record is not built yet: stage 0 is
+          always safe (the station owns exec_src), but the rest need this
+          complex's transfer to have run first, and skipping them would
+          leave those stages with no tag-clearing hardware at all
         """
         if self._declared_suc_pred:
             return
+        records = getattr(self, "stage_srcs", ())
         for stage_idx in range(self.exec_unit.stage_cnt):
             if stage_idx == 0:
                 src = self.rsv.exec_src[0]
             else:
-                if not hasattr(self, "stage_srcs"):
-                    raise ValueError(
-                        f"ExecUnitO3 '{self.label}': on_suc_pred before "
-                        f"transfer — stage {stage_idx}'s record does not "
-                        f"exist until the stage chain is built")
-                src = self.stage_srcs[stage_idx][0]
-            left = to_ref(getattr(src, SPEC_TAG)) & ~suc_tag
-            src |= {SPEC_TAG: left, IS_SPEC: left != 0}
+                self._require_stage_record(records, stage_idx,
+                                           "on_suc_pred")
+                src = records[stage_idx][0]
+            with zif(getattr(src, IS_SPEC)
+                     & (getattr(src, SPEC_TAG) == suc_tag)):
+                src |= {SPEC_TAG: 0, IS_SPEC: 0}

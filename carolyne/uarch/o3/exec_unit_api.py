@@ -16,13 +16,14 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 
-from kathryn import PipCon, kaf, zync
+from kathryn import PipCon, kaf, priority, zync
 from kathryn.signal import to_ref
 
 from carolyne.isa import AtomicOperand, ExecUnitApi
 from carolyne.uarch.o3.common_field import (IS_SPEC, ROB_DES_IDX, SPEC_TAG,
                                             UOP_IDX)
 from carolyne.uarch.o3.operand_field import PR_IDX, field_name
+from carolyne.uarch.o3.priority import PRI_ISSUE
 
 
 class ExecUnitApiO3(ExecUnitApi):
@@ -70,9 +71,14 @@ class ExecUnitApiO3(ExecUnitApi):
                 f"declare_fin/wb_reg's business")
         bind = self.pip_con if cond is None else (self.pip_con, cond)
         with zync(bind):
-            des[0] |= {name: to_ref(getattr(src[0], name))
-                       for name in self._carried}
-            yield
+            # At PRI_ISSUE, and the body's writes with it: a record LANDING in
+            # a stage must beat on_suc_pred's mask, which is computed from
+            # that stage record's PREVIOUS contents. Same rung, same reason,
+            # as the station's copy into exec_src.
+            with priority(PRI_ISSUE):
+                des[0] |= {name: to_ref(getattr(src[0], name))
+                           for name in self._carried}
+                yield
 
     def next_stage_fields(self, src, *dest_oprs: AtomicOperand) -> dict:
         """The machine's fields for the body's next-stage record — the
