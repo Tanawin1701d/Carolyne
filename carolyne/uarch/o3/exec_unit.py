@@ -27,10 +27,12 @@
 from kathryn import *
 from kathryn.signal import to_ref
 
-from carolyne.uarch.o3.common_field import IS_SPEC, ROB_DES_IDX, SPEC_TAG
+from carolyne.uarch.o3.common_field import (IS_SPEC, ROB_DES_IDX,
+                                            SPEC_TAG, SpecLane)
 from carolyne.uarch.o3.config import CPUO3_Config, RsvSpec, rsv_type_fields
 from carolyne.uarch.o3.exec_unit_api import ExecUnitApiO3
 from carolyne.uarch.o3.operand_field import PR_IDX, field_name
+from carolyne.uarch.o3.priority import PRI_SUC_PRED
 from carolyne.uarch.o3.rsv import RsvBase, RsvBypass
 
 
@@ -113,6 +115,16 @@ class ExecUnitO3(Module):
         self.stage_metas = [self.exec_meta] + [
             PipCon(name=f"{self.label}_s{stage_idx}")
             for stage_idx in range(1, self.exec_unit.stage_cnt)]
+
+        # One per stage TRANSITION: the speculation pair as it will land in
+        # the next stage, and the place on_suc_pred OVERRIDES it. The api
+        # drives it from `src`; a tag resolving in that cycle is masked here,
+        # BEFORE the clocked copy — src's own register only clears at the
+        # edge, so a copy straight off it would carry a resolved tag.
+        self.spec_overriders = [
+            SpecLane(HwComponentType.WIRE, (1,), f"{self.label}_spec_ovr{stage_idx}",
+                     spec_tag=self.config.sptag_len)
+            for stage_idx in range(self.exec_unit.stage_cnt - 1)]
 
 
     def connect(self, core):
@@ -318,6 +330,15 @@ class ExecUnitO3(Module):
         """
         if self._declared_suc_pred:
             return
+        # the pair moving to the next stage this cycle: masked on the
+        # spec_overrider, since the record it lands in is written at the edge
+        for spec_ovr in self.spec_overriders:
+            spec_ovr_row = spec_ovr[0]
+            with priority(PRI_SUC_PRED):
+                with zif(spec_ovr_row.is_spec
+                         & (spec_ovr_row.spec_tag == suc_tag)):
+                    spec_ovr[0] *= {IS_SPEC: 0, SPEC_TAG: 0}
+
         records = getattr(self, "stage_srcs", ())
         for stage_idx in range(self.exec_unit.stage_cnt):
             if stage_idx == 0:

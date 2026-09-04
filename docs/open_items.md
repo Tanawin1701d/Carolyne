@@ -46,11 +46,6 @@ here; a decision already made and recorded goes in CLAUDE.md §4, not here.
       *Closes when:* either a misalignment detect that traps (blocked on trap
       policy), or a two-word read + concatenate for spanning accesses.
 
-- [ ] **A store pushed in the cycle its tag resolves keeps the stale tag.**
-      Same family as the stage-hop race below; `RsvBase.on_issue` solves its
-      version by substituting into the copy.
-      *Where:* `uarch/o3/exec_unit.py` (`lsq_push_store`).
-
 ## Speculation
 
 - [ ] **Mpft booking is unwired.** `Mpft.on_rename` needs the current
@@ -69,16 +64,3 @@ here; a decision already made and recorded goes in CLAUDE.md §4, not here.
       (`declare_mis_pred`, which passes `dest_renames` empty because a station
       record carries no per-dest active bit).
       *Closes when:* the record carries that bit, or a per-tag snapshot exists.
-
-- [ ] **A record hopping stages in the resolve cycle copies its tag before the
-      mask lands.**
-      *Where:* `uarch/o3/exec_unit_api.py` (`zync_with_next_stage`).
-      *Closes when:* the transfer learns the same substitution `on_issue` uses.
-
-## Back end
-
-- [ ] **Nothing calls `build_issue`.** The stations' issue blocks are built,
-      and each complex's `exec_meta` is the arb they would zync against, but
-      no caller connects the two — so no entry ever issues into an execution
-      unit.
-      *Where:* `uarch/o3/core.py`, `uarch/o3/rsv_o3.py` / `rsv_ior.py`.

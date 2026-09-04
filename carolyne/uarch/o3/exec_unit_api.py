@@ -76,8 +76,19 @@ class ExecUnitApiO3(ExecUnitApi):
             # that stage record's PREVIOUS contents. Same rung, same reason,
             # as the station's copy into exec_src.
             with priority(PRI_ISSUE):
-                des[0] |= {name: to_ref(getattr(src[0], name))
-                           for name in self._carried}
+                # The speculation pair goes through the complex's
+                # spec_overrider: on_suc_pred masks it there, so a tag
+                # resolving in this cycle never reaches `des`. Everything
+                # else copies straight across — only the pair can go stale.
+                spec_ovr = self.exu.spec_overriders[self.stage_idx][0]
+                spec_ovr *= {IS_SPEC : to_ref(getattr(src[0], IS_SPEC)),
+                             SPEC_TAG: to_ref(getattr(src[0], SPEC_TAG))}
+
+                des[0] |= {
+                    name: to_ref(getattr(
+                        self.exu.spec_overriders[self.stage_idx][0]
+                        if name in (IS_SPEC, SPEC_TAG) else src[0], name))
+                    for name in self._carried}
                 yield
 
     def next_stage_fields(self, src, *dest_oprs: AtomicOperand) -> dict:

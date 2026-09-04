@@ -40,10 +40,11 @@
 from kathryn        import *
 from kathryn.signal import to_ref
 
-from carolyne.uarch.common      import ceil_log2
-from carolyne.uarch.o3.config   import CPUO3_Config
-from carolyne.uarch.o3.easy_mem import EasyMem
-from carolyne.uarch.o3.priority import PRI_MIS_PRED
+from carolyne.uarch.common          import ceil_log2
+from carolyne.uarch.o3.common_field import SpecLane
+from carolyne.uarch.o3.config       import CPUO3_Config
+from carolyne.uarch.o3.easy_mem     import EasyMem
+from carolyne.uarch.o3.priority     import PRI_MIS_PRED, PRI_SUC_PRED
 
 
 class StBufEntry(Karray):
@@ -85,6 +86,14 @@ class StoreBuf(Module):
                                 data     = self.data_mem.data_width)
         self.table.reset(busy=0, complete=0, is_spec=0)
 
+        # The speculation pair of the store landing THIS cycle, and the place
+        # on_suc_pred OVERRIDES it: on_new_entry drives it, the resolve masks
+        # it at PRI_SUC_PRED, and the row write reads it — so a tag resolving
+        # in the same cycle never reaches the table.
+        self.spec_overrider = SpecLane(HwComponentType.WIRE, (1,),
+                                       f"{self.label}_spec_ovr",
+                                       spec_tag=self.config.sptag_len)
+
         self.alloc_ptr = reg(self.ptr_width, f"{self.label}_alloc_ptr")
         self.alloc_ptr.reset(0)
         self.com_ptr = reg(self.ptr_width, f"{self.label}_com_ptr")
@@ -103,12 +112,18 @@ class StoreBuf(Module):
 
         - complete stays 0: only the ROB's retirement (on_commit) sets it
         - the speculation pair is the CALLER's record's — the engine reads
-          it off the stage record (ExecUnitO3.lsq_push_store)
+          it off the stage record (ExecUnitO3.lsq_push_store) — but it goes
+          through `spec_overrider`, so a tag resolving in THIS cycle is masked
+          out of it before the row write reads it. Reading the caller's
+          register directly would store a tag already resolved.
         """
+        self.spec_overrider[0] *= {"is_spec": is_spec, "spec_tag": spec_tag}
+
+        spec_ovr = self.spec_overrider[0]
         self.table[self.alloc_ptr] |= {"busy"    : 1,
                                        "complete": 0,
-                                       "is_spec" : is_spec,
-                                       "spec_tag": spec_tag,
+                                       "is_spec" : to_ref(spec_ovr.is_spec),
+                                       "spec_tag": to_ref(spec_ovr.spec_tag),
                                        "mem_addr": mem_addr,
                                        "data"    : data}
         self.alloc_ptr |= self.alloc_ptr + 1
@@ -212,13 +227,25 @@ class StoreBuf(Module):
                           + sum_cnt(survivors).extend(self.ptr_width)
 
     def on_suc_pred(self, suc_tag):
-        """The resolved tag stops covering anything — the RsvBase mask-out."""
+        """The resolved tag stops covering anything — the RsvBase mask-out.
+
+        The store PUSHED this cycle is masked too, on `spec_overrider` rather
+        than on the table: its row is written at the edge, so the wire is
+        the only place the value it will take can still be changed.
+        """
         for row_idx in range(self.depth):
             row  = self.table[row_idx]
             left = to_ref(row.spec_tag) & ~suc_tag
             with zif(to_ref(row.busy) & to_ref(row.is_spec)):
                 self.table[row_idx] |= {"spec_tag": left,
                                         "is_spec" : left != 0}
+
+        # a tag is ONE-HOT, so an entry sits under it or does not
+        spec_ovr_row = self.spec_overrider[0]
+        with priority(PRI_SUC_PRED):
+            with zif(spec_ovr_row.is_spec
+                     & (spec_ovr_row.spec_tag == suc_tag)):
+                self.spec_overrider[0] *= {"is_spec": 0, "spec_tag": 0}
 
     # --- retire to memory -----------------------------------------------------------
     @flow
