@@ -1218,8 +1218,11 @@ BELOW-user rung, because at EQUAL priority an unconditional write is emitted
 after (and silently beats) every zif write; one rung down, every matched
 branch beats the default and a no-hit level hands a bubble. The earlier flat
 `decode_templates` design and its multi-µop refusal are SUPERSEDED by
-`group_uops_by_level`; `tests/test_decode_templates.py` (untracked) still pins the
-old shape and needs rewriting against `group_uops_by_level`.
+`group_uops_by_level`, and `tests/test_decode_templates.py` was rewritten
+against it (2026-09-05) and TRACKED: it pins the mutual exclusivity that
+justifies the parallel zifs, the no-hit bubble, the declared `uop_idx` cover,
+and — inverted from what it used to assert — that a crack becomes ONE LEVEL
+PER µOP carrying the same guard at each, plus the ruleless-path refusal.
 
 **µop -> station ROUTING** (2026-09-05, Tanawin) — `rsv_id` is no longer
 zero. Two halves, split by who owns the question.
