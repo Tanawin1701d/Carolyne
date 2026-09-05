@@ -42,6 +42,7 @@ from .. import Intermediate
 from ..atomic_operand import AtomicOperand, OperandRole, TargetKind
 from ..operand import FieldRef, Operand
 from . import field_match as FM
+from . import imm as IMM_RULE
 from .reg import ImmTarget, RegFile
 
 SRC, DEST   = OperandRole.SRC, OperandRole.DEST
@@ -73,12 +74,14 @@ OPR_REGS = (OPR_RD, OPR_RS1, OPR_RS2)
 # --- immediate operands -----------------------------------------------------
 # No index: an immediate is not a register of a class. The matcher is the
 # whole rule — which bits of the instruction word carry the value. All six
-# select IMM off the one immediate core.
-OPR_IMM_I     = Operand(AOPR_SRC_2, IMM, matcher=FM.IMM_I)     # addi/loads/jalr: 12-bit
-OPR_IMM_S     = Operand(AOPR_SRC_3, IMM, matcher=FM.IMM_S)     # stores: 12-bit, split field
-OPR_IMM_B     = Operand(AOPR_SRC_3, IMM, matcher=FM.IMM_B)     # branches: low bit implicit 0
-OPR_IMM_U     = Operand(AOPR_SRC_2, IMM, matcher=FM.IMM_U)     # lui/auipc: bits 31..12
-OPR_IMM_J     = Operand(AOPR_SRC_2, IMM, matcher=FM.IMM_J)     # jal: low bit implicit 0
-OPR_IMM_SHAMT = Operand(AOPR_SRC_2, IMM, matcher=FM.SHAMT)     # slli/srli/srai: 5-bit count
+# select IMM off the one immediate core. `imm_extract` (imm.py) is what the
+# matched bits MEAN — placement and sign; shamt states none, since five
+# contiguous zero-extended bits are the one case the default gets right.
+OPR_IMM_I     = Operand(AOPR_SRC_2, IMM, matcher=FM.IMM_I, imm_extract=IMM_RULE.imm_i)  # addi/loads/jalr: 12-bit
+OPR_IMM_S     = Operand(AOPR_SRC_3, IMM, matcher=FM.IMM_S, imm_extract=IMM_RULE.imm_s)  # stores: 12-bit, split field
+OPR_IMM_B     = Operand(AOPR_SRC_3, IMM, matcher=FM.IMM_B, imm_extract=IMM_RULE.imm_b)  # branches: low bit implicit 0
+OPR_IMM_U     = Operand(AOPR_SRC_2, IMM, matcher=FM.IMM_U, imm_extract=IMM_RULE.imm_u)  # lui/auipc: bits 31..12
+OPR_IMM_J     = Operand(AOPR_SRC_2, IMM, matcher=FM.IMM_J, imm_extract=IMM_RULE.imm_j)  # jal: low bit implicit 0
+OPR_IMM_SHAMT = Operand(AOPR_SRC_2, IMM, matcher=FM.SHAMT)                              # slli/srli/srai: 5-bit count
 
 OPR_IMMS = (OPR_IMM_I, OPR_IMM_S, OPR_IMM_B, OPR_IMM_U, OPR_IMM_J, OPR_IMM_SHAMT)

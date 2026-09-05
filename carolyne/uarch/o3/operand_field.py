@@ -126,8 +126,12 @@ def field_width(config      : CPUO3_Config,
         return 1
 
     if kind == DATA:
-        return (atm_operand.reg_file.width if atm_operand.has_arch
-                else atm_operand.intermediate.width)
+        # A core offering BOTH targets holds whichever value the slot turns
+        # out to name, so the field takes the WIDER of the two — sizing it
+        # off the arch class alone would truncate a wider immediate.
+        return max(target.width
+                   for target in (atm_operand.reg_file, atm_operand.intermediate)
+                   if target is not None)
 
     if kind not in _INDEX_KINDS:
         raise ValueError(f"{where}: no such operand field kind '{kind}'")

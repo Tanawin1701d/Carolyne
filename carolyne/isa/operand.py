@@ -31,7 +31,7 @@
 from __future__    import annotations
 
 from dataclasses     import dataclass
-from typing          import Optional, Union
+from typing          import Callable, Optional, Union
 
 from .atomic_operand import AtomicOperand, OperandRole, TargetKind
 from .reg            import Intermediate, RegFile
@@ -59,10 +59,15 @@ IndexRule = Union[int, FieldRef]
 
 @dataclass(frozen=True)
 class Operand:
-    atomic     : AtomicOperand                  # which values are on offer, which direction
-    target_kind: TargetKind                     # WHICH of the core's targets this slot names
-    index      : Optional[IndexRule] = None     # RegFile targets; omitted on a 1-reg class
-    matcher    : Optional[InstrFieldMatch] = None   # position only; an operand tests nothing
+    atomic      : AtomicOperand                      # which values are on offer, which direction
+    target_kind : TargetKind                         # WHICH of the core's targets this slot names
+    index       : Optional[IndexRule]       = None   # RegFile targets; omitted on a 1-reg class
+    matcher     : Optional[InstrFieldMatch] = None   # position only; an operand tests nothing
+    # What the matched bits MEAN: `(word, ImmApi) -> value`, the immediate's
+    # own assembly and sign rule (isa/imm_api.py). Omitted leaves the one
+    # default extract_imm_value handles — a single contiguous segment,
+    # zero-extended.
+    imm_extract: Optional[Callable] = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.atomic, AtomicOperand):
@@ -90,6 +95,23 @@ class Operand:
                     f"Operand index must be an int or FieldRef, got {type(self.index).__name__}")
         elif self.index is not None:
             raise ValueError("Operand on an Intermediate carries no index")
+        if self.imm_extract is not None:
+            # An extraction rule is about the bits an IMMEDIATE reads, so it
+            # needs both a target that carries one and a matcher saying where
+            # those bits sit — without the matcher decode reads the slot as a
+            # linking µtemp and never calls the rule at all.
+            if not callable(self.imm_extract):
+                raise TypeError(
+                    f"Operand imm_extract must be callable (word, ImmApi) -> value, "
+                    f"got {type(self.imm_extract).__name__}")
+            if not self.is_intermediate:
+                raise ValueError(
+                    f"Operand on reg file '{target.name}' carries an imm_extract: "
+                    f"an extraction rule belongs to a slot that names an immediate")
+            if self.matcher is None:
+                raise ValueError(
+                    "Operand carries an imm_extract but no matcher — nothing says "
+                    "which bits of the word the rule reads")
 
     # --- the selection: which of the core's targets this slot names -----------
     @property

@@ -105,6 +105,8 @@ class Decode(Module):
         self.fetch     = None       # the fetch stage's rows, from connect()
         self.next_meta = None       # the consumer's arb, from connect()
 
+        self._imm_wire_cnt = 0      # names the per-extraction immediate wires
+
     # retrieve data you want
     def connect(self, fetcher, dispatcher):
         """Fill the stage's slots from its neighbours: the fetched rows this
@@ -214,6 +216,20 @@ class Decode(Module):
         with priority(PRI_DECODE_DEFAULT):
             decode_entry |= {"valid": 0}
 
+    def build_imm(self, word, operand):
+        """The operand's immediate, landed on a wire of its own width.
+
+        - the rule is the ISA's (`Operand.imm_extract`, isa/imm_api.py); it
+          DRIVES this wire slice by slice, so the width is the selected
+          target's and the bits nothing places read zero
+        - one wire per extraction site: the value is a named net in the
+          waveform, and the record field it feeds is sized independently
+        """
+        out = wire(operand.width,
+                   f"imm_{operand.atomic.name}_{self._imm_wire_cnt}")
+        self._imm_wire_cnt += 1
+        return extract_imm_value(word, operand, out)
+
     def _operand_group(self, word, atm_opr, operand) -> dict:
         """One atomic operand's fields for this µop: filled, zeros elsewhere.
 
@@ -236,7 +252,7 @@ class Decode(Module):
                       and operand.matcher is not None)
             group[field_name(VALID, atm_opr)] = int(is_imm)
             if atm_opr.has_imm:
-                group[field_name(DATA, atm_opr)] = (extract_imm_value(word, operand)
+                group[field_name(DATA, atm_opr)] = (self.build_imm(word, operand)
                                                     if is_imm else 0)
         else:
             # only a DEST_W_REQ core has the field; there the bit is active

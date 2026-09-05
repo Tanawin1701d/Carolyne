@@ -203,6 +203,63 @@ arithmetic (`ceil_log2`, the word readers); a helper moves here only when
 
 Immediates are deliberately NOT an `Operand` target — the µop record carries
 `imm` as its own field (contract §2).
+- **`ImmApi` (`isa/imm_api.py`) + `Operand.imm_extract`** (2026-09-05,
+  Tanawin: "user can define the api like exec_unit_api.py but in this case
+  for imm") — what the matched bits MEAN, beside the matcher that says where
+  they sit. A rule is a callable `(word, ImmApi)` hung on the operand; the
+  engine declares a wire of the SELECTED target's width and the body drives
+  it, so a body declares no hardware and never restates the width.
+  Decision: **a callable, not a placement table**. A per-segment "lands at"
+  field on `InstrFieldMatch` would cover all six RV32I forms and x86's, and
+  keep `isa/` pure data — and it breaks on the first ISA whose immediate is
+  not segments moved around (ARM's `mov r0,#imm` rotates an 8-bit value by a
+  4-bit field), which is exactly the ISA-agnosticism §1 claims. The
+  precedent is `exec_stage`: a package's semantics are code (2026-08-28).
+  Decision (Tanawin, superseding a first shift-and-mask spelling the same
+  day — "I don't want >> lo and << at again it waste logic"): **a body WRITES
+  slices, it does not return a value.** The engine hands it the result wire
+  and `place(word, hi, lo, at)` drives one part-select from another
+  (`out[at+n-1, at] *= word[hi, lo]`) — no shift, no mask, no gates, and the
+  bits nothing places are the wire's own undriven zero, which is what makes
+  a branch target's implicit bit 0 free. Each call drives a DISJOINT slice,
+  so the `|` chain the first version needed is gone and two placements can
+  never contend. `sign_extend(from_bit)` then fills only the bits ABOVE the
+  sign, reading it back off the result.
+  MEASURED on the whole-core elaboration: every shift, xor and subtract left
+  the Decode module — 66 `<<`, 96 `>>`, 44 `^`, 44 `-` down to zero, the
+  module 424 lines shorter.
+  Decision: **the sign fill is a MUX between all-ones and all-zeros**, not
+  `extend()`. Kathryn's `ExtendBit` fills `1'b0` and NEVER replicates
+  (`arena_impl_comb.rs` says so, and is why `gen_mux` exists), and there is
+  no concat, so `{20{sign}}` cannot be spelled at all — a mux on the sign
+  bit is the nearest zero-gate form, collapsing to fan-out in synthesis.
+  Rejected: assigning each top bit individually, which is literally zero
+  nodes of logic but emits ~20 extra assigns at every one of the ~270
+  extraction sites.
+  Decision: the helpers keep an INT FALLBACK — `ImmApi(width)` with no `out`
+  accumulates an int and `value` reads it back — the `extract_field_bits`
+  bargain (slice on a signal, arithmetic on an int, both meaning the same
+  bits). That is what keeps `tests/test_imm.py` verifying RV32I's rules
+  against the spec's own encoders with NO Kathryn and no engine: imm_i and
+  imm_s over their whole 12-bit signed range, imm_b and imm_j over their
+  whole even range.
+  Decision (Tanawin's pick): **the body states its own bit positions**
+  rather than placing the matcher's segments by ordinal — a rule then reads
+  like the manual's table (`place(word, 31, 31, at=12)`) instead of
+  `s[3] << 12`. COST: `IMM_B`'s segments are written in two places and
+  nothing holds them equal. The matcher STAYS regardless — `decode` uses
+  `matcher is not None` to tell an immediate from a linking µtemp.
+  Decision (Tanawin's pick): **refuse rather than guess** — no rule falls
+  back only to a single contiguous zero-extended segment (shamt), and a
+  scrambled field with none RAISES. `Operand` refuses a rule that is not
+  callable, sits on an ARCH selection, or carries no matcher. LIMIT:
+  placement happens in the WORD's width, so an immediate wider than the
+  instruction word needs a widening step the api has not got (RV32I: both
+  32). LIMIT: signedness is not description data, so a single-segment
+  SIGNED immediate with no rule still zero-extends silently — RV32I states
+  imm_i's rule for exactly that reason. `isa/imm_api.py` imports Kathryn
+  (`mux`), on the terms `isa/exec_unit_api.py` already set.
+
 
 - **No `Op` type.** One existed until 2026-08-23 — a frozen `name` and
   nothing else, value-equal, standalone so several units could list it — and
@@ -431,7 +488,8 @@ each tiling the word exactly once — declared but not yet consumed, since a
 `Mop` has no format slot), `uop.py` (`UOP_*` + `UOPS`, plus the `LOADS` /
 `STORES` / `BRANCHES` groups the units build from — it is the whole operation
 vocabulary since `op.py` went on 2026-08-23), `mop.py` (`MOP_*` +
-`MOP_TABLE` → 11 opcode-group `Mop`s, exhaustive over `UOPS`), `rv32i.py`
+`MOP_TABLE` → 11 opcode-group `Mop`s, exhaustive over `UOPS`), `imm.py`
+(the five immediate extraction rules — see the ImmApi entry), `rv32i.py`
 (`Rv32i`, an `IsaBase` **subclass** — exec_unit.py also holds the ALU's
 semantics, `AluUnit`, see the `ExecContext` entry below — supplying every vocabulary as a field
 default — `Rv32i()` is the whole description, and `Rv32i(name=...)` varies one
@@ -468,10 +526,9 @@ mechanism is pinned meanwhile by the x86 shape in `test_uop.py`. Its KNOWN GAPS
 blocks are the real output — bringing up RV32I is what surfaced them, and
 each is contract-side, fixable without touching `uarch`:
 `Uop` has no `imm` (so immediates ride in `srcs`, which contract §2 says they
-should not); and a matcher **discriminates but does
-not extract** — nothing says where each segment of a scrambled immediate lands
-in the assembled value, so a decoder can now pick the instruction and still not
-build its immediate. Three former gaps are closed and *used*: the instruction's
+should not). The matcher's **discriminate-but-not-extract** gap is CLOSED
+(2026-09-05, the ImmApi entry): `imm.py` states all five scrambled/signed
+rules and shamt keeps the default. Three further gaps are closed and *used*: the instruction's
 own PC — which no operand can name, since PC is not a reg file — is read off
 the µop record as `ExecContext.pc()` (2026-08-22; `AluUnit`'s AUIPC uses it,
 the jumps' link value will), `FUNCT3_7 = FUNCT3
@@ -900,7 +957,11 @@ misleading name exactly where it costs most — in the emitted Verilog and the
 waveform — and would make this the one constant here whose name and value
 disagree. `wb_` is already the prefix `RobEntry.wb_fin` established for
 writeback state. A width of ZERO means "nothing
-to store", which is what drops `ar_idx` on a one-register class. `field_name()`
+to store", which is what drops `ar_idx` on a one-register class. `data` on a
+core offering BOTH targets is the **MAX** of the two widths (2026-09-05,
+Tanawin) — the slot holds whichever value it turns out to name, so sizing it
+off the arch class alone would truncate a wider immediate; a no-op for RV32I,
+where both are X_LEN. `field_name()`
 is the single spelling, and the CONSUMERS use it too — `RsvBase.slot_ready` and
 `on_bypass`, `RsvO3._folded`, the ROB's reset — so a record and the logic
 reading it cannot disagree about a name. `require_named` and the µtemp refusal
@@ -1173,9 +1234,12 @@ ints and scrambled fields, because a slice's width is the segment's own
 (shifting one left for placement TRUNCATES — measured) and Kathryn has no
 concat. `extract_arch_index` reads a literal index as the implicit register
 and a FieldRef through the operand's matcher, refusing one without;
-`extract_imm_value` is STILL the extraction-gap placeholder (naive
-first-segment-lowest, no sign extension, no placement — wrong for
-imm_b/imm_j; the real rule swaps in there); `match_field_bits` is the guard
+`extract_imm_value` NO LONGER GUESSES (2026-09-05, see the ImmApi entry):
+it runs the operand's own `imm_extract` when there is one, else the single
+case description data alone can state honestly — ONE contiguous segment,
+zero-extended (RV32I's shamt) — and RAISES on a scrambled field with no
+rule, where it used to assemble first-segment-lowest and hand back a wrong
+value in silence; `match_field_bits` is the guard
 half — per-segment equals, AND-ed, slice compares on signals. Names are
 verb-first on purpose.
 

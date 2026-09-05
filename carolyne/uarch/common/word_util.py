@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from carolyne.isa import InstrFieldMatch, InstrValueMatch, Operand
+from carolyne.isa import ImmApi, InstrFieldMatch, InstrValueMatch, Operand
 
 
 def extract_field_bits(word: Any, field: InstrFieldMatch) -> Any:
@@ -70,14 +70,38 @@ def extract_arch_index(word: Any, operand: Operand) -> Any:
     return extract_field_bits(word, operand.matcher)
 
 
-def extract_imm_value(word: Any, operand: Operand) -> Any:
-    # LIMIT — the open extraction gap (isa/field_match.py): naive assembly.
-    # - no sign extension, no placement, no implicit zeros
-    # - right for contiguous unsigned fields (shamt); WRONG for imm_b/imm_j
-    #   and every signed immediate
-    # - the real extraction rule swaps in HERE when the contract grows it
+def extract_imm_value(word: Any, operand: Operand, out: Any = None) -> Any:
+    """The immediate's assembled value: the operand's own rule, else the one
+    default that cannot be wrong.
+
+    - `imm_extract` (isa/imm_api.py) states placement and sign; it is given
+      an ImmApi sized from the SELECTED target, so a body never restates the
+      width
+    - `out` is the destination wire the rule drives; omitted (an int `word`,
+      under pytest) the value comes back as an int instead
+    - no rule: a single contiguous segment, ZERO-extended, which is all the
+      description data alone can honestly say (RV32I's shamt)
+    - a scrambled field with no rule RAISES — nothing says where each segment
+      lands, and assembling them first-lowest was the silent wrong answer
+      this replaces
+    """
     if operand.matcher is None:
         raise ValueError(
             f"immediate operand '{operand.atomic.name}' has no "
             f"matcher — nothing says which bits carry its value")
-    return extract_field_bits(word, operand.matcher)
+    if operand.imm_extract is not None:
+        where = f"imm_extract for operand '{operand.atomic.name}'"
+        api   = ImmApi(operand.width, where, out)
+        operand.imm_extract(word, api)
+        return api.value
+    if len(operand.matcher.match_idx) != 1:
+        raise ValueError(
+            f"immediate operand '{operand.atomic.name}' reads field "
+            f"'{operand.matcher.name}', which is {len(operand.matcher.match_idx)} "
+            f"segments, and states no imm_extract — nothing says where each "
+            f"segment lands in the value")
+    bits = extract_field_bits(word, operand.matcher)
+    if out is None:
+        return bits
+    out *= bits
+    return out
