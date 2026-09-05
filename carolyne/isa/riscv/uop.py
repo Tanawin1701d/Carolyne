@@ -67,19 +67,28 @@ _REG   = (OPR_RS1, OPR_RS2)                 # op:     two registers
 UOP_LUI   = Uop("LUI",   0, srcs=(OPR_IMM_U,), dests=_RD)   # rd = imm_u << 12
 UOP_AUIPC = Uop("AUIPC", 1, srcs=(OPR_IMM_U,), dests=_RD)   # rd = pc + (imm_u << 12)
 
+# What a µop IS to the machine, beyond its operands. The ENGINE decides what
+# each means — the ROB groups its commit barrier on both, and the store buffer
+# pops on _STORE (uop_contract: the ISA states the fact, the generator builds
+# the hardware).
+_FEAT_BRANCH = ("is_branch",)   # augments the pc: the ROB's barrier reads it
+_FEAT_STORE  = ("is_store",)    # reaches memory only on retirement
+
 # --- jumps, opcode 1101111 / 1100111: rd = pc + ilen, then redirect ----------
 # rd = pc + ilen, then redirect: jal to pc + imm (target known at decode),
 # jalr to (rs1 + imm) & ~1 (known at execute). One µop, so nothing cracks.
-UOP_JAL  = Uop("JAL",  2, srcs=(OPR_IMM_J,), dests=_RD)
-UOP_JALR = Uop("JALR", 3, srcs=_ADDR, dests=_RD)
+UOP_JAL  = Uop("JAL",  2, srcs=(OPR_IMM_J,), dests=_RD,
+                specified_feature=_FEAT_BRANCH)
+UOP_JALR = Uop("JALR", 3, srcs=_ADDR, dests=_RD,
+                specified_feature=_FEAT_BRANCH)
 
 # --- B-type, opcode 1100011: redirect when the test holds, no destination ----
-UOP_BEQ  = Uop("BEQ",  4, srcs=_BR)
-UOP_BNE  = Uop("BNE",  5, srcs=_BR)
-UOP_BLT  = Uop("BLT",  6, srcs=_BR)
-UOP_BGE  = Uop("BGE",  7, srcs=_BR)
-UOP_BLTU = Uop("BLTU", 8, srcs=_BR)
-UOP_BGEU = Uop("BGEU", 9, srcs=_BR)
+UOP_BEQ  = Uop("BEQ",  4, srcs=_BR, specified_feature=_FEAT_BRANCH)
+UOP_BNE  = Uop("BNE",  5, srcs=_BR, specified_feature=_FEAT_BRANCH)
+UOP_BLT  = Uop("BLT",  6, srcs=_BR, specified_feature=_FEAT_BRANCH)
+UOP_BGE  = Uop("BGE",  7, srcs=_BR, specified_feature=_FEAT_BRANCH)
+UOP_BLTU = Uop("BLTU", 8, srcs=_BR, specified_feature=_FEAT_BRANCH)
+UOP_BGEU = Uop("BGEU", 9, srcs=_BR, specified_feature=_FEAT_BRANCH)
 
 BRANCHES = (UOP_BEQ, UOP_BNE, UOP_BLT, UOP_BGE, UOP_BLTU, UOP_BGEU)
 
@@ -93,9 +102,9 @@ UOP_LHU = Uop("LHU", 14, srcs=_ADDR, dests=_RD)
 LOADS = (UOP_LB, UOP_LH, UOP_LW, UOP_LBU, UOP_LHU)
 
 # --- S-type stores, opcode 0100011: mem[rs1 + imm] = rs2 ---------------------
-UOP_SB = Uop("SB", 15, srcs=_STORE)
-UOP_SH = Uop("SH", 16, srcs=_STORE)
-UOP_SW = Uop("SW", 17, srcs=_STORE)
+UOP_SB = Uop("SB", 15, srcs=_STORE, specified_feature=_FEAT_STORE)
+UOP_SH = Uop("SH", 16, srcs=_STORE, specified_feature=_FEAT_STORE)
+UOP_SW = Uop("SW", 17, srcs=_STORE, specified_feature=_FEAT_STORE)
 
 STORES = (UOP_SB, UOP_SH, UOP_SW)
 

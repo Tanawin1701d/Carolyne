@@ -51,6 +51,11 @@ class Uop:
                                         # unique + dense per ISA (IsaBase)
     srcs    : Tuple[Operand, ...] = ()
     dests   : Tuple[Operand, ...] = ()
+    # What this µop IS to the machine, beyond its operands: "is_branch",
+    # "is_store", ... A REQUEST, the same bargain ExecUnit.needs makes — the
+    # ISA states the fact and the generator decides what hardware it means,
+    # so no vocabulary ships here and an ISA may name one nobody reads yet.
+    specified_feature : Tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if not (isinstance(self.name, str) and self.name):
@@ -64,6 +69,19 @@ class Uop:
                 f"Uop '{self.name}': uop_idx must be >= 0, got {self.uop_idx}")
         object.__setattr__(self, "srcs",  tuple(self.srcs))    # accept any sequence
         object.__setattr__(self, "dests", tuple(self.dests))
+        object.__setattr__(self, "specified_feature",
+                           tuple(self.specified_feature))
+        seen = set()
+        for feature in self.specified_feature:
+            if not (isinstance(feature, str) and feature):
+                raise ValueError(
+                    f"Uop '{self.name}': specified_feature holds non-empty "
+                    f"strings, got {feature!r}")
+            if feature in seen:
+                raise ValueError(
+                    f"Uop '{self.name}': specified_feature names "
+                    f"'{feature}' twice")
+            seen.add(feature)
         for kind, roles, operands, limit in (("src",  SRC_ROLES,  self.srcs,  MAX_SRCS),
                                             ("dest", DEST_ROLES, self.dests, MAX_DESTS)):
             if len(operands) > limit:
@@ -80,6 +98,11 @@ class Uop:
                         f"Uop '{self.name}': {kind} slot {slot} holds an operand "
                         f"declared {operand.role} — an operand's role must match "
                         f"the list it sits in")
+
+    def has_feature(self, feature: str) -> bool:
+        """This µop declares that feature — the one door a generator reads,
+        so no consumer spells `in uop.specified_feature` itself."""
+        return feature in self.specified_feature
 
     def __str__(self) -> str:
         return self.name
