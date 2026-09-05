@@ -8,7 +8,7 @@ from carolyne.isa import (
     AtomicOperand, FieldRef, Intermediate, Operand, OperandRole, RegFile, TargetKind)
 
 SRC, DEST  = OperandRole.SRC, OperandRole.DEST
-ARCH, TEMP = TargetKind.ARCH, TargetKind.TEMP
+ARCH, IMM = TargetKind.ARCH, TargetKind.IMM
 
 
 def test_intermediate_identity_not_equality():
@@ -65,8 +65,8 @@ def test_operand_is_built_on_an_atomic_core():
         Operand(core)                       # the selector is required, never defaulted
     with pytest.raises(TypeError):
         Operand("rs1", ARCH, 5)             # the core must be an AtomicOperand
-    with pytest.raises(ValueError, match="offers no temp"):
-        Operand(core, TEMP)                 # ...and must carry what the slot selects
+    with pytest.raises(ValueError, match="offers no imm"):
+        Operand(core, IMM)                 # ...and must carry what the slot selects
 
 
 def test_index_may_be_omitted_only_on_a_one_register_class():
@@ -85,10 +85,10 @@ def test_index_may_be_omitted_only_on_a_one_register_class():
 
 def test_intermediate_operand_carries_no_index():
     t = Intermediate(32, "addr")
-    op = Operand(AtomicOperand(DEST, intermediate=t), TEMP)
+    op = Operand(AtomicOperand(DEST, intermediate=t), IMM)
     assert op.is_intermediate and op.width == 32
     with pytest.raises(ValueError):
-        Operand(AtomicOperand(DEST, intermediate=t), TEMP, 0)                 # index forbidden on a µtemp
+        Operand(AtomicOperand(DEST, intermediate=t), IMM, 0)                 # index forbidden on a µtemp
 
 
 def test_x86_mem_add_cracking_shape():
@@ -100,14 +100,14 @@ def test_x86_mem_add_cracking_shape():
     old   = Intermediate(32, "old")
     new   = Intermediate(32, "new")
 
-    agu_dst   = Operand(AtomicOperand(DEST, intermediate=addr), TEMP)
-    load_src  = Operand(AtomicOperand(SRC, intermediate=addr), TEMP)   # same node: LOAD consumes AGU's result
-    load_dst  = Operand(AtomicOperand(DEST, intermediate=old), TEMP)
-    add_srcs  = (Operand(AtomicOperand(SRC, intermediate=old), TEMP),  # decoded reg beside the µtemp
+    agu_dst   = Operand(AtomicOperand(DEST, intermediate=addr), IMM)
+    load_src  = Operand(AtomicOperand(SRC, intermediate=addr), IMM)   # same node: LOAD consumes AGU's result
+    load_dst  = Operand(AtomicOperand(DEST, intermediate=old), IMM)
+    add_srcs  = (Operand(AtomicOperand(SRC, intermediate=old), IMM),  # decoded reg beside the µtemp
                  Operand(AtomicOperand(SRC, reg_file=gpr), ARCH, FieldRef("modrm_reg")))
-    add_dsts  = (Operand(AtomicOperand(DEST, intermediate=new), TEMP),
+    add_dsts  = (Operand(AtomicOperand(DEST, intermediate=new), IMM),
                  Operand(AtomicOperand(DEST, reg_file=flags), ARCH))   # 2nd dest: implicit flags
-    store_src = Operand(AtomicOperand(SRC, intermediate=new), TEMP)
+    store_src = Operand(AtomicOperand(SRC, intermediate=new), IMM)
 
     assert agu_dst.target is load_src.target        # the link IS the shared node
     assert agu_dst.is_dest and load_src.is_src      # ...read in opposite directions

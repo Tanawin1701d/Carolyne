@@ -102,7 +102,7 @@ class Operand:
 
     @property
     def is_intermediate(self) -> bool:
-        return self.target_kind is TargetKind.TEMP
+        return self.target_kind is TargetKind.IMM
 
     @property
     def width(self) -> int:

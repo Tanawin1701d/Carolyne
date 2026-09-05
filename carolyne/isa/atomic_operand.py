@@ -56,7 +56,7 @@ DEST_ROLES = (OperandRole.DEST, OperandRole.DEST_W_REQ)
 # Which of a core's two targets an operand selects.
 class TargetKind(Enum):
     ARCH = "arch"       # the core's reg_file — renamed through that class's RAT/PRF
-    TEMP = "temp"       # the core's intermediate — the µtemp instance IS the value node
+    IMM  = "imm"        # the core's intermediate — the µtemp instance IS the value node
 
     def __str__(self) -> str:
         return self.value
@@ -100,7 +100,7 @@ class AtomicOperand:
         if not isinstance(kind, TargetKind):
             raise TypeError(
                 f"target_kind must be a TargetKind, got {type(kind).__name__} "
-                f"(TargetKind.ARCH or TargetKind.TEMP)")
+                f"(TargetKind.ARCH or TargetKind.IMM)")
         target = self.reg_file if kind is TargetKind.ARCH else self.intermediate
         if target is None:
             raise ValueError(

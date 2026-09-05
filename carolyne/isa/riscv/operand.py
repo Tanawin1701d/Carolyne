@@ -45,7 +45,7 @@ from . import field_match as FM
 from .reg import ImmTarget, RegFile
 
 SRC, DEST   = OperandRole.SRC, OperandRole.DEST
-ARCH, TEMP  = TargetKind.ARCH, TargetKind.TEMP
+ARCH, IMM   = TargetKind.ARCH, TargetKind.IMM
 
 # The cores the rules below build on — one per SLOT of an RV32I instruction,
 # which is what the numbering says: src 1 is rs1, src 2 is rs2, src 3 is the
@@ -53,7 +53,7 @@ ARCH, TEMP  = TargetKind.ARCH, TargetKind.TEMP
 # value-equal, so sharing one couples nothing.
 #
 # Each core offers exactly ONE target, so every operand here selects ARCH or
-# TEMP with nothing else on offer. The two-target form is for an ISA whose
+# IMM with nothing else on offer. The two-target form is for an ISA whose
 # single encoding slot resolves either way (x86 ModRM r/m); RV32I has no such
 # slot, and stating the selection anyway is what keeps a rule readable on its
 # own.
@@ -73,12 +73,12 @@ OPR_REGS = (OPR_RD, OPR_RS1, OPR_RS2)
 # --- immediate operands -----------------------------------------------------
 # No index: an immediate is not a register of a class. The matcher is the
 # whole rule — which bits of the instruction word carry the value. All six
-# select TEMP off the one immediate core.
-OPR_IMM_I     = Operand(AOPR_SRC_2, TEMP, matcher=FM.IMM_I)     # addi/loads/jalr: 12-bit
-OPR_IMM_S     = Operand(AOPR_SRC_3, TEMP, matcher=FM.IMM_S)     # stores: 12-bit, split field
-OPR_IMM_B     = Operand(AOPR_SRC_3, TEMP, matcher=FM.IMM_B)     # branches: low bit implicit 0
-OPR_IMM_U     = Operand(AOPR_SRC_2, TEMP, matcher=FM.IMM_U)     # lui/auipc: bits 31..12
-OPR_IMM_J     = Operand(AOPR_SRC_2, TEMP, matcher=FM.IMM_J)     # jal: low bit implicit 0
-OPR_IMM_SHAMT = Operand(AOPR_SRC_2, TEMP, matcher=FM.SHAMT)     # slli/srli/srai: 5-bit count
+# select IMM off the one immediate core.
+OPR_IMM_I     = Operand(AOPR_SRC_2, IMM, matcher=FM.IMM_I)     # addi/loads/jalr: 12-bit
+OPR_IMM_S     = Operand(AOPR_SRC_3, IMM, matcher=FM.IMM_S)     # stores: 12-bit, split field
+OPR_IMM_B     = Operand(AOPR_SRC_3, IMM, matcher=FM.IMM_B)     # branches: low bit implicit 0
+OPR_IMM_U     = Operand(AOPR_SRC_2, IMM, matcher=FM.IMM_U)     # lui/auipc: bits 31..12
+OPR_IMM_J     = Operand(AOPR_SRC_2, IMM, matcher=FM.IMM_J)     # jal: low bit implicit 0
+OPR_IMM_SHAMT = Operand(AOPR_SRC_2, IMM, matcher=FM.SHAMT)     # slli/srli/srai: 5-bit count
 
 OPR_IMMS = (OPR_IMM_I, OPR_IMM_S, OPR_IMM_B, OPR_IMM_U, OPR_IMM_J, OPR_IMM_SHAMT)

@@ -127,11 +127,25 @@ arithmetic (`ceil_log2`, the word readers); a helper moves here only when
   retire that. COST, and it comes due at x86 bring-up: a real µtemp answers
   `has_imm` true while carrying no immediate at all, so a consumer that must
   tell the two apart cannot use this predicate — it is the `Uop.imm` gap
-  wearing the name of one of its two meanings. Decision: it carries **no `width`, `is_arch`,
+  wearing the name of one of its two meanings. SUPERSEDED IN HALF (2026-09-05,
+  Tanawin): the selector is now **`TargetKind.IMM = "imm"`** — "the targetKind
+  temp is imm", so the enum member says what the target IS rather than what
+  its type is called, and the predicate it answers (`has_imm`) finally agrees
+  with the selection that produces it. Still a rename of the SELECTOR ONLY:
+  the field stays `intermediate`, the type stays `Intermediate`,
+  `Operand.is_intermediate` keeps its name, so the µtemp mechanism the x86
+  crack runs on is untouched — what changed is the word an operand rule spells
+  (`Operand(AOPR_SRC_2, IMM, matcher=…)`, RV32I's six immediate rules). The
+  enum VALUE moved with the member, since its only job is to read right in
+  `target_for`'s message ("offers no imm target"). CARRIED OVER, not fixed:
+  the x86 cost above is now the SELECTOR's too — an AGU-produced address will
+  select `IMM` while being no immediate at all, and matcher presence stays the
+  only thing that tells the two apart (`decode.uop_decode`). The day contract
+  §2's own `Uop.imm` field lands, that is what splits them. Decision: it carries **no `width`, `is_arch`,
   `is_intermediate`** (ambiguous with two candidates — only the selection
   answers them) and **no `is_const`/`is_decoded`** (facts about the *index*,
   which the core has not got). It owns `OperandRole`
-  (`SRC`/`DEST`/`DEST_W_REQ`) and `TargetKind` (`ARCH`/`TEMP`), so the import
+  (`SRC`/`DEST`/`DEST_W_REQ`) and `TargetKind` (`ARCH`/`IMM`), so the import
   runs `operand` → `atomic_operand` one-way. Decision (2026-08-19): a **`name`**
   joined, optional and defaulting to `""`, validated as a Python identifier —
   it is the STEM of every hardware field a consumer builds for that slot

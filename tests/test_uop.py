@@ -18,7 +18,7 @@ from carolyne.isa import (
 )
 
 SRC, DEST  = OperandRole.SRC, OperandRole.DEST
-ARCH, TEMP = TargetKind.ARCH, TargetKind.TEMP
+ARCH, IMM = TargetKind.ARCH, TargetKind.IMM
 
 # No catalog ships with the isa layer (exec_unit.py header): a description
 # declares the µops and units its machine has. This block is what a per-ISA
@@ -170,7 +170,7 @@ def test_x86_implicit_register_operand():
     # (The -4 adjustment rides in the imm rule — see the NOTE at the top.)
     gpr     = RegFile("gpr", 32, 8)
     esp_new = Intermediate(32, "esp_new")
-    dec = Uop("ADD", 0, srcs=(Operand(AtomicOperand(SRC, reg_file=gpr), ARCH, 4),), dests=(Operand(AtomicOperand(DEST, intermediate=esp_new), TEMP),))
+    dec = Uop("ADD", 0, srcs=(Operand(AtomicOperand(SRC, reg_file=gpr), ARCH, 4),), dests=(Operand(AtomicOperand(DEST, intermediate=esp_new), IMM),))
     assert not dec.srcs[0].is_decoded       # literal index, not is_const: ESP isn't hardwired
 
 
@@ -184,11 +184,11 @@ def test_x86_mem_add_cracks_to_four_uops():
 
     crack = (
         Uop("AGU",   0, srcs=(Operand(AtomicOperand(SRC, reg_file=gpr), ARCH, FieldRef("modrm_rm")),),
-                   dests=(Operand(AtomicOperand(DEST, intermediate=addr), TEMP),)),
-        Uop("LOAD",  1, srcs=(Operand(AtomicOperand(SRC, intermediate=addr), TEMP),), dests=(Operand(AtomicOperand(DEST, intermediate=old), TEMP),)),
-        Uop("ADD",   2, srcs=(Operand(AtomicOperand(SRC, intermediate=old), TEMP), Operand(AtomicOperand(SRC, reg_file=gpr), ARCH, FieldRef("modrm_reg"))),
-                   dests=(Operand(AtomicOperand(DEST, intermediate=new), TEMP), Operand(AtomicOperand(DEST, reg_file=flags), ARCH, 0))),
-        Uop("STORE", 3, srcs=(Operand(AtomicOperand(SRC, intermediate=addr), TEMP), Operand(AtomicOperand(SRC, intermediate=new), TEMP))),
+                   dests=(Operand(AtomicOperand(DEST, intermediate=addr), IMM),)),
+        Uop("LOAD",  1, srcs=(Operand(AtomicOperand(SRC, intermediate=addr), IMM),), dests=(Operand(AtomicOperand(DEST, intermediate=old), IMM),)),
+        Uop("ADD",   2, srcs=(Operand(AtomicOperand(SRC, intermediate=old), IMM), Operand(AtomicOperand(SRC, reg_file=gpr), ARCH, FieldRef("modrm_reg"))),
+                   dests=(Operand(AtomicOperand(DEST, intermediate=new), IMM), Operand(AtomicOperand(DEST, reg_file=flags), ARCH, 0))),
+        Uop("STORE", 3, srcs=(Operand(AtomicOperand(SRC, intermediate=addr), IMM), Operand(AtomicOperand(SRC, intermediate=new), IMM))),
     )
 
     # The shared µtemp instance IS the dataflow link between the µops.

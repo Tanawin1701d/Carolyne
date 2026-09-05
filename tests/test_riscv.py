@@ -127,7 +127,7 @@ def test_immediate_operands_carry_a_matcher_and_no_index():
         "imm_i", "imm_s", "imm_b", "imm_u", "imm_j", "shamt"]
     with pytest.raises(ValueError):                 # an index on one is refused
         Operand(AtomicOperand(OperandRole.SRC, intermediate=ImmTarget),
-                TargetKind.TEMP, FieldRef("imm"), matcher=FM.IMM_I)
+                TargetKind.IMM, FieldRef("imm"), matcher=FM.IMM_I)
 
 
 def test_immediates_ride_in_srcs_for_now():

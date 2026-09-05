@@ -13,7 +13,7 @@ from carolyne.isa import (
 )
 
 SRC, DEST  = OperandRole.SRC, OperandRole.DEST
-ARCH, TEMP = TargetKind.ARCH, TargetKind.TEMP
+ARCH, IMM = TargetKind.ARCH, TargetKind.IMM
 
 X     = RegFile("x", 32, 32, const_regs={0: 0})
 FLAGS = RegFile("flags", 6, 1)

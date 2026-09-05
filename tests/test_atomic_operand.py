@@ -9,7 +9,7 @@ from carolyne.isa import (
     TargetKind)
 
 SRC, DEST  = OperandRole.SRC, OperandRole.DEST
-ARCH, TEMP = TargetKind.ARCH, TargetKind.TEMP
+ARCH, IMM = TargetKind.ARCH, TargetKind.IMM
 
 
 def test_a_core_may_carry_one_target_or_both():
@@ -23,7 +23,7 @@ def test_a_core_may_carry_one_target_or_both():
     assert reg_only.has_arch and not reg_only.has_imm
     assert temp_only.has_imm and not temp_only.has_arch
     assert either.has_arch and either.has_imm
-    assert either.target_for(ARCH) is x and either.target_for(TEMP) is addr
+    assert either.target_for(ARCH) is x and either.target_for(IMM) is addr
 
 
 def test_a_core_must_name_at_least_one_value():
@@ -44,10 +44,10 @@ def test_selecting_a_target_the_core_does_not_carry_is_refused():
     core = AtomicOperand(SRC, reg_file=x)
 
     assert core.target_for(ARCH) is x
-    with pytest.raises(ValueError, match="offers no temp"):
-        core.target_for(TEMP)
-    with pytest.raises(ValueError, match="offers no temp"):
-        Operand(core, TEMP)
+    with pytest.raises(ValueError, match="offers no imm"):
+        core.target_for(IMM)
+    with pytest.raises(ValueError, match="offers no imm"):
+        Operand(core, IMM)
     with pytest.raises(TypeError):
         core.target_for("arch")                 # the word is not the kind
 
@@ -61,7 +61,7 @@ def test_one_core_can_serve_rules_that_resolve_differently():
     core = AtomicOperand(SRC, reg_file=gpr, intermediate=load)
 
     as_reg = Operand(core, ARCH, FieldRef("modrm_rm"))
-    as_mem = Operand(core, TEMP)
+    as_mem = Operand(core, IMM)
 
     assert as_reg.atomic is as_mem.atomic        # ...the same core
     assert as_reg.target is gpr and as_mem.target is load
@@ -91,10 +91,10 @@ def test_cores_are_shared_across_the_rv32i_table():
 
     shared = OPR_RS2.atomic
     assert OPR_IMM_I.atomic is shared and shared.has_arch and shared.has_imm
-    assert OPR_RS2.target_kind is ARCH and OPR_IMM_I.target_kind is TEMP
+    assert OPR_RS2.target_kind is ARCH and OPR_IMM_I.target_kind is IMM
     assert OPR_RS2.target is not OPR_IMM_I.target        # one core, two answers
 
-    assert all(i.target_kind is TEMP for i in OPR_IMMS)
+    assert all(i.target_kind is IMM for i in OPR_IMMS)
     assert OPR_RD.atomic is not OPR_RS1.atomic           # different direction
     assert OPR_RS1.atomic != OPR_RS2.atomic              # rs2's core offers more
     assert OPR_RS1.index != OPR_RS2.index                # ...and they read different fields
