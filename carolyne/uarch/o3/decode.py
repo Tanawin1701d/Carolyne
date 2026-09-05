@@ -175,14 +175,14 @@ class Decode(Module):
         pc   = to_ref(fetch_entry.pc)
 
         # atomic operand -> the slot rule this µop fills it with, by identity.
-        filled = {}
+        operand_by_atm_opr = {}
         for operand in (*uop.srcs, *uop.dests):
-            if id(operand.atomic) in filled:
+            if id(operand.atomic) in operand_by_atm_opr:
                 raise ValueError(
                     f"µop '{uop.name}' fills atomic operand "
                     f"'{operand.atomic.name}' twice — one record group "
                     f"cannot say both")
-            filled[id(operand.atomic)] = operand
+            operand_by_atm_opr[id(operand.atomic)] = operand
 
         # is_branch / is_store come from the TEMPLATE: the ISA states what a
         # µop is (Uop.specified_feature) and the machine decides what that
@@ -201,7 +201,7 @@ class Decode(Module):
                "is_store" : int(uop.has_feature("is_store")),
                "rsv_id"   : 0} #TODO we will manage that later
         for atm_opr in self.atm_operands:
-            operand = filled.get(id(atm_opr))   # None = this µop leaves it empty
+            operand = operand_by_atm_opr.get(id(atm_opr))   # None = slot left empty
             group   = self._operand_group(word, atm_opr, operand)
             row.update(group)
         decode_entry |= row
