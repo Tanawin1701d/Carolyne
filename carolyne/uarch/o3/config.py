@@ -170,6 +170,10 @@ class RsvSpec:
         """The station named by what it feeds — it has no name of its own."""
         return "/".join(unit.name for unit in self.exec_unit)
 
+    def can_issue(self, uop: Uop) -> bool:
+        """This station can issue that µop — one of its units runs it."""
+        return any(unit.has(uop) for unit in self.exec_unit)
+
     @property
     def uops(self) -> Tuple[Uop, ...]:
         """Every µop issuable from this station, deduped by identity — the
@@ -334,11 +338,10 @@ class CPUO3_Config:
           run a kind, this answers which STATIONS feed such a unit
         - a station's id IS its position in `rsv_specs` (core.py builds them
           by position), so the index is the routing value itself
-        - identity, the discipline the description layer runs on
         - more than one is legal: picking among them is the caller's policy
         """
-        ids = tuple(idx for idx, spec in enumerate(self.rsv_specs)
-                    if any(listed is uop for listed in spec.uops))
+        ids = tuple(rsv_id for rsv_id, spec in enumerate(self.rsv_specs)
+                    if spec.can_issue(uop))
         if not ids:
             raise ValueError(
                 f"CPUO3_Config: no reservation station can issue µop "

@@ -159,19 +159,6 @@ class Decode(Module):
             with zif(hit):
                 self.uop_decode(uop, lane, fetch_entry, decode_entry)
 
-    def rsv_id_for(self, uop: Uop, lane: int) -> int:
-        """Which station this lane sends that µop to — STATIC, no hardware.
-
-        - the candidates are every station whose units run the kind
-          (`config.rsv_ids_for`); one of them has to be chosen
-        - chosen by `lane % len(candidates)`, so a µop several stations can
-          run is spread across them by lane instead of piling on the first
-        - a constant per (µop, lane), so the decoder wires it and builds
-          no comparison
-        """
-        ids = self.config.rsv_ids_for(uop)
-        return ids[lane % len(ids)]
-
     def uop_decode(self,
                    uop         : Uop,
                    lane        : int,
@@ -278,3 +265,16 @@ class Decode(Module):
                                                   if active and operand.is_arch
                                                   else 0)
         return group
+
+    def rsv_id_for(self, uop: Uop, lane: int) -> int:
+        """Which station this lane sends that µop to — STATIC, no hardware.
+
+        - the candidates are every station whose units run the kind
+          (`config.rsv_ids_for`); one of them has to be chosen
+        - chosen by `lane % len(candidates)`, so a µop several stations can
+          run is spread across them by lane instead of piling on the first
+        - a constant per (µop, lane), so the decoder wires it and builds
+          no comparison
+        """
+        ids = self.config.rsv_ids_for(uop)
+        return ids[lane % len(ids)]
