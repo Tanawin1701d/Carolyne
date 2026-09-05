@@ -11,22 +11,6 @@ here; a decision already made and recorded goes in CLAUDE.md §4, not here.
 
 ## Front end
 
-- [ ] **decode routes nothing to a real station.** `uop_decode` writes
-      `is_branch` / `is_store` / `rsv_id` as ZERO, so every valid lane names
-      station 0 and reads as non-branch, non-store.
-      *Where:* `uarch/o3/decode.py` (`uop_decode`, the `TODO:` at ~line 185).
-      *Closes when:* the description layer can say which µop templates are
-      branches / stores, and which station each kind routes to. Until then the
-      LS and branch paths are structurally complete but **idle at runtime** —
-      no µop ever reaches the mem station.
-
-- [ ] **The immediate-extraction rule is a placeholder.**
-      `extract_imm_value` reads the first segment lowest, with no sign
-      extension and no placement, so `imm_b` / `imm_j` are wrong.
-      *Where:* `uarch/common/word_util.py`.
-      *Closes when:* a matcher can say where each segment lands in the
-      assembled value — the open half of the encoding contract (§1.3).
-
 - [ ] **An inactive source slot blocks issue.** decode writes `valid_<n>`=0 for
       a slot the µop does not fill, and `RsvBase.slot_ready` ANDs EVERY wake
       operand's valid bit.
