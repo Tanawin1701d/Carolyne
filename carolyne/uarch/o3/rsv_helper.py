@@ -29,7 +29,7 @@ from kathryn import *
 from carolyne.isa import AtomicOperand, IsaBase
 from carolyne.uarch.common import ceil_log2
 from carolyne.uarch.o3.config import CPUO3_Config, RsvSpec
-from carolyne.uarch.o3.operand_field import (DATA, PR_IDX, WB_REQUIRED, VALID,
+from carolyne.uarch.o3.operand_field import (ACTIVE, DATA, PR_IDX, WB_REQUIRED, VALID,
                                              operand_fields as build_fields,
                                              require_named)
 
@@ -121,9 +121,13 @@ def operand_fields(config: CPUO3_Config,
     carries where its result goes, plus the bit that says the write is
     required — which operand_field drops on a plain DEST, where the role is
     the constant answer. The names and widths themselves are operand_field's.
+
+    An arch source also carries ACTIVE: the record has a slot per operand the
+    ISA declares and a µop fills only some, so `slot_ready` needs the bit that
+    says whether this one is waiting on anything at all.
     """
     if atm_operand.is_src:
-        kinds = (VALID, DATA, PR_IDX) if atm_operand.has_arch else (DATA,)
+        kinds = (ACTIVE, VALID, DATA, PR_IDX) if atm_operand.has_arch else (DATA,)
     else:
         kinds = (WB_REQUIRED, PR_IDX)
 

@@ -25,7 +25,7 @@ from kathryn.signal import to_ref
 
 from carolyne.isa import RegFile
 from carolyne.uarch.o3.config import CPUO3_Config, RsvSpec
-from carolyne.uarch.o3.operand_field import DATA, PR_IDX, VALID, field_name
+from carolyne.uarch.o3.operand_field import ACTIVE, DATA, PR_IDX, VALID, field_name
 from carolyne.uarch.o3.priority import (PRI_ISSUE, PRI_MIS_PRED,
                                         PRI_RENAME, PRI_SUC_PRED)
 from carolyne.uarch.o3.rsv_helper import (build_rsv_slot, build_rsv_table,
@@ -110,10 +110,19 @@ class RsvBase(Module):
 
     # --- reads -----------------------------------------------------------------
     def slot_ready(self, row):
-        """This entry is occupied and every source it waits on has landed."""
+        """This entry is occupied and every source it waits on has landed.
+
+        A slot the µop does not fill waits on NOTHING, so it reads ready:
+        the record has a group per operand the ISA declares and only some are
+        filled, and `valid` alone would hold an entry forever on a slot no
+        value was ever coming to (RV32I's LUI/AUIPC/JAL fill one source, the
+        system µops none).
+        """
         ready = to_ref(row.valid)
         for atm_operand in self.has_src_arch_operands:
-            ready = ready & to_ref(getattr(row, field_name(VALID, atm_operand)))
+            landed = to_ref(getattr(row, field_name(VALID,  atm_operand)))
+            active = to_ref(getattr(row, field_name(ACTIVE, atm_operand)))
+            ready  = ready & (landed | ~active)
         return ready
 
     def all_row_idxs(self):

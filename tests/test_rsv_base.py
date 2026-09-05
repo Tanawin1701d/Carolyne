@@ -100,6 +100,41 @@ def test_only_an_arch_source_is_something_to_wait_for():
     assert [a.name for a in st.has_src_arch_operands] == ["src_1", "src_2"]
 
 
+def test_a_wake_slot_carries_the_bit_that_says_it_is_waiting():
+    # slot_ready needs more than valid_<n>: the record has a group per operand
+    # the ISA declares and a µop fills only some, so an arch source also
+    # carries active_<n>.
+    cfg  = _cfg()
+    host = _drive(cfg, RsvSpec(True, 4, (ALU,), RsvType.RSV_EXEC))
+    row  = host.station.table[0]
+
+    for slot in ("src_1", "src_2"):
+        assert hasattr(row, f"active_{slot}")
+        assert hasattr(row, f"valid_{slot}")
+
+
+def test_a_slot_the_uop_does_not_fill_never_holds_an_entry_back():
+    """An inactive source waits on NOTHING, so it reads ready.
+
+    Without this, `valid` alone would hold an entry forever on a slot no value
+    was ever coming to — RV32I's LUI/AUIPC/JAL fill one source and the system
+    µops none, so six of its forty µops could never issue.
+    """
+    # The µops whose sources leave an arch wake slot unfilled.
+    wake  = [a.name for a in ISA.used_atomic_operands() if a.is_src and a.has_arch]
+    stuck = [uop.name for uop in ISA.used_uops()
+             if any(name not in {o.atomic.name for o in uop.srcs} for name in wake)]
+    assert stuck == ["LUI", "AUIPC", "JAL", "FENCE", "ECALL", "EBREAK"]
+
+    # slot_ready therefore reads active_<n> beside valid_<n>. _drive
+    # elaborates OldestFirst, whose build_issue calls slot_ready in its flow,
+    # so a station that builds at all is one whose gating built.
+    cfg  = _cfg()
+    host = _drive(cfg, RsvSpec(True, 4, (ALU,), RsvType.RSV_EXEC))
+    st   = host.station
+    assert [a.name for a in st.has_src_arch_operands] == ["src_1", "src_2"]
+
+
 def test_the_base_refuses_to_guess_the_issue_policy():
     cfg = _cfg()
     reset()

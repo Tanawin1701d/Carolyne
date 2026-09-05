@@ -717,7 +717,7 @@ read or write, named after the core —
 
 | core                    | fields                                  |
 | ----------------------- | --------------------------------------- |
-| src on a register class | `valid_<n>`, `pr_idx_<n>`, `data_<n>`   |
+| src on a register class | `active_<n>`, `valid_<n>`, `pr_idx_<n>`, `data_<n>` |
 | src on a µtemp only     | `data_<n>` only                         |
 | `DEST`                  | `pr_idx_<n>`                            |
 | `DEST_W_REQ`            | `wb_required_<n>`, `pr_idx_<n>`         |
@@ -751,9 +751,9 @@ the `table` of waiting entries, the `exec_src` row the FU reads, and the events
 that move them, modelled on the C++ engine's `rsv.h`. `build_issue` is left
 abstract (`NotImplementedError`) — which ready entry goes next is the station's
 policy, age order out of order vs the head in order — so a subclass says it and
-everything else is shared. `slot_ready(row)` ANDs `valid` with `valid_<n>` over
-the ARCH sources only, since a µtemp/immediate has no physical register to wait
-for; `wake_operands` is that subset, computed once at declaration. `on_bypass`
+everything else is shared. `slot_ready(row)` ANDs `valid` with
+`valid_<n> | ~active_<n>` over the ARCH sources only — a µtemp/immediate has no
+physical register to wait for, and an unfilled slot waits on nothing; `wake_operands` is that subset, computed once at declaration. `on_bypass`
 takes `RsvBypass(reg_file, valid, pr_idx, data)` records and only wakes sources
 naming the SAME class — two PRFs number their entries independently, so a bare
 index would cross-wake. `on_suc_pred` masks the resolved tag out
@@ -1404,11 +1404,15 @@ slot ready from architectural state (`valid_<n>`=1, `data_<n>` =
 splits on the PRF entry's `fin` (2026-08-28, `Prf.on_get_entry(prf_idx)`)
 — already written back reads the value straight out of the PRF
 (`valid_<n>`=1), still in flight leaves valid as decoded and puts the
-RT's `prf_idx` in `pr_idx_<n>`, the index the station wakes on. OPEN, and it bites at issue: decode writes
-`valid_<n>`=0 for a slot the µop does not fill and `RsvBase.slot_ready`
-ANDs EVERY wake operand's valid bit, so an entry with an unfilled arch
-slot cannot issue until someone answers for inactive slots — decode
-writing their valid 1, or slot_ready gating on active.
+RT's `prf_idx` in `pr_idx_<n>`, the index the station wakes on. CLOSED 2026-09-05 (Tanawin picked the
+station-side fix): `slot_ready` now reads `valid_<n> | ~active_<n>` per
+wake slot, so a slot the µop does not fill waits on NOTHING. `valid`
+keeps meaning "a value landed" everywhere instead of also meaning "none
+was wanted", and the question is answered where it is asked. The station
+entry's arch-source group gained `active_<n>` to carry it — free wiring,
+since the dispatch bus already carried the bit and the k2k copy pairs it
+by name. Without it SIX of RV32I's forty µops could never issue:
+LUI/AUIPC/JAL fill one source, FENCE/ECALL/EBREAK none.
 `Rt.read_rename(port, ar_idx)` is the new read: lane 0 the commit row
 (master's wire alias plus this cycle's commit fixups), lane k
 `temp_dispatch[k-1]` — the state after earlier lanes' renames, BEFORE its

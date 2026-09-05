@@ -9,15 +9,6 @@ here; a decision already made and recorded goes in CLAUDE.md §4, not here.
 
 ---
 
-## Front end
-
-- [ ] **An inactive source slot blocks issue.** decode writes `valid_<n>`=0 for
-      a slot the µop does not fill, and `RsvBase.slot_ready` ANDs EVERY wake
-      operand's valid bit.
-      *Where:* `uarch/o3/decode.py`, `uarch/o3/rsv.py` (`slot_ready`).
-      *Closes when:* decode writes those slots' valid as 1, or `slot_ready`
-      gates on `active`.
-
 ## Load / store
 
 - [ ] **Misaligned `LW` / `LH` return the containing word.** The low two
