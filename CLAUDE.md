@@ -1221,6 +1221,29 @@ branch beats the default and a no-hit level hands a bubble. The earlier flat
 `group_uops_by_level`; `tests/test_decode_templates.py` (untracked) still pins the
 old shape and needs rewriting against `group_uops_by_level`.
 
+**µop -> station ROUTING** (2026-09-05, Tanawin) — `rsv_id` is no longer
+zero. Two halves, split by who owns the question.
+`CPUO3_Config.rsv_ids_for(uop)` answers WHICH stations can run a kind: the
+machine's counterpart of `IsaBase.units_for` (that names the UNITS, this
+names the STATIONS feeding such a unit), matched by IDENTITY, returning
+positions in `rsv_specs` — which IS the routing value, since `CoreO3` builds
+stations by position and `RsvBase.lane_targets_me` compares against that
+index. It RAISES on an unroutable µop, a guard the config's own
+stranded-µop check already makes unreachable for a used kind.
+`Decode.rsv_id_for(uop, lane)` is the POLICY: `ids[lane % len(ids)]`.
+Decision: **modulo the LANE, decided at elaboration** — a µop several
+stations can run is spread across them by lane instead of piling every lane
+onto the first, and because both the kind and the lane are known at generate
+time the answer is a CONSTANT the decoder wires, so routing costs no
+comparator and no hardware at all. The lane index therefore threads down the
+walk (`transfer` → `mop_decode` → `uop_decode`), which is what it is for.
+MEASURED on the whole-core elaboration (stations mem/alu/system/control):
+decode's 40 templates now write four distinct ids — 8 to mem (5 loads + 3
+stores), 21 to alu, 3 to system, 8 to control — where every one of them
+wrote 0 before. LIMIT: the spread is per-lane and static, so it balances
+nothing at runtime; a lane whose station is full stalls even when a sibling
+station running the same kind is empty.
+
 **`carolyne/uarch/common/word_util.py`** (2026-08-24) — reading the word by
 the description's rules. Decode is the ONE legitimate consumer (§2: nothing
 downstream carries the raw word), but the helpers live in `common/` beside
@@ -1364,10 +1387,10 @@ its handle), legal beside the k2k because the copy skipped the field, so
 nothing is driven twice; `convert_lane(lane)` takes the lane index for
 exactly that fresh selection. What the skip warning still lists and truly
 goes unfilled is the rename half proper (`pr_idx_<n>`, `is_spec`/
-`spec_tag`, `data_src_1`). LIMIT, narrowed to decode's own writes:
-`uop_decode` writes is_branch/is_store/rsv_id zero — every valid lane
-still names station 0 (and reads non-branch, non-store) until the real
-rules land there.
+`spec_tag`, `data_src_1`). That LIMIT is now CLOSED: `uop_decode` fills
+is_branch/is_store from the template (2026-09-05, `Uop.specified_feature`)
+and rsv_id from the machine (same day, `Decode.rsv_id_for` — see the
+routing entry below).
 
 **The rename READ** (2026-08-27, `dispatch.rename_src_operand` +
 `Rt.read_rename`): convert_lane fills each arch SOURCE slot's rename half
@@ -1787,9 +1810,9 @@ the C++ (which reads dmem in stage 2): the WORD IS CAPTURED AT STAGE 0
 into the record — safe exactly because the LS station issues IN ORDER,
 so no older store can execute after this µop's stage 0; `ExecUnitO3`
 now REFUSES a mem-needing unit on an issue_o3 station for that reason.
-LIMIT: decode still writes `is_store`/`rsv_id` zero, so no µop routes
-to the mem station at runtime — the LS path is structurally complete
-and idle until decode's routing rules land; LIMIT: a store pushed in
+LIMIT LIFTED 2026-09-05: decode now fills `is_store` from the
+template and routes loads/stores to the mem station, so the LS path
+carries real traffic; LIMIT: a store pushed in
 the same cycle its tag resolves keeps the stale tag (the on_issue
 substitution race, same family as the stage-hop one).
 

@@ -203,9 +203,8 @@ class Dispatch(Module):
           aimed there at all
         - nothing commits here: update_rsvs (on the grant) is what writes
           the entries
-        - LIMIT: rsv_id now copies from the decode row, but decode still
-          writes it 0 — every valid lane names station 0 until the
-          µop→station routing rule lands in uop_decode
+        - rsv_id copies from the decode row, which now names the station
+          the µop's kind actually routes to (Decode.rsv_id_for)
         - returns READY: the AND of every station's all_ok
         """
         for lane in range(self.config.fe_lanes):

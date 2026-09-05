@@ -326,3 +326,21 @@ class CPUO3_Config:
         """Bits addressing that class's physical file. Per class, because each
         renamed class gets its own PRF (uop_contract.md Q1)."""
         return (self.phy_size(reg_file) - 1).bit_length()
+
+    def rsv_ids_for(self, uop: Uop) -> Tuple[int, ...]:
+        """Which stations can issue this µop, as the `rsv_id`s a lane names.
+
+        - the machine's half of `IsaBase.units_for`: that answers WHICH UNITS
+          run a kind, this answers which STATIONS feed such a unit
+        - a station's id IS its position in `rsv_specs` (core.py builds them
+          by position), so the index is the routing value itself
+        - identity, the discipline the description layer runs on
+        - more than one is legal: picking among them is the caller's policy
+        """
+        ids = tuple(idx for idx, spec in enumerate(self.rsv_specs)
+                    if any(listed is uop for listed in spec.uops))
+        if not ids:
+            raise ValueError(
+                f"CPUO3_Config: no reservation station can issue µop "
+                f"'{uop.name}' — nothing to route it to")
+        return ids

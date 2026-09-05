@@ -135,12 +135,13 @@ class Decode(Module):
                     with zync(self.next_meta):
                         for lane in range(self.config.fe_lanes):
                             self.write_lane_default(self.decode[lane])
-                            self.mop_decode(level,
+                            self.mop_decode(level, lane,
                                             self.fetch[lane],
                                             self.decode[lane])
 
     def mop_decode(self,
                    level       : int,
+                   lane        : int,
                    fetch_entry : FetchEntryBase,
                    decode_entry: DecodeEntryBase):
         """One level of the walk for this lane: the match guards.
@@ -156,10 +157,24 @@ class Decode(Module):
                 compare = match_field_bits(word, field, value)
                 hit     = compare if hit is None else hit & compare
             with zif(hit):
-                self.uop_decode(uop, fetch_entry, decode_entry)
+                self.uop_decode(uop, lane, fetch_entry, decode_entry)
+
+    def rsv_id_for(self, uop: Uop, lane: int) -> int:
+        """Which station this lane sends that µop to — STATIC, no hardware.
+
+        - the candidates are every station whose units run the kind
+          (`config.rsv_ids_for`); one of them has to be chosen
+        - chosen by `lane % len(candidates)`, so a µop several stations can
+          run is spread across them by lane instead of piling on the first
+        - a constant per (µop, lane), so the decoder wires it and builds
+          no comparison
+        """
+        ids = self.config.rsv_ids_for(uop)
+        return ids[lane % len(ids)]
 
     def uop_decode(self,
                    uop         : Uop,
+                   lane        : int,
                    fetch_entry : FetchEntryBase,
                    decode_entry: DecodeEntryBase):
         """The WHOLE record for a lane that decoded to this µop, one assign.
@@ -187,19 +202,18 @@ class Decode(Module):
         # is_branch / is_store come from the TEMPLATE: the ISA states what a
         # µop is (Uop.specified_feature) and the machine decides what that
         # means — the ROB groups its commit barrier on both, the store buffer
-        # pops on is_store. Constants, because a template's features are
-        # known at elaboration; the write must exist even when a µop has
-        # neither, since the rows are REGs and silence would keep the
+        # pops on is_store. rsv_id comes from the MACHINE: which stations run
+        # the kind, picked by lane. All three are constants known at
+        # elaboration; the write must exist even when a µop has neither
+        # feature, since the rows are REGs and silence would keep the
         # previous instruction's claim.
-        # LIMIT: rsv_id is still 0 — µop→station routing needs a map the
-        # machine has not got, so every lane still names station 0.
         row = {"valid"    : 1,
                "pc"       : pc,
                "npc"      : pc + self.config.isa.ilen_bytes,
                "uop_idx"  : uop.uop_idx,
                "is_branch": int(uop.has_feature("is_branch")),
                "is_store" : int(uop.has_feature("is_store")),
-               "rsv_id"   : 0} #TODO we will manage that later
+               "rsv_id"   : self.rsv_id_for(uop, lane)}
         for atm_opr in self.atm_operands:
             operand = operand_by_atm_opr.get(id(atm_opr))   # None = slot left empty
             group   = self._operand_group(word, atm_opr, operand)
