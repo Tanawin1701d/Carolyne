@@ -62,13 +62,13 @@ def test_a_decode_entry_is_the_machine_shape_plus_every_isa_operand():
 
     # The ISA half, core-wide: RV32I's three source slots and its one
     # destination, whatever unit ends up running the µop. dest_1 is a plain
-    # DEST, so no wb_required bit — the role itself is the constant answer.
+    # DEST, and every dest now carries wb_required: the decoder answers it.
     for field in ("active_src_1", "valid_src_1", "ar_idx_src_1",
                   "active_src_2", "valid_src_2", "ar_idx_src_2", "data_src_2",
                   "active_src_3", "valid_src_3", "data_src_3",
                   "active_dest_1", "ar_idx_dest_1"):
         assert _has_field(host.table, field), field
-    assert not _has_field(host.table, "wb_required_dest_1")
+    assert _has_field(host.table, "wb_required_dest_1")
 
 
 def test_the_table_is_one_row_per_front_end_lane():
@@ -131,14 +131,14 @@ def test_the_widths_come_from_the_isa_and_the_config():
     assert fields["ar_idx_src_1"].width == X.index_width == 5
     assert fields["data_src_3"].width == 32                 # the µtemp's width
     assert fields["active_src_1"].width == fields["valid_src_1"].width == 1
-    assert "wb_required_dest_1" not in fields    # a plain DEST stores no bit
+    assert fields["wb_required_dest_1"].width == 1   # every dest has it
 
 
 def test_a_one_register_class_has_no_architectural_index_to_store():
     # x86 FLAGS: index_width is 0, so there is nothing to choose and a 0-bit
     # field is not a legal width.
     flags = RegFile("flags", 6, 1)
-    core  = AtomicOperand(OperandRole.DEST_W_REQ, "flags_out", reg_file=flags)
+    core  = AtomicOperand(OperandRole.DEST, "flags_out", reg_file=flags)
     opr   = Operand(core, TargetKind.ARCH)          # no index: one register
     uop   = Uop("ADD", 0, dests=(opr,))
     unit  = ExecUnit("alu", (uop,), dest_operands=(core,))

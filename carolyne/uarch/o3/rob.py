@@ -283,13 +283,11 @@ class Rob(Module):
             frees_phy_reg = self.commit_ok[lane] & to_ref(
                 getattr(row, field_name(ACTIVE, atm_operand)))
 
-            # a plain DEST stores no wb_required: its write asks no
-            # permission of the bit, active alone makes it architectural
-            if atm_operand.is_write_required:
-                writes = frees_phy_reg & to_ref(
-                    getattr(row, field_name(WB_REQUIRED, atm_operand)))
-            else:
-                writes = frees_phy_reg
+            # ACTIVE frees the register, WB_REQUIRED makes the write
+            # architectural. A branch forced its slot active with nothing
+            # written, so it frees and stops there.
+            writes = frees_phy_reg & to_ref(
+                getattr(row, field_name(WB_REQUIRED, atm_operand)))
             pr_idx = to_ref(getattr(row, field_name(PR_IDX, atm_operand)))
             ar_idx = self._arch_index(row, atm_operand)
 

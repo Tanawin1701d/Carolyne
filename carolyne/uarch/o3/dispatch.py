@@ -20,7 +20,7 @@ from carolyne.uarch.o3.common_field import IS_SPEC, ROB_DES_IDX, SPEC_TAG
 from carolyne.uarch.o3.config import CPUO3_Config
 from carolyne.uarch.o3.dispatch_helper import build_dispatch
 from carolyne.uarch.o3.operand_field import (ACTIVE, AR_IDX, DATA, PR_IDX,
-                                             VALID, field_name,
+                                             VALID, WB_REQUIRED, field_name,
                                              named_atomic_operands)
 from carolyne.uarch.o3.priority import PRI_RENAME
 from carolyne.uarch.o3.reg_arch_mng import collect_arch_dest_atm_oprs
@@ -147,7 +147,10 @@ class Dispatch(Module):
     def warm_rts(self):
         """Register every lane's rename on its class's RT — metas only.
 
-        - req / pr_idx come off prf_acquisition, is_branch / tag off
+        - the request is WB_REQUIRED, not active: a branch is forced active so
+          the PRF allocates a register the squash can roll back to, but it
+          writes no architectural register, so the RT must map nothing for it
+        - pr_idx comes off prf_acquisition, is_branch / tag off
           tag_acquisition, ar_idx straight off the decode row
         - book_rename only RECORDS the port's metas; RT's on_rename (the
           update half) is what builds the writes from them
@@ -157,8 +160,11 @@ class Dispatch(Module):
             decode_entry            = self.decode[lane]
             is_branch, is_spec, tag = self.tag_acquisition[lane]
             for atm_opr in self.arch_dest_atm_oprs:
-                rt          = self.reg_arch_mng.rt(atm_opr.reg_file)
-                req, pr_idx = self.prf_acquisition[(lane, id(atm_opr))]
+                rt        = self.reg_arch_mng.rt(atm_opr.reg_file)
+                _, pr_idx = self.prf_acquisition[(lane, id(atm_opr))]
+                wb_req    = to_ref(getattr(decode_entry,
+                                           field_name(WB_REQUIRED, atm_opr)))
+                req       = to_ref(decode_entry.valid) & wb_req
                 # a one-register class stores no ar_idx (index_width 0):
                 # there is nothing to choose, that register is 0
                 if atm_opr.reg_file.index_width == 0:

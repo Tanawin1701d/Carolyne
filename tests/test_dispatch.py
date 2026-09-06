@@ -72,8 +72,8 @@ def test_a_dispatch_row_is_one_group_per_operand():
     # RV32I's immediate names no register class, so neither index is there.
     assert by_name["src_3"] == ["active", "valid", "data"]
     # A destination: where the result goes. dest_1 is a plain DEST, so the
-    # wb_required bit drops — the role itself is the constant answer.
-    assert by_name["dest_1"] == ["active", "pr_idx", "ar_idx"]
+    # every dest carries wb_required: the decoder answers it per µop.
+    assert by_name["dest_1"] == ["active", "wb_required", "pr_idx", "ar_idx"]
 
 
 def test_a_lane_carries_the_machine_fields_beside_its_operands():
@@ -100,7 +100,7 @@ def test_the_machine_fields_are_sized_from_the_config():
 
 
 def test_a_source_never_promises_a_writeback():
-    # wb_required is a DESTINATION's promise that the writeback lands before
+    # wb_required is a DESTINATION's promise that a writeback will land before
     # the instruction retires. A source writes nothing, so it has none.
     cfg  = _cfg()
     host = _build(cfg)
@@ -108,9 +108,8 @@ def test_a_source_never_promises_a_writeback():
     assert "wb_required" not in SRC_KINDS
     for slot in ("src_1", "src_2", "src_3"):
         assert not _has_field(host.bus, f"wb_required_{slot}"), slot
-    # dest_1 is a plain DEST, so even the destination stores no bit here;
-    # only a DEST_W_REQ core does (the flags_out test below).
-    assert not _has_field(host.bus, "wb_required_dest_1")
+    # every dest carries it, whatever the µop turns out to write.
+    assert _has_field(host.bus, "wb_required_dest_1")
 
 
 def test_a_destination_waits_on_nothing_and_holds_no_value():
@@ -147,7 +146,7 @@ def test_the_widths_come_from_the_isa_and_the_machine():
     assert fields["data_src_3"].width == 32          # the µtemp's own width
     for flag in ("valid_src_1", "active_src_1", "active_dest_1"):
         assert fields[flag].width == 1
-    assert "wb_required_dest_1" not in fields    # a plain DEST stores no bit
+    assert fields["wb_required_dest_1"].width == 1   # every dest has it
 
 
 def test_the_bus_is_one_row_per_front_end_lane():
@@ -163,7 +162,7 @@ def test_a_utemp_destination_keeps_the_kinds_that_need_no_index():
     # x86's AGU writes a µtemp: it has no architectural register, so no index
     # either, but it is still a destination that must produce its value.
     addr = Intermediate(32, "addr")
-    core = AtomicOperand(OperandRole.DEST_W_REQ, "addr_out", intermediate=addr)
+    core = AtomicOperand(OperandRole.DEST, "addr_out", intermediate=addr)
 
     assert dispatch_operand_kinds(core) == ("active", "wb_required")
 
@@ -193,7 +192,7 @@ def test_a_one_register_class_has_no_architectural_index_to_store():
     # x86 FLAGS: index_width is 0, so there is nothing to choose and a 0-bit
     # field is not a legal width. ar_idx drops, pr_idx stays.
     flags = RegFile("flags", 6, 1)
-    core  = AtomicOperand(OperandRole.DEST_W_REQ, "flags_out", reg_file=flags)
+    core  = AtomicOperand(OperandRole.DEST, "flags_out", reg_file=flags)
     opr   = Operand(core, TargetKind.ARCH)
     uop   = Uop("ADD", 0, dests=(opr,))
     unit  = ExecUnit("alu", (uop,), dest_operands=(core,))

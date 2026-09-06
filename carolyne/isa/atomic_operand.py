@@ -27,13 +27,13 @@ from .reg import Intermediate, RegFile
 # No SRC_DEST member: a slot both read and written (x86 `add eax, ebx`) is TWO
 # operands, filling one src slot and one dest slot of the record.
 #
-# DEST_W_REQ is a destination whose write is REQUIRED — the µop must produce it
-# before the instruction can retire, so a reservation station carries a
-# `wb_required_<name>` bit for it where a plain DEST carries only its index.
+# NOT here: whether a destination's write is required before the instruction
+# retires. That is not an ISA fact but a per-INSTRUCTION one — the same slot is
+# written by one µop and left empty by another — so the DECODER answers it per
+# µop in the record's `wb_required_<name>` bit.
 class OperandRole(Enum):
-    SRC        = "src"
-    DEST       = "dest"
-    DEST_W_REQ = "dest_w_req"
+    SRC  = "src"
+    DEST = "dest"
 
     def __str__(self) -> str:
         return self.value
@@ -44,13 +44,13 @@ class OperandRole(Enum):
 
     @property
     def is_dest(self) -> bool:
-        return self in (OperandRole.DEST, OperandRole.DEST_W_REQ)
+        return self is OperandRole.DEST
 
 
-# The roles a src slot and a dest slot may hold. Two roles are destinations, so
-# every consumer that used to compare against DEST tests membership instead.
+# The roles a src slot and a dest slot may hold. Tuples, not bare members, so a
+# consumer tests membership and an added role costs it nothing.
 SRC_ROLES  = (OperandRole.SRC,)
-DEST_ROLES = (OperandRole.DEST, OperandRole.DEST_W_REQ)
+DEST_ROLES = (OperandRole.DEST,)
 
 
 # Which of a core's two targets an operand selects.
@@ -125,7 +125,3 @@ class AtomicOperand:
     def is_dest(self) -> bool:
         return self.role.is_dest
 
-    @property
-    def is_write_required(self) -> bool:
-        """A destination the µop must write before the instruction retires."""
-        return self.role is OperandRole.DEST_W_REQ

@@ -302,8 +302,8 @@ class IsaBase:
         return unit.src_operands
 
     def dest_atomic_operands_for(self, unit: ExecUnit) -> Tuple[AtomicOperand, ...]:
-        """The slots this exec unit WRITES. Both dest roles are returned;
-        read `is_write_required` to tell DEST_W_REQ from a plain DEST."""
+        """The slots this exec unit WRITES: the write-port side of the same
+        declaration."""
         self._check_unit(unit, "dest_atomic_operands_for")
         return unit.dest_operands
 

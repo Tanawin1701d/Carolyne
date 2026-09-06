@@ -205,7 +205,8 @@ class Decode(Module):
                RSV_ID   : self.rsv_id_for(uop, lane)}
         for atm_opr in self.atm_operands:
             operand = operand_by_atm_opr.get(id(atm_opr))   # None = slot left empty
-            group   = self._operand_group(word, atm_opr, operand)
+            group   = self.build_atm_operand_value(word, atm_opr, operand,
+                                                   uop.has_feature(IS_BRANCH))
             row.update(group)
         decode_entry |= row
 
@@ -227,15 +228,22 @@ class Decode(Module):
         self._imm_wire_cnt += 1
         return extract_imm_value(word, operand, out)
 
-    def _operand_group(self, word, atm_opr, operand) -> dict:
-        """One atomic operand's fields for this µop: filled, zeros elsewhere.
+    def build_atm_operand_value(self, word, atm_opr, operand, is_branch) -> dict:
+        """What one atomic operand's fields HOLD for this µop, keyed by name.
 
-        - mirrors decode_helper.decode_operand_fields: only kinds the record
-          has are written
+        decode_helper.decode_operand_fields builds the same group's SHAPE; this
+        fills it. A slot the µop leaves empty reads zero.
+
+        - only kinds the record actually has are written
         - `data` needs a has_imm source; `ar_idx` only where the class
           has an index to choose (has_arch, index_width > 0)
+        - a BRANCH forces every dest slot ACTIVE even when the µop leaves it
+          empty, so rename allocates a physical register the squash can roll
+          the pointer back to; `wb_required` stays off there, so commit frees
+          that register without making anything architectural
         """
-        active = operand is not None
+        filled = operand is not None
+        active = filled or (is_branch and atm_opr.is_dest)
         group  = {field_name(ACTIVE, atm_opr): int(active)}
 
         if atm_opr.is_src:
@@ -245,20 +253,20 @@ class Decode(Module):
             # nothing is known at decode.
             # LIMIT: nothing wakes a linking µtemp downstream yet — that is
             # the cracker/rename story, not decode's.
-            is_imm = (active and operand.is_intermediate
+            is_imm = (filled and operand.is_intermediate
                       and operand.matcher is not None)
             group[field_name(VALID, atm_opr)] = int(is_imm)
             if atm_opr.has_imm:
                 group[field_name(DATA, atm_opr)] = (self.build_imm(word, operand)
                                                     if is_imm else 0)
         else:
-            # only a DEST_W_REQ core has the field; there the bit is active
-            if atm_opr.is_write_required:
-                group[field_name(WB_REQUIRED, atm_opr)] = int(active)
+            # FILLED, not active: a forced-active branch slot has no writeback
+            # coming, and commit must not wait for one
+            group[field_name(WB_REQUIRED, atm_opr)] = int(filled)
 
         if atm_opr.has_arch and atm_opr.reg_file.index_width:
             group[field_name(AR_IDX, atm_opr)] = (extract_arch_index(word, operand)
-                                                  if active and operand.is_arch
+                                                  if filled and operand.is_arch
                                                   else 0)
         return group
 

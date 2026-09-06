@@ -73,7 +73,7 @@ def test_a_station_table_is_the_isa_operands_plus_the_machine_shape():
                   "pr_idx_dest_1"):
         assert _has_field(host.table, field), field
     # A plain DEST always writes, so it carries no runtime bit.
-    assert not _has_field(host.table, "wb_required_dest_1")
+    assert _has_field(host.table, "wb_required_dest_1")
     # src_3 is the immediate, which no ALU µop reads.
     assert not _has_field(host.table, "data_src_3")
 
@@ -116,20 +116,17 @@ def test_a_utemp_source_carries_only_its_data():
     assert not _has_field(host.table, "valid_src_3")
 
 
-def test_only_a_write_required_dest_carries_the_required_bit():
-    # A plain DEST always writes, so it needs no runtime bit; DEST_W_REQ is the
-    # conditional one, and wb_required_<name> is what makes it conditional.
+def test_every_dest_carries_the_writeback_bit():
+    # The bit is no longer an ISA declaration: every dest has it and the
+    # DECODER answers it per µop, because the same slot is written by one µop
+    # and left empty by another.
     cfg  = _cfg()
     spec = RsvSpec(True, 16, (ALU,), RsvType.RSV_EXEC)
 
-    plain = AtomicOperand(OperandRole.DEST,       "d_plain", reg_file=X)
-    w_req = AtomicOperand(OperandRole.DEST_W_REQ, "d_req",   reg_file=X)
-    assert plain.is_dest and w_req.is_dest              # both are destinations
-    assert w_req.is_write_required and not plain.is_write_required
-
-    assert sorted(operand_fields(cfg, spec, plain)) == ["pr_idx_d_plain"]
-    assert sorted(operand_fields(cfg, spec, w_req)) == ["pr_idx_d_req",
-                                                       "wb_required_d_req"]
+    dest = AtomicOperand(OperandRole.DEST, "d_plain", reg_file=X)
+    assert dest.is_dest
+    assert sorted(operand_fields(cfg, spec, dest)) == ["pr_idx_d_plain",
+                                                       "wb_required_d_plain"]
 
 
 def test_the_index_and_data_widths_come_from_the_machine_and_the_class():

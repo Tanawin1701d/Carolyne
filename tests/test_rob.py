@@ -59,11 +59,11 @@ def test_a_rob_entry_is_the_machine_shape_plus_the_isa_destinations():
         assert _has_field(host.table, field), field
 
     # The ISA half: one group per DESTINATION core. RV32I writes one register,
-    # and dest_1 is a plain DEST, so no wb_required bit — the role itself is
+    # and every dest carries wb_required now, because the decoder is
     # the (constant) answer, and a constant needs no storage.
     for field in ("active_dest_1", "pr_idx_dest_1", "ar_idx_dest_1"):
         assert _has_field(host.table, field), field
-    assert not _has_field(host.table, "wb_required_dest_1")
+    assert _has_field(host.table, "wb_required_dest_1")
 
 
 def test_only_destinations_reach_the_rob():
@@ -99,7 +99,7 @@ def test_a_one_register_class_has_no_architectural_index_to_store():
     flags = RegFile("flags", 6, 1)
     assert flags.index_width == 0
 
-    core = AtomicOperand(OperandRole.DEST_W_REQ, "flags_out", reg_file=flags)
+    core = AtomicOperand(OperandRole.DEST, "flags_out", reg_file=flags)
     opr  = Operand(core, TargetKind.ARCH)          # no index: one register
     uop  = Uop("ADD", 0, dests=(opr,))
     unit = ExecUnit("alu", (uop,), dest_operands=(core,))

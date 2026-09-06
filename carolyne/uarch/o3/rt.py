@@ -161,6 +161,9 @@ class Rt(Module):
           (PRI_RENAME beats the chain copy): the state it leaves behind,
           which is what on_mis_pred restores — the branch itself retires,
           so its own rename must survive the rollback
+        - the snapshot is gated on is_branch ALONE, not on the request: a
+          branch that writes no register still has to leave the row a
+          mispredict restores, and is_branch already carries the lane's valid
         """
         amount = self.isa_reg_file.amount
         with priority(PRI_RENAME):
@@ -175,7 +178,7 @@ class Rt(Module):
                 with zif(req_rename_sig):
                     write_entry(self.temp_dispatch[port_idx], arch_idx_to_set,
                                 amount, renamed=1, prf_idx=prf_idx_to_set)
-                with zif(req_rename_sig & is_branch_sig):
+                with zif(is_branch_sig):
                     copy_row(self.spec_rt[OH(spectag_dyn)],
                              self.temp_dispatch[port_idx],
                              amount, clocked=True)
