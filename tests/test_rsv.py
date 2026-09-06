@@ -116,10 +116,9 @@ def test_a_utemp_source_carries_only_its_data():
     assert not _has_field(host.table, "valid_src_3")
 
 
-def test_every_dest_carries_the_writeback_bit():
-    # The bit is no longer an ISA declaration: every dest has it and the
-    # DECODER answers it per µop, because the same slot is written by one µop
-    # and left empty by another.
+def test_a_dest_carries_the_writeback_bit_and_its_index():
+    # No active bit: decode forces a branch's dest slots active, so the squash
+    # rolls every class back unconditionally and nothing reads it here.
     cfg  = _cfg()
     spec = RsvSpec(True, 16, (ALU,), RsvType.RSV_EXEC)
 

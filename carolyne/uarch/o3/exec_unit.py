@@ -32,6 +32,7 @@ from carolyne.uarch.o3.common_field import (IS_SPEC, NPC, PC, ROB_DES_IDX, SPEC_
 from carolyne.uarch.o3.config import CPUO3_Config, RsvSpec, rsv_type_fields
 from carolyne.uarch.o3.exec_unit_api import ExecUnitApiO3
 from carolyne.uarch.o3.operand_field import PR_IDX, field_name
+from carolyne.uarch.o3.rsv_helper import station_atm_operands
 from carolyne.uarch.o3.priority import PRI_SUC_PRED
 from carolyne.uarch.o3.rsv import RsvBase, RsvBypass
 
@@ -67,6 +68,12 @@ class ExecUnitO3(Module):
         # a multi-unit complex needs per-unit routing after issue.
         self.exec_unit = rsv_spec.exec_unit[0]
         self.label     = name or f"exu_{rsv_spec.label.replace('/', '_')}"
+        # The dest slots a squash rolls back: rename booked a physical register
+        # for each, so each has a pointer to restore. The STATION's set, not
+        # the core's — a slot the entry has no field for cannot be read.
+        self.arch_dest_atm_oprs = tuple(
+            atm_opr for atm_opr in station_atm_operands(config.isa, rsv_spec)
+            if atm_opr.is_dest and atm_opr.has_arch)
         # The top core module, from connect(). Underscored: it is a BACK
         # reference, and the sim manifest walks public module attributes —
         # a public ancestor ref would read as an attribute cycle.
@@ -142,16 +149,23 @@ class ExecUnitO3(Module):
         - the zif scopes the squash: every flush takes `dyn_cond` as its gate
         - this complex EXCLUDES ITSELF from the per-stage kill: the branch is
           older than everything it kills and still has to report
-        - LIMIT: `dest_renames` is empty, so no RT/PRF pointer rolls back yet
+        - every ARCH dest the station carries is named: decode forces a
+          branch's dest slots active, so rename allocated for all of them and
+          a branch that writes nothing still rolls its class's PRF back
         """
         if dyn_cond is None:
             raise ValueError(
                 f"ExecUnitO3 '{self.label}'.declare_mis_pred: needs the "
                 f"mispredict condition — an unconditional squash is nonsense")
         self._declared_mis_pred = True
+        dest_renames = []
+        for atm_opr in self.arch_dest_atm_oprs:
+            phy_idx = to_ref(getattr(src[0], field_name(PR_IDX, atm_opr)))
+            dest_renames.append((atm_opr, phy_idx))
         with zif(dyn_cond):
             self._core.on_mis_pred(to_ref(getattr(src[0], SPEC_TAG)),
-                                   to_ref(getattr(src[0], ROB_DES_IDX)))
+                                   to_ref(getattr(src[0], ROB_DES_IDX)),
+                                   dest_renames)
 
     def declare_suc_pred(self, src, dyn_cond=None):
         """A stage resolved a prediction CORRECTLY under `dyn_cond`: the tag

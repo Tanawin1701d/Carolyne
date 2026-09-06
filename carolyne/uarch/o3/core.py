@@ -130,17 +130,13 @@ class CoreO3(Module):
           guard as its gate
         - `last_valid_spec_tag_dyn` is the branch's one-hot tag,
           `rob_des_idx_dyn` its ROB entry (carried in the stage record)
-        - `dest_renames` is (active, atomic_operand, phy_idx) per dest slot
-          of the branch: under its active bit that class's RT restores the
-          branch's snapshot and its PRF rolls back to just past the
-          branch's own allocation
+        - `dest_renames` is (atomic_operand, phy_idx) per dest slot of the
+          branch: that class's RT restores the branch's snapshot and its PRF
+          rolls back to just past the branch's own allocation
         - the Arf is untouched on purpose: it holds committed state only
         - LIMIT: dispatch books the Mpft rows, but seeds them with the
           NEWEST open tag instead of the mask of every open tag, so this
           read under-kills: younger speculations survive the squash
-        - LIMIT: a branch with no active dest (a plain BEQ) restores no RT
-          and rolls no PRF pointer back, so squashed youngers' renames of
-          that class survive until a per-tag snapshot exists
         """
         if self._mis_pred_built:
             raise ValueError(
@@ -169,14 +165,14 @@ class CoreO3(Module):
         self.mpft   .on_mis_pred(last_valid_spec_tag_dyn)
         self.rob    .on_mis_pred(rob_des_idx_dyn)
 
-        # only DESTINATION classes hold rename state: each dest slot of the
-        # branch rolls its class's RT and PRF back, under its active bit
-        for active, atm_opr, phy_idx in dest_renames:
+        # only DESTINATION classes hold rename state. No active guard: decode
+        # forces every dest slot of a branch active, so rename allocated for
+        # all of them and every class has a pointer to roll back.
+        for atm_opr, phy_idx in dest_renames:
             rt  = self.reg_arch_mng.rt (atm_opr.reg_file)
             prf = self.reg_arch_mng.prf(atm_opr.reg_file)
-            with zif(active):
-                rt .on_mis_pred(last_valid_spec_tag_dyn)
-                prf.on_mis_pred(phy_idx)
+            rt .on_mis_pred(last_valid_spec_tag_dyn)
+            prf.on_mis_pred(phy_idx)
 
     # --- resolve ----------------------------------------------------------------
     def on_suc_pred(self, last_valid_spec_tag_dyn, rob_des_idx_dyn):
