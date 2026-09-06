@@ -109,7 +109,8 @@ class CoreO3(Module):
         self.decode  .connect(self.fetch, self.dispatch)
         self.dispatch.connect(self.decode      , self.backend_meta,
                               self.reg_arch_mng, self.tag_gen     ,
-                              self.rob         , self.rsvs)
+                              self.mpft        , self.rob         ,
+                              self.rsvs)
         # Station <-> complex, by position: the complex calls back into the core for
         # the declare fan-outs, the station takes the arb its issue zyncs on.
         for rsv, exu in zip(self.rsvs, self.exus):
@@ -134,9 +135,9 @@ class CoreO3(Module):
           branch's snapshot and its PRF rolls back to just past the
           branch's own allocation
         - the Arf is untouched on purpose: it holds committed state only
-        - LIMIT: mpft booking (on_book_rename/on_rename) is unwired — it
-          needs the open-tag mask no block drives yet; the read returns an
-          unbooked table until that lands
+        - LIMIT: dispatch books the Mpft rows, but seeds them with the
+          NEWEST open tag instead of the mask of every open tag, so this
+          read under-kills: younger speculations survive the squash
         - LIMIT: a branch with no active dest (a plain BEQ) restores no RT
           and rolls no PRF pointer back, so squashed youngers' renames of
           that class survive until a per-tag snapshot exists

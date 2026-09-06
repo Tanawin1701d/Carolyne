@@ -113,10 +113,22 @@ class TagGen(Module):
         for i, req in enumerate(earlier):
             # A select, because rotating "by zero" is not a rotate. No width
             # passed: the value is next_tag-wide and rotate_left reads that off.
-            tag = mux(req, rotate_left(tag), tag,
+            tag = mux(req, rotate_left(tag, 1), tag,
                       width = self.config.sptag_len,
                       name  = "{}_s{}".format(label, i))
         return tag
+
+    # ---- reads ---------------------------------------------------------------------
+    def get_last_tag(self):
+        """The tag handed out most recently, or 0 when none is outstanding.
+
+        - ONE tag, not the mask of every open tag: Mpft.on_rename wants the
+          mask, and this value is not it
+        """
+        sptag_len = self.config.sptag_len
+        return mux(self.free_tag != (sptag_len - 1),   # anything open?
+                   rotate_right(self.next_tag, 1),     # step back one place
+                   0, width=sptag_len, name="last_tag")
 
     # ---- a prediction resolves correctly ----------------------------------------
     def on_suc_pred(self, valid):
@@ -169,4 +181,5 @@ class TagGen(Module):
             self.free_tag |= (self.config.sptag_len - 1)
             # Width stated here, unlike book_rename: last_valid_tag comes from a
             # caller, so the check that it really is tag-wide is worth having.
-            self.next_tag |= rotate_left(last_valid_tag, width=self.config.sptag_len)
+            self.next_tag |= rotate_left(last_valid_tag, 1,
+                                         width=self.config.sptag_len)

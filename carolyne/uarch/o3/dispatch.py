@@ -68,7 +68,7 @@ class Dispatch(Module):
         self.rsvs         = None    # the reservation stations, from connect()
 
     # retrieve data you want
-    def connect(self, decoder, next_meta, reg_arch_mng, tag_gen, rob, rsvs):
+    def connect(self, decoder, next_meta, reg_arch_mng, tag_gen, mpft, rob, rsvs):
         """Fill the stage's slots: the decoded rows this stage converts, the
         arb its granted transfer runs against, and every block the warm/
         update halves book on."""
@@ -76,6 +76,7 @@ class Dispatch(Module):
         self.next_meta    = next_meta
         self.reg_arch_mng = reg_arch_mng
         self.tag_gen      = tag_gen
+        self.mpft         = mpft
         self.rob          = rob
         self.rsvs         = tuple(rsvs)
 
@@ -168,6 +169,17 @@ class Dispatch(Module):
                 rt.book_rename(lane, req, is_branch, tag, ar_idx, pr_idx)
         return val(1, 1)
 
+    def warm_mpft(self):
+        """Register every lane's branch booking on the Mpft. Metas only.
+
+        - EVERY lane is registered, branch or not: on_rename reads a port's
+          metas unconditionally, so an unbooked port has none to read
+        """
+        for lane in range(self.config.fe_lanes):
+            is_branch, _is_spec, tag = self.tag_acquisition[lane]
+            self.mpft.on_book_rename(lane, is_branch, tag)
+        return val(1, 1)    # always READY: it books no resource of its own
+
     def warm_rob(self):
         """Ask the ROB where every lane would land. Wires only: it reads the
         DECODE rows, so the fit answer exists BEFORE the grant it decides.
@@ -223,6 +235,12 @@ class Dispatch(Module):
             rt = self.reg_arch_mng.rt(atm_opr.reg_file)
             rt.on_rename()
 
+    def update_mpft(self):
+        """Commit the cycle's Mpft rows. MUST run inside the granted zync."""
+        # LIMIT: the newest open tag, not the mask, so a squash under-kills
+        # a REGISTER read, so it is the pre-booking value whatever order runs
+        self.mpft.on_rename(self.tag_gen.get_last_tag())
+
     def update_rob(self):
         """Commit the cycle's allocations on the ROB. MUST be inside the grant."""
         self.rob.on_dispatch(self.dispatch_bus)
@@ -243,12 +261,13 @@ class Dispatch(Module):
 
         # the warm half books, and each call answers whether its resource
         # is actually available — the AND is the cycle's go/stall bit
-        tag_ok = self.warm_tag_gen()
-        prf_ok = self.warm_prfs()
-        rt_ok  = self.warm_rts()
-        rob_ok = self.warm_rob()
-        rsv_ok = self.warm_rsvs()
-        self.ready_to_go *= tag_ok & prf_ok & rt_ok & rob_ok & rsv_ok
+        tag_ok  = self.warm_tag_gen()
+        prf_ok  = self.warm_prfs()
+        rt_ok   = self.warm_rts()
+        mpft_ok = self.warm_mpft()
+        rob_ok  = self.warm_rob()
+        rsv_ok  = self.warm_rsvs()
+        self.ready_to_go *= tag_ok & prf_ok & rt_ok & mpft_ok & rob_ok & rsv_ok
 
         with pip(self.dispatch_meta, auto_restart=True):
             # inside the zync: everything here fires on the grant only, and
@@ -258,6 +277,7 @@ class Dispatch(Module):
                 self.update_tag_gen()
                 self.update_prfs()
                 self.update_rts()
+                self.update_mpft()
                 self.update_rob()
                 self.update_rsvs()
 

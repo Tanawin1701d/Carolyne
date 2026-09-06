@@ -23,14 +23,6 @@ here; a decision already made and recorded goes in CLAUDE.md §4, not here.
 
 ## Speculation
 
-- [ ] **Mpft booking is unwired.** `Mpft.on_rename` needs the current
-      open-tag mask and no block owns that signal, so `get_fix_tag` reads an
-      unbooked table — a squash currently computes its kill mask from rows
-      nothing ever wrote.
-      *Where:* `uarch/o3/mpft.py`, `uarch/o3/core.py` (`on_mis_pred`).
-      *Closes when:* some block publishes the open-tag mask and dispatch calls
-      `on_book_rename` / `on_rename`.
-
 - [ ] **A destless branch rolls back no rename state.** `dest_renames` is what
       names the classes to restore, so a plain `BEQ` (which writes no register)
       restores no RT and rolls no PRF pointer back — squashed younger

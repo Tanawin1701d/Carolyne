@@ -5,9 +5,9 @@
 # It returns 0 for n == 1 — correct as a log, and NOT a legal Kathryn width, so
 # a caller sizing a signal with it must decide what one entry means.
 #
-# `rotate_left` is in Kathryn (`combinational.py`, exported from the package
-# root), not here: it builds hardware, and inside Kathryn it can read its width
-# off the signal. Import it from `kathryn`.
+# `rotate_left` / `rotate_right` are in Kathryn (`combinational.py`, exported
+# from the package root), not here: they build hardware, and inside Kathryn they
+# read the width off the signal. Import them from `kathryn`.
 
 from __future__ import annotations
 
