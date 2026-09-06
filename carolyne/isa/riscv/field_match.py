@@ -1,32 +1,27 @@
-# Where RV32I's encoding fields live in the 32-bit instruction word
+# Where RV32I's encoding fields are in the 32-bit instruction word
 # (uop_contract.md §1.3). Segments are (start, end) with end EXCLUSIVE and
 # bit 0 = LSB, so funct7 = (25, 32) is bits 31..25.
 #
 # RV32I is fixed 32-bit, so ILEN_BYTES is the constant 4 and no length decoder
-# is needed; PC_WIDTH / PC_ALIGN sit beside it as one addressing group.
+# is needed; PC_WIDTH / PC_ALIGN are beside it as one addressing group.
 #
 # The scrambled immediates (S/B/J) are why InstrFieldMatch takes a TUPLE of
-# segments. imm_b keeps four segments even where two are adjacent — (7,8) is
-# imm[11] and (8,12) is imm[4:1], and merging would erase that they land in
-# different places.
+# segments. imm_b keeps four segments even where two are next to each other —
+# (7,8) is imm[11] and (8,12) is imm[4:1], and merging them would hide that
+# they go to different places in the value.
 #
 # The six base FORMATS are InstrFieldMatch unions of the fields they contain,
-# DECLARED but NOT CONSUMED: Mop has no format slot, so rv32i.py names the
-# format of each opcode group in a comment. The mop table is grouped by
-# OPCODE, not by format — one I-type Mop would have to cover four opcodes
-# (LOAD, OP-IMM, JALR, SYSTEM), which one matcher cannot say.
+# DECLARED but NOT USED: Mop has no format slot, so rv32i.py names the format
+# of each opcode group in a comment. The mop table is grouped by OPCODE, not by
+# format, because one I-type Mop would have to cover four opcodes (LOAD,
+# OP-IMM, JALR, SYSTEM), which one matcher cannot state.
 #
 # `val(...)` is the package's shorthand for an InstrValueMatch, kept here
 # beside the fields those values are compared against.
 #
-# KNOWN GAPS — this file is where the encoding side runs out of road, and the
-# missing pieces belong in the contract, not here:
-# - A rule can DISCRIMINATE but not EXTRACT. Nothing says where a segment lands
-#   inside the assembled field: for imm_s, (7,12) is imm[4:0] and (25,32) is
-#   imm[11:5]; for imm_b and imm_j the scramble is worse. A segment needs a
-#   destination offset (and the immediates a sign-extension rule) before an
-#   immediate can be built — picking the instruction now works, reading its
-#   operand value does not.
+# NOT here: how the matched bits become a VALUE. A rule here says WHICH BITS,
+# never where a segment goes in the assembled immediate or whether it is
+# signed. That is stated per operand by `imm_extract` (imm.py).
 
 from __future__ import annotations
 
@@ -35,17 +30,12 @@ from .reg import X_LEN
 
 
 def val(*values: int) -> InstrValueMatch:
-    """One match value per segment of the field this will be paired with.
-
-    Shorthand for InstrValueMatch, which spelled out needs a lone trailing
-    comma in the one-segment case. Segment order is the field's:
-    `val(0b000, 0b0100000)` beside FUNCT3_7 is funct3 then funct7.
-    """
+    """One match value per segment, in the field's own segment order."""
     return InstrValueMatch(values)
 
 # --- instruction addressing (the three scalars IsaBase takes) ---------------
 # Grouped here because they are one subject with the field positions below:
-# where an instruction sits and how long it is. PC_WIDTH is XLEN by the RV32I
+# where an instruction is and how long it is. PC_WIDTH is XLEN by the RV32I
 # spec — the PC still has a width even though it is not a register class, and
 # reg.py says why it is not one.
 PC_WIDTH   = X_LEN      # program counter is XLEN bits

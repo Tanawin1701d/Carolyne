@@ -1,6 +1,6 @@
-# ExecUnitApi — what a stage body reaches the ENGINE through, beside the raw
+# ExecUnitApi — what a stage body uses to call the ENGINE, beside the raw
 # Kathryn it now writes (exec_unit.py: a body is natural Kathryn since
-# 2026-08-28, the compromise of the no-Kathryn rule). The base declares the
+# the relaxed no-Kathryn rule). The base declares the
 # surface and raises; the O3 generator overrides it with the real machinery
 # (uarch/o3/fu.py), one instance per stage invocation, so a call can resolve
 # against the stage's own records.
@@ -29,7 +29,7 @@ class ExecUnitApi:
     """The engine half of a stage body. Subclassed by the O3 generator.
 
     EVERY `src`/`des` here is the stage record's KARRAY, not an element —
-    the api indexes inside, so a body hands on what exec_stage handed it
+    the api indexes inside, so a body passes on what exec_stage gave it
     (`api.declare_fin(src)`, `return res`) and never pre-indexes for a
     call. Its own field reads still index: `src[0].loaded_word`.
     """
@@ -49,13 +49,8 @@ class ExecUnitApi:
         return to_ref(getattr(src[0], f"data_{atm_opr.name}"))
 
     def field_width(self, src, field: str) -> int:
-        """How wide that record field is — what sizes a body's OWN next-stage
-        record so the engine's transfer (spec pair, rob_des_idx) never
-        truncates. Concrete: a width is the same under every generator.
-
-        `.size`, not `.stop`: stop is an upper BIT INDEX, and the two agree
-        only on a whole signal (start 0). A slice view would read wrong.
-        """
+        """How wide that record field is, so a body can size its own record."""
+        # .size, not .stop: stop is an upper BIT INDEX, so a slice would lie
         return to_ref(getattr(src[0], field))._slice.size
 
     def next_stage_fields(self, src, *dest_oprs: AtomicOperand) -> dict:
@@ -71,7 +66,7 @@ class ExecUnitApi:
         - name a dest ONLY if a later stage writes it back — that is what
           asks for its promised physical register
         - generator-supplied: the names ARE the machine's record
-          vocabulary, so the generator that owns them answers this
+          vocabulary, so the generator that defines them answers this
         """
         raise NotImplementedError(
             f"{type(self).__name__}.next_stage_fields: the generator supplies this")
@@ -98,7 +93,7 @@ class ExecUnitApi:
                 ...   # the body's writes to `des` — fire on the grant
 
         `src` is the record this stage received, `des` the register record
-        it hands on; the generator transfers the speculation state AND the
+        it passes on; the generator copies the speculation state AND the
         rob_des_idx from src to des inside the block, so `des` must carry
         all three. The body places the block where its own Kathryn
         structure completes a transfer; work outside it does not move the
@@ -135,7 +130,7 @@ class ExecUnitApi:
             f"{type(self).__name__}.lsq_is_full: the generator supplies this")
 
     def lsq_push_store(self, mem_addr, data):
-        """An executed store enters the buffer; it reaches memory only
+        """An executed store enters the buffer; it is written to memory only
         after the ROB retires it. The engine reads the speculation pair
         off the stage's record itself. Respects the enclosing scope."""
         raise NotImplementedError(

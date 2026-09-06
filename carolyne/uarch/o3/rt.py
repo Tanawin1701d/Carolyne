@@ -10,11 +10,7 @@ from carolyne.uarch.o3.priority import PRI_COMMIT, PRI_MIS_PRED, PRI_RENAME
 def write_entry(dst_row, dyn_idx, amount, **fields):
     """Write the one element of a WIRE row that `dyn_idx` names, at run time.
 
-    A runtime-indexed Karray write needs a REG backing -- a wire cannot hold its
-    non-selected elements -- so on a wire the selection moves into the guard:
-    one statically-indexed write per entry, enabled when the index names it.
-    That is the same hardware a dynamic write would build, spelled the way
-    Kathryn accepts. The caller's own `zif` (if any) still wraps this one.
+    - a wire cannot hold non-selected elements, so the selection is a guard
     """
     for arch_idx in range(amount):
         with zif(dyn_idx == arch_idx):
@@ -24,10 +20,9 @@ def write_entry(dst_row, dyn_idx, amount, **fields):
 def copy_row(dst_row, src_row, amount, clocked):
     """Copy one whole row of a Karray, element by element.
 
-    A Karray selection collapses EVERY dimension to exactly one element -- there
-    are no ranges, so `dst_row *= src_row` is not a statement Kathryn has. The
-    loop is the spelling of it. `clocked` picks the operator the destination
-    needs: `|=` for a reg-backed array, `*=` for a wire-backed one.
+    - a Karray selection collapses EVERY dimension to one element, so
+      `dst_row *= src_row` is not a statement Kathryn has
+    - `clocked` picks the operator: `|=` for reg-backed, `*=` for wire
     """
     for arch_idx in range(amount):
         if clocked:
@@ -119,14 +114,9 @@ class Rt(Module):
 
     def read_rename(self, port_idx: int, arch_dyn_idx):
         """(renamed, prf_idx) of one architectural register, as rename port
-        `port_idx` sees it: the state AFTER every earlier lane's rename of
-        this cycle and BEFORE its own.
+        `port_idx` sees it: AFTER every earlier lane's rename, BEFORE its own.
 
-        - port 0 reads the commit row (the master's wire alias, plus this
-          cycle's commit fixups); port k reads the row lane k-1 overlaid —
-          on_normal_flow's chain
-        - a read only, so it works on the wire rows; the overlays it sees
-          are whatever fired this cycle
+        - port 0 reads the commit row; port k reads the row lane k-1 overlaid
         """
         row = (self.temp_commit[0] if port_idx == 0
                else self.temp_dispatch[port_idx - 1])

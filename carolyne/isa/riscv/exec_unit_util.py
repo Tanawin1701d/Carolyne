@@ -25,10 +25,9 @@ def uop_hit(src, uops):
 
 
 def drive_by_uop(result, src, cases) -> None:
-    """Drive `result` from a (µops, value) table: one independent zif per
-    row. Every value is COMPUTED whatever the µop is — the guard picks, it
-    never short-circuits — and the rows are mutually exclusive, so the
-    drives need no priority between them."""
+    """Drive `result` from a (µops, value) table: one zif per row.
+
+    - every value is COMPUTED whatever the µop is; the guard only picks"""
     for uops, value in cases:
         with zif(uop_hit(src, uops)):
             result *= value

@@ -39,7 +39,7 @@ class Mpft(Module):
     def get_fix_tag(self, last_valid_spec_tag_dyn):
         """Get the column of the table: 00001 gets column 0 from all rows.
 
-        - walked row by row: each row hands over its bit at the column the
+        - walked row by row: each row supplies its bit at the column the
           one-hot tag names (bit c of the tag muxes the row's bit c)
         - bit u of the mask comes from row u, so the bits assemble in row
           order into the selected column

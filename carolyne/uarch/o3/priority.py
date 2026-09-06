@@ -9,7 +9,7 @@
 # ONE HOME, because a rung only means something if every block reads the same
 # one. Rungs are NAMED FOR EVENTS, not for blocks: a rung is a moment in the
 # pipeline, and every structure that moment touches orders its writes the same
-# way. The band sits strictly between Kathryn's own constants — above
+# way. The band is strictly between Kathryn's own constants: above
 # DEFAULT_UE_PRI_USER (10), so a rung beats every plain assignment, and below
 # DEFAULT_UE_PRI_INTERNAL_MIN (50), so nothing collides with the fallback and
 # routing events Kathryn builds for itself. Room is left between the rungs for
@@ -17,13 +17,13 @@
 #
 # THE BOTTOM RUNG IS NOT HERE: structural work — a row copied forward, a
 # register reloaded every cycle — runs at DEFAULT_UE_PRI_USER by not naming a
-# priority at all. ONE rung sits BELOW that instead (PRI_DECODE_DEFAULT): a
+# priority at all. ONE rung is BELOW that instead (PRI_DECODE_DEFAULT): a
 # default that every plain write must beat.
 #
-# This lives in `o3/` rather than `uarch/common/`: these are the events of an
+# This is in `o3/` rather than `uarch/common/`: these are the events of an
 # OUT-OF-ORDER pipeline, and `common/` is deliberately Kathryn-free.
 
-# The rule that makes the ladder load-bearing rather than decorative: at EQUAL
+# The rule that makes the ladder matter rather than decorate: at EQUAL
 # priority the emission order is NOT the order the statements were written — an
 # assignment made inside a flow block (`zif`) is emitted BEFORE every
 # unconditional one. So "copy the row, then overlay the exception" only builds
@@ -34,7 +34,7 @@ from kathryn import DEFAULT_UE_PRI_USER
 
 # A decoded lane's empty default: valid=0, written every granted cycle. The
 # ladder's one BELOW-user rung — it must LOSE to every match-guard row write
-# (those run plain, at DEFAULT_UE_PRI_USER), and it sits above Kathryn's own
+# (those run plain, at DEFAULT_UE_PRI_USER), and it is above Kathryn's own
 # fallback (DEFAULT_UE_PRI_FALLBACK = 1). No hit -> the default stands ->
 # the lane decodes to empty.
 PRI_DECODE_DEFAULT = DEFAULT_UE_PRI_USER - 1

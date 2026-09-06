@@ -1,5 +1,5 @@
 # Prf — one physical register file for ONE architectural register class
-# (uop_contract.md §4.1 / Q1: per-class PRF, per-class RAT). It owns the entry
+# (uop_contract.md §4.1 / Q1: per-class PRF, per-class RAT). It holds the entry
 # storage plus the two numbers rename allocates from: how many entries are free,
 # and which entry goes out next.
 #
@@ -23,11 +23,11 @@
 #
 # Rename and commit resolve into ONE clocked write per quantity, built by the
 # Prf's OWN `@flow` (`update_meta`) — automatic, once, and in the Prf's own
-# UNGATED scope. That last part is load-bearing: on_rename/on_commit run
+# UNGATED scope. That last part matters: on_rename/on_commit run
 # inside their stages' zync blocks, where every assignment is gated on that
 # stage's grant, so a meta write built THERE would fire only on that one
 # event's cycles. Instead the always-on write reads the PORT WIRES, which are
-# driven inside the granted scopes and read 0 otherwise — the gating rides in
+# driven inside the granted scopes and read 0 otherwise: the gating is in
 # the wires, and the resolve composes whatever fired. The cost is that the
 # PORT COUNT is a construction parameter.
 #
@@ -86,7 +86,7 @@ class Prf(Module):
         self.rename_ports = rename_ports
         self.commit_ports = commit_ports
         # Bits addressing one of the phy_amount entries: ceil(log2(phy_amount)). Same
-        # store-the-count / derive-the-log2 bargain RegFile makes with
+        # store-the-count / derive-the-log2 rule RegFile follows with
         # amount -> index_width, so the file's size and its index can never
         # disagree.
         self.idx_width    = (phy_amount - 1).bit_length()
@@ -137,10 +137,9 @@ class Prf(Module):
     def book_rename(self, port, req):
         """Book lane `port`'s allocation; `req` is a 1-bit enable.
 
-        Returns the entry that lane gets — the pointer plus however many lanes
-        BEFORE it are booking, so the lanes of one cycle take consecutive
-        entries. It reads the other lanes' port wires, which is legal whether or
-        not they have been driven yet.
+        - returns the entry that lane gets: the pointer plus the lanes BEFORE
+          it that are booking, so one cycle's lanes take consecutive entries
+        - reads the other lanes' port wires, legal whether or not driven yet
         """
         self.req_port[port] *= req
         index = self.next_index
@@ -166,7 +165,7 @@ class Prf(Module):
 
         - automatic and UNGATED: built once at gen_flow, in this module's
           scope, never inside a caller's zync (whose grant would gate it)
-        - the gating rides in the PORT WIRES: driven in the granted scopes,
+        - the gating is in the PORT WIRES: driven in the granted scopes,
           reading 0 otherwise, so the resolve composes whatever fired
         """
         free, next_index, over_terms = self._resolve()
@@ -202,46 +201,27 @@ class Prf(Module):
     # ---- read / write back -------------------------------------------------------
     @flow
     def run_read_lane(self):
-        """The read view, driven every cycle: storage as it stands.
-
-        Prf's own flow, plain priority — `on_wb` overlays this cycle's
-        writeback on top at PRI_ISSUE.
-
-        A LOOP, not `read_lane *= storage`: a Karray selection must index
-        every dimension, so an unkeyed whole-array assign is refused. The
-        emitted wires are the same either way.
+        """The read view, driven every cycle: storage as it stands. A LOOP,
+        because a Karray selection must index every dimension.
         """
         for idx in range(self.phy_amount):
             self.read_lane[idx] *= self.storage[idx]
 
     def on_get_entry(self, dyn_idx):
-        """The entry as the REGISTER holds it — the plain read.
-
-        Right for a reader whose value is necessarily at least a cycle old:
-        the ROB's commit gates on a wb_fin the writeback set in an EARLIER
-        cycle, so nothing can be landing on that entry now. A reader that
-        CAN race a writeback wants `on_get_entry_with_bp`."""
+        """The entry as the REGISTER holds it. A reader that CAN race a writeback wants `on_get_entry_with_bp`."""
         return self.storage[dyn_idx]
 
     def on_get_entry_with_bp(self, dyn_idx):
-        """The entry as a reader must see it NOW: the register, or this
-        cycle's writeback if one is landing on that index.
-
-        Right for dispatch's rename read, where a source may name a register
-        a unit is writing back this very cycle. Costs the read-lane fan-out,
-        so a reader that cannot race one takes `on_get_entry` instead."""
+        """The entry as a reader must see it NOW: register, or this cycle's writeback."""
         return self.read_lane[dyn_idx]
 
     def on_wb(self, dyn_idx, data):
         """Write `data` back, and bypass it to every read of this cycle.
 
-        The register write lands at the edge, so a reader in the same cycle
-        would take the stale value — the bypass is what closes that, at
-        PRI_ISSUE over run_read_lane's plain copy.
-
-        STATIC index + guard, not `read_lane[dyn_idx] *=`: a runtime-indexed
-        write needs a reg backing and the read view is wire, so the decode
-        is written out. Costs one guarded override per entry per writeback.
+        - the register write lands at the edge, so a same-cycle reader would
+          take the stale value; the bypass closes that at PRI_ISSUE
+        - STATIC index + guard, not `read_lane[dyn_idx] *=`: a runtime-indexed
+          write needs a reg backing and the read view is wire
         """
         dyn_idx = to_ref(dyn_idx)          # resolved ONCE, not per entry
         self.storage[dyn_idx].fin  |= 1

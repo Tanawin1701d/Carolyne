@@ -65,7 +65,7 @@ class BrExecUnit(ExecUnitBase):
         # jal/jalr's rd: the return path, pc of the NEXT instruction. GATED
         # on the jump µops — a branch booked no physical register, so an
         # unguarded write would land on a garbage pr_idx. Which µops write
-        # rd is the ISA's own rule, so the guard sits here, and wb_reg's
+        # rd is the ISA's own rule, so the guard is here, and wb_reg's
         # hardware must respect the enclosing scope (the core's contract).
         link = wire(X_LEN, "br_link")
         link *= pc + ILEN_BYTES

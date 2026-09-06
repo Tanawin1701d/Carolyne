@@ -9,14 +9,14 @@
 #   valid        this lane carries a µop this cycle
 #   is_spec      it is under an open speculation, spec_tag says which ones
 #   spec_tag
-#   uop_idx      WHICH µop of the ISA's vocabulary it is (no raw ISA bits ride
+#   uop_idx      WHICH µop of the ISA's vocabulary it is (no raw ISA bits are
 #                past decode, uop_contract.md §2)
 #   rob_des_idx  the ROB entry it was allocated, what writeback reports against
 #   rsv_id       the station it is aimed at, which is what lets every station
 #                read every lane and take only the ones naming it
 #   is_branch    the two barriers commit groups against
 #   is_store
-#   pc           where the instruction sits, and where the next one does
+#   pc           where the instruction is, and where the next one is
 #   npc
 #
 # WHICH KINDS an operand group carries follows from the operand's ROLE and its
@@ -27,18 +27,16 @@
 #   dest, register class                pr_idx  ar_idx  active  wb_required
 #   dest, µtemp only                                    active  wb_required
 #
-# A SOURCE never carries `wb_required`: it is a destination's promise that the
-# writeback lands before the instruction retires, and a source writes nothing.
-# And a destination carries it only on a DEST_W_REQ core — operand_field drops
-# the bit on a plain DEST, where the role itself is the constant answer.
-#
-# A DESTINATION never carries `valid` or `data`: it is not waiting on anything,
-# and at dispatch its value does not exist yet — the FU has not run.
-#
-# NO INDEX WITHOUT A CLASS: `pr_idx` and `ar_idx` name a register OF A CLASS,
-# which a µtemp has not got, so an operand that only ever names one carries
-# neither. That is `operand_field`'s rule, not a choice made here — it refuses
-# the two rather than sizing them zero.
+# Why the table drops what it drops:
+#   - a SOURCE never carries `wb_required`. That bit is a destination's
+#     promise that the writeback lands before the instruction retires, and a
+#     source writes nothing. A destination carries it only on a DEST_W_REQ
+#     core; operand_field drops it on a plain DEST.
+#   - a DESTINATION never carries `valid` or `data`. It waits for nothing, and
+#     at dispatch its value does not exist yet: the FU has not run.
+#   - NO INDEX WITHOUT A CLASS. `pr_idx` and `ar_idx` name a register of a
+#     class, which a µtemp does not have. That is operand_field's rule, and it
+#     refuses the two rather than sizing them zero.
 
 from typing import Optional
 
@@ -120,7 +118,7 @@ def dispatch_entry_shape(config: CPUO3_Config) -> tuple:
     """The bus class, and the widths of every field it holds.
 
     Shared by the bus and by anything built of the same shape, so the two
-    cannot drift.
+    cannot disagree.
     """
     where  = f"dispatch of ISA '{config.isa.name}'"
     fields = {"spec_tag"   : config.sptag_len,
@@ -139,9 +137,8 @@ def dispatch_entry_shape(config: CPUO3_Config) -> tuple:
 def dispatch_field_names(config: CPUO3_Config) -> tuple:
     """Every field one dispatch lane carries, declared ones then added ones.
 
-    What a reader needs to know which of ITS fields a lane can fill: the bus is
-    core-wide, so a station's record is a subset of it plus whatever the
-    station stamps itself.
+    - the bus is core-wide, so a station's record is a subset of it plus what
+      the station writes itself
     """
     entry_cls, fields = dispatch_entry_shape(config)
     declared = tuple(name for name, _ in entry_cls.__karray_fields__)
@@ -153,8 +150,7 @@ def build_dispatch(config: CPUO3_Config, lanes: Optional[int] = None,
                    name: str = "dispatch"):
     """The dispatch bus: `lanes` wire rows, one per front-end lane.
 
-    Declares hardware, so it must be called from inside an open Kathryn module
-    scope — the @init of the module that owns dispatch.
+    - declares hardware: call it inside an open Kathryn module scope
     """
     entry_cls, fields = dispatch_entry_shape(config)
     lanes = config.fe_lanes if lanes is None else lanes

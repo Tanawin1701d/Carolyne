@@ -71,14 +71,7 @@ def rob_dest_operands(isa: IsaBase) -> tuple:
 
 def rob_operand_fields(config: CPUO3_Config, atm_operand: AtomicOperand) -> dict:
     """The entry fields one destination core contributes, as kaf() specs.
-
-    Which KINDS a retiring instruction keeps: whether it writes that
-    destination at all, whether the write must land first, and the two indexes
-    commit hops between. The names, widths and the drop rules are
-    operand_field's: `wb_required` survives only on a DEST_W_REQ core (a plain
-    DEST's role is the constant answer), `ar_idx` only where there is an index
-    to choose (not on a one-register class).
-    """
+    Names, widths and the drop rules are operand_field's."""
     return build_fields(config, atm_operand, (ACTIVE, WB_REQUIRED, PR_IDX, AR_IDX),
                         "ROB")
 
@@ -87,7 +80,7 @@ def rob_entry_shape(config: CPUO3_Config) -> tuple:
     """The entry class the ROB uses, and the widths of every field it holds.
 
     Shared by the table and by any wire row a stage builds of the same shape,
-    so the two cannot drift.
+    so the two cannot disagree.
     """
     fields = {"pc": config.pc_width}
     for atm_operand in rob_dest_operands(config.isa):
@@ -96,13 +89,9 @@ def rob_entry_shape(config: CPUO3_Config) -> tuple:
 
 
 def build_rob_dispatch(config: CPUO3_Config, lanes: int, name: str = "rob_disp"):
-    """The dispatch bus into the ROB: `lanes` wire rows of the entry shape, each
-    with a `valid` bit saying the lane is carrying an instruction.
+    """The dispatch bus into the ROB: `lanes` wire rows of the entry shape.
 
-    EVERY lane allocates here — a µop goes to one station but every instruction
-    goes to the ROB — so the row says only whether it is there, where a
-    station's bus also has to say which station it is for. `valid` is an ADDED
-    field: the ROB answers it on the way in and stores nothing.
+    - EVERY lane allocates here, so the row need not name a station
     """
     entry_cls, fields = rob_entry_shape(config)
     return entry_cls(HwComponentType.WIRE, (lanes,),
@@ -113,7 +102,7 @@ def build_rob_table(config: CPUO3_Config, name: str = "rob"):
     """The reorder buffer: a Karray of `config.rob_depth` rows.
 
     Declares hardware, so it must be called from inside an open Kathryn module
-    scope — the @init of the module that owns the ROB.
+    scope: the @init of the module that declares the ROB.
     """
     entry_cls, fields = rob_entry_shape(config)
     table = entry_cls(HwComponentType.REG, (config.rob_depth,), name, **fields)

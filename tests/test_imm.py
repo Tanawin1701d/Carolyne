@@ -106,7 +106,7 @@ def test_a_u_type_lands_in_the_top_twenty_bits():
         assert run(R.imm_u, _enc_u(v)) == (v << 12) & M32
 
 
-# --- how a rule reaches the engine --------------------------------------------
+# --- how a rule gets to the engine --------------------------------------------
 def test_every_scrambled_rv32i_immediate_states_its_rule():
     # the default cannot place segments, so anything multi-segment must.
     for operand in (OPR_IMM_I, OPR_IMM_S, OPR_IMM_B, OPR_IMM_U, OPR_IMM_J):
@@ -134,7 +134,7 @@ def test_a_scrambled_field_with_no_rule_is_refused():
         extract_imm_value(0, opr)
 
 
-# --- what an extraction rule may sit on ---------------------------------------
+# --- what an extraction rule may be attached to ------------------------------
 def test_a_rule_needs_a_slot_that_names_an_immediate():
     x   = RegFile("x", 32, 32)
     atm = AtomicOperand(SRC, "src_1", reg_file=x)

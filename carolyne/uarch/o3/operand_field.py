@@ -17,7 +17,7 @@
 # WHICH kinds its record keeps, never in what order they land.
 #
 # A caller names the kinds its record carries and this module answers with the
-# field names and widths, so two records cannot drift apart or disagree about a
+# field names and widths, so two records cannot disagree about a
 # spelling. `where` names the caller for the error messages, the way
 # check_matcher_pair does in the ISA layer.
 
@@ -67,10 +67,9 @@ def require_named(atm_operand: AtomicOperand, where: str) -> str:
 def named_atomic_operands(isa: IsaBase, where: str) -> tuple:
     """Every atomic operand the ISA's µops fill, sources then destinations.
 
-    Core-wide, which is what a record built before a µop is routed needs: it
-    has to hold whatever the µop turns out to be. Deduped by identity already
-    (IsaBase does it), and held to non-empty names here, since a name is the
-    stem of every field built for the operand.
+    - core-wide: a record built before a µop is routed must hold whatever it
+      turns out to be
+    - names are checked non-empty here, because a name is the field stem
     """
     srcs, dests = [], []
     for atm_operand in isa.used_atomic_operands():

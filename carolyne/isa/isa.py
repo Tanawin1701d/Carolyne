@@ -1,28 +1,28 @@
 # IsaBase — the whole description of one ISA, and the single object a
-# generator is handed (uop_contract.md §6). It owns the vocabularies that
-# everything else in this layer refers to: the architectural register classes,
-# the operand cores and the slot rules built on them, the µop templates the
-# ISA speaks, the execution units the machine provides for them, and
-# the mops binding encodings to µop sequences — plus the three addressing
-# scalars (pc_width, pc_align, ilen_bytes) saying where an instruction sits
-# and how long it is. The PC is not a register class (§4.3), but its width is
-# still an ISA fact: fetch, the redirect path and the ROB cannot be sized
-# without it.
+# generator is given (uop_contract.md §6). It holds the vocabularies everything
+# else in this layer refers to: the architectural register classes, the operand
+# cores and the slot rules built on them, the µop templates, the execution
+# units, and the mops that bind encodings to µop sequences. It also holds the
+# three addressing scalars (pc_width, pc_align, ilen_bytes) saying where an
+# instruction is and how long it is. The PC is not a register class (§4.3), but
+# its width is still an ISA fact: fetch, the redirect path and the ROB cannot
+# be sized without it.
 #
 # Every vocabulary is DECLARED, never derived from the mops, and the container
-# holds the mops to it one link at a time: a mop's µops must be declared, their
-# operands must be declared, and those operands' cores must be declared. Ops
-# reg files, cores, operands, µops and units all match by IDENTITY
-# — they are unhashable anyway, and a package shares its constants so that one
-# rule is one object. Declared-but-unused is legal throughout: a unit may list
-# µops this ISA never uses, and a rule may be written before a crack uses it.
+# checks the mops against it one link at a time: a mop's µops must be declared,
+# their operands must be declared, and those operands' cores must be declared.
+# Reg files, cores, operands, µops and units all match by IDENTITY: they are
+# unhashable anyway, and a package shares its constants so one rule is one
+# object. Declared-but-unused is legal: a unit may list µops this ISA never
+# uses, and a rule may be written before a crack uses it.
+#
 # LIMIT: the reg-file check walks what operands SELECT, not what their cores
 # offer, so a candidate no operand ever selects need not be declared.
 #
-# Named *Base* because a per-ISA package may subclass it for description
-# fields this container does not model (mini-x86 prefix/ModRM tables). A
-# subclass stays frozen=True and stays DATA: overriding uop() / units_for() /
-# __post_init__ would put ISA-specific behavior on the elaborator's path.
+# Named *Base* because a per-ISA package may subclass it for description fields
+# this container does not model (mini-x86 prefix/ModRM tables). A subclass stays
+# frozen=True and stays DATA: overriding uop() / units_for() / __post_init__
+# would put ISA-specific behavior on the elaborator's path.
 #
 # NOT here: the reset vector (machine configuration, not an ISA fact) and the
 # trap policy (§6 deliverable, no type yet).
@@ -101,7 +101,7 @@ class IsaBase:
 
     # --- construction checks --------------------------------------------------
     def _check_addressing(self) -> None:
-        """Hold the three addressing scalars to each other (header, 2026-08-16)."""
+        """Check the three addressing scalars against each other."""
         for field, value in (("pc_width",   self.pc_width),
                              ("pc_align",   self.pc_align),
                              ("ilen_bytes", self.ilen_bytes)):
@@ -181,7 +181,7 @@ class IsaBase:
                 raise ValueError(
                     f"IsaBase '{self.name}': µops '{by_idx[uop.uop_idx].name}' and "
                     f"'{uop.name}' both declare uop_idx {uop.uop_idx} — the id is "
-                    f"what the hardware plane speaks, so it has to be unique")
+                    f"what the hardware plane uses, so it has to be unique")
             by_idx[uop.uop_idx] = uop
         want = set(range(len(self.uops)))
         if set(by_idx) != want:
@@ -243,13 +243,7 @@ class IsaBase:
     # --- derived facts --------------------------------------------------------
     @property
     def pc_align_bits(self) -> int:
-        """Low PC bits that are always zero — the ones a stored PC can drop.
-
-        Derived from `pc_align` the way RegFile.index_width is derived from
-        `amount`: the description states the count, the hardware wants the
-        log2, and deriving is what stops the two from disagreeing. Byte-aligned
-        (pc_align == 1) gives 0.
-        """
+        """Low PC bits that are always zero. Byte-aligned gives 0."""
         return self.pc_align.bit_length() - 1
 
     # --- what the mops actually reach -----------------------------------------
@@ -269,8 +263,7 @@ class IsaBase:
         return _by_identity(o.atomic for o in self.used_operands())
 
     def used_reg_files(self) -> Tuple[RegFile, ...]:
-        """Every architectural class a used operand SELECTS, by identity:
-        the elaborator builds one PRF per instance."""
+        """Every architectural class a used operand SELECTS, by identity."""
         return _by_identity(o.target for o in self.used_operands() if o.is_arch)
 
     def uop(self, name: str) -> Uop:
@@ -299,26 +292,18 @@ class IsaBase:
             f"(has: {', '.join(sorted(r.name for r in self.reg_files))})")
 
     def units_for(self, uop: Uop) -> Tuple[ExecUnit, ...]:
-        """Units that can execute this µop — the kind→FU map, read out. More
-        than one is legal: picking one is the elaborator's choice."""
+        """Units that can execute this µop. More than one is legal."""
         return tuple(unit for unit in self.exec_units if unit.has(uop))
 
     def src_atomic_operands_for(self, unit: ExecUnit) -> Tuple[AtomicOperand, ...]:
-        """The slots this exec unit READS — its declared port shape, which is
-        what a read port is sized from.
-
-        DECLARED, not derived from the µops that happen to reach the unit: a
-        port shape is a fact about the unit, and deriving it would make it
-        depend on which mops exist. `_reject_uncovered_operands` is what holds
-        the µops to it.
-        """
+        """The slots this exec unit READS: its declared port shape, which is
+        what a read port is sized from."""
         self._check_unit(unit, "src_atomic_operands_for")
         return unit.src_operands
 
     def dest_atomic_operands_for(self, unit: ExecUnit) -> Tuple[AtomicOperand, ...]:
-        """The slots this exec unit WRITES — the write-port side of the same
-        declaration. Both dest roles come back; read `is_write_required` to
-        tell DEST_W_REQ from a plain DEST."""
+        """The slots this exec unit WRITES. Both dest roles are returned;
+        read `is_write_required` to tell DEST_W_REQ from a plain DEST."""
         self._check_unit(unit, "dest_atomic_operands_for")
         return unit.dest_operands
 
@@ -334,7 +319,7 @@ class IsaBase:
         Every unit listing the µop must cover it: which unit issues a µop is
         the elaborator's routing choice, so a µop has to run on ANY of them.
         This is the check the declared port shape buys — without it, a unit's
-        shape and the instructions using it could drift apart silently.
+        shape and the instructions using it could disagree with no error.
         """
         for uop in self._uops():
             for unit in self.units_for(uop):

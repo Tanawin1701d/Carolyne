@@ -1,5 +1,5 @@
 # StoreBuf — the store half of the load/store queue: every executed store
-# waits here until the ROB retires it, and only then reaches memory. Loads
+# waits here until the ROB retires it, and only then is written to memory. Loads
 # read AROUND it through search_newest (store-to-load forwarding).
 #
 # THREE POINTERS walk one circular table of `st_buf_depth` entries. Each
@@ -89,7 +89,7 @@ class StoreBuf(Module):
         # The speculation pair of the store landing THIS cycle, and the place
         # on_suc_pred OVERRIDES it: on_new_entry drives it, the resolve masks
         # it at PRI_SUC_PRED, and the row write reads it — so a tag resolving
-        # in the same cycle never reaches the table.
+        # in the same cycle never arrives in the table.
         self.spec_overrider = SpecLane(HwComponentType.WIRE, (1,),
                                        f"{self.label}_spec_ovr",
                                        spec_tag=self.config.sptag_len)
@@ -192,14 +192,8 @@ class StoreBuf(Module):
     def _search_terms(self, view, addr):
         """A subtree's answer: (does it hold a match, is that match PRE-WRAP).
 
-        `pre_wrap` is which of the two runs the wrap cuts the ring into the
-        entry belongs to — `alloc_ptr <= idx`, so an entry at or past the
-        tail is in the older run and one below the tail is in the newer one.
-        That, not the raw index, is what orders two entries by age.
-
-        A leaf has neither answer yet and computes both — the per-row
-        augmentation the C++ does before its reduce; a node reads them back
-        off the extras rather than rebuilding the compare.
+        - `pre_wrap` is `alloc_ptr <= idx`: which side of the wrap the entry
+          is on. That, not the raw index, orders two entries by age
         """
         if "search_hit" in view.fields:
             return view.fields["search_hit"], view.fields["search_pre_wrap"]
@@ -211,7 +205,7 @@ class StoreBuf(Module):
         """Kill the speculating stores; the survivors stay a contiguous run.
 
         The tail lands at ret + the survivor count (the RsvIOR sum_cnt
-        bargain — the C++ original recomputed it with bit-pattern searches);
+        rule; the C++ original recomputed it with bit-pattern searches);
         com_ptr needs no repair, a committed store is never speculative.
         """
         survivors = []
@@ -240,7 +234,7 @@ class StoreBuf(Module):
                 self.table[row_idx] |= {"spec_tag": left,
                                         "is_spec" : left != 0}
 
-        # a tag is ONE-HOT, so an entry sits under it or does not
+        # a tag is ONE-HOT, so an entry is under it or is not
         spec_ovr_row = self.spec_overrider[0]
         with priority(PRI_SUC_PRED):
             with zif(spec_ovr_row.is_spec
@@ -250,7 +244,7 @@ class StoreBuf(Module):
     # --- retire to memory -----------------------------------------------------------
     @flow
     def run_retire(self):
-        """The head's committed store reaches memory, one per cycle.
+        """The head's committed store is written to memory, one per cycle.
 
         StoreBuf's own flow, unconditional: the zif is the gate, so an
         empty or not-yet-complete head writes nothing and moves nothing.

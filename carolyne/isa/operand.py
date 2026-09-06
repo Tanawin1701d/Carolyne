@@ -1,32 +1,30 @@
 # Operand — one source or destination slot of a µop template: an AtomicOperand
-# (the values on offer and the direction) plus the ENCODING SIDE around it —
-# WHICH of the core's targets this slot names, the index rule by which the
-# generated hardware finds the register, and the matcher saying where in the
-# instruction word that index is read from.
+# (the values it may name and the direction) plus the ENCODING SIDE: which of
+# the core's targets this slot names, the index rule the generated hardware
+# uses to find the register, and the matcher saying where in the instruction
+# word that index is read from.
 #
-# The ISA layer is a TEMPLATE: an operand never holds a runtime value, only
-# the rule the generated hardware uses to find the register at runtime.
-# For a RegFile target the index is one of:
+# The ISA layer is a TEMPLATE. An operand never holds a runtime value, only the
+# rule the hardware uses to find the register at runtime. For a RegFile target
+# the index is one of:
 #
-#   FieldRef("rd")  runtime-decoded — elaborates to wiring from the decoder's
-#                   field extractor into the rename port (the normal case)
-#   int             implicit fixed register — part of the ISA itself (x86
-#                   push/pop use ESP, flags writes hit the one flags reg);
-#                   elaborates to a constant wire into the same rename port
+#   FieldRef("rd")  decoded at runtime: wired from the decoder's field
+#                   extractor into the rename port (the normal case)
+#   int             implicit fixed register, part of the ISA itself (x86
+#                   push/pop use ESP): a constant wire into the same port
 #   omitted         only when the class holds ONE register: index_width is 0,
-#                   so there is nothing to choose and the elaborator wires the
-#                   single register (x86 FLAGS)
+#                   so there is nothing to choose (x86 FLAGS)
 #
-# An Intermediate target needs no index either: the instance IS the value node.
+# An Intermediate target needs no index: the instance IS the value node.
 #
 # Operand HOLDS an AtomicOperand rather than extending it. `target_kind` is the
-# selector, required and resolved in __post_init__, so a rule selecting a
-# target its core does not carry fails at construction. The selection lives
-# here, so `target`, `width`, `is_arch` and `is_intermediate` do too; only
-# `role`/`is_src`/`is_dest` forward from the core.
+# selector, required and resolved in __post_init__, so a rule that selects a
+# target its core does not have fails at construction. The selection is made
+# here, so `target`, `width`, `is_arch` and `is_intermediate` are here too;
+# only `role`/`is_src`/`is_dest` come from the core.
 #
-# FieldRef lives here rather than in its own module: it is the index rule of
-# an Operand (and the same rule for a Uop's imm), meaningless on its own.
+# FieldRef is defined here, not in its own module: it is the index rule of an
+# Operand and has no meaning apart from one.
 
 from __future__    import annotations
 
@@ -98,7 +96,7 @@ class Operand:
         if self.imm_extract is not None:
             # An extraction rule is about the bits an IMMEDIATE reads, so it
             # needs both a target that carries one and a matcher saying where
-            # those bits sit — without the matcher decode reads the slot as a
+            # those bits are. Without the matcher decode reads the slot as a
             # linking µtemp and never calls the rule at all.
             if not callable(self.imm_extract):
                 raise TypeError(

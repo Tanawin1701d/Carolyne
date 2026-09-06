@@ -21,7 +21,7 @@
 #
 # The row count must be a POWER OF TWO for that arithmetic: both pointers step
 # modulo the table, and at a power-of-two size the modulo IS the width of the
-# register, so no wrap comparison is built anywhere (the bargain Prf makes).
+# register, so no wrap comparison is built anywhere (the rule Prf follows).
 
 from kathryn import *
 from kathryn.signal import to_ref
@@ -183,17 +183,11 @@ class RsvIOR(RsvBase):
     def on_mis_pred(self, fix_tag):
         """Kill the speculating entries, then pull the allocation pointer back.
 
-        A squash always takes the youngest entries, so what survives is still a
-        contiguous run starting at the head: the pointer belongs one past the
-        last survivor, which is head + the number of them. The head itself does
-        not move — the entries before the branch are still going to issue.
-
-        Which entries die is `entry_squashed`, the same predicate the base uses
-        to clear them, read back rather than restated.
-
-        The count reads the CURRENT valid bits, so an entry issuing in this
-        same cycle is still counted; that is right, because the head moves on
-        by one at the same time.
+        - a squash takes the youngest, so the survivors are still a contiguous
+          run from the head: the pointer belongs at head + their count
+        - the head does not move; entries before the branch still issue
+        - the count reads the CURRENT valid bits, so an entry issuing this
+          cycle is still counted, which is right because the head moves too
         """
         super().on_mis_pred(fix_tag)
 

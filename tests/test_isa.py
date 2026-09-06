@@ -53,10 +53,9 @@ def _mop(uop, opcode):
 def _walk(mops):
     """The uops/operands/cores a set of mops actually uses, in order.
 
-    A real package declares these from its own module constants (see
-    riscv/rv32i.py); this toy builds its shapes inside _mop, so the default
-    declaration is read back off the mops. Tests that pin the cross-checks
-    override one vocabulary with something the mops do not use.
+    - a real package declares these from its own constants (riscv/rv32i.py);
+      this toy builds its shapes inside _mop, so the default is read back
+      off the mops
     """
     uops     = tuple(u for mop in mops for seq in mop.uop_seq for u in seq.uops)
     operands = tuple(o for u in uops for o in u.srcs + u.dests)
@@ -258,7 +257,7 @@ def test_declared_but_unused_operands_and_uops_are_fine_too():
     isa = _isa(mops=mops,
                atomic_operands=cores + (spare_core,),
                operands=operands + (Operand(spare_core, ARCH),),
-               uops=uops + (LOAD,))          # declared, no mop reaches it
+               uops=uops + (LOAD,))          # declared, no mop uses it
     assert len(isa.uops) == len(isa.used_uops()) + 1
     assert len(isa.operands) == len(isa.used_operands()) + 1
 
@@ -320,7 +319,7 @@ def test_it_reads_the_operand_cores_that_reach_one_exec_unit():
 
 
 def test_the_two_halves_are_disjoint():
-    # Role lives in the core and Uop cross-checks it against slot position,
+    # Role is in the core and Uop cross-checks it against slot position,
     # so nothing can land in both halves.
     isa = _isa()
     for unit in isa.exec_units:
@@ -399,7 +398,7 @@ def test_a_unit_may_ask_for_facilities_beyond_its_operands():
 
 def test_a_unit_without_semantics_is_still_a_description():
     # Only a generator building a real function unit demands them — the same
-    # bargain AtomicOperand makes with its name.
+    # rule AtomicOperand follows with its name.
     isa = _isa()
     assert ALU.stage_cnt == 1                   # one stage by default
     with pytest.raises(NotImplementedError, match="exec_stage"):

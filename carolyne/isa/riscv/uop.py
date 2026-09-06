@@ -1,53 +1,37 @@
-# One Uop template per RV32I instruction — the µop an instruction decodes to,
-# transcribed from the RV32I base listing (RISC-V unprivileged spec, ch. 36).
-# Every instruction is exactly ONE µop here: RV32I has no AGU (addressing is
+# One Uop template per RV32I instruction, transcribed from the RV32I base
+# listing (RISC-V unprivileged spec, ch. 36).
+#
+# EVERY INSTRUCTION IS EXACTLY ONE µop. RV32I has no AGU (addressing is
 # base+imm, computed in the mem unit) and no separate link µop (the jumps
-# write rd themselves), so nothing cracks. See the rv32i.py header.
+# write rd themselves), so nothing cracks and this ISA uses no µtemp.
 #
-# Module CONSTANTS named UOP_<mnemonic>, one per row of the listing, so this
-# file is the one place an instruction is written down and rv32i.py is purely
-# the opcode grouping. Each template NAMES ITSELF — the mnemonic is the µop's
-# own name, unique across the ISA — and DECLARES ITS ID: the second argument
-# is `uop_idx`, the value the hardware plane speaks, 0..39 here in the order
-# the UOPS tuple lists them. IsaBase holds the ids unique and dense; the tuple
-# order itself means nothing to hardware. There is no op vocabulary beside
-# this file: an `Op` type held a name and nothing else, so the name moved onto
-# the template that has the rest of the operation (uop.py, 2026-08-23). ADDI
-# is therefore its own µop rather than "ADD with the other second-operand
-# rule", and a stage body that means both guards on both.
+# Module constants named UOP_<mnemonic>, one per row of the listing, so this
+# file is the one place an instruction is written down and rv32i.py is only
+# the opcode grouping. Each template NAMES ITSELF (the mnemonic, unique across
+# the ISA) and DECLARES ITS ID: the second argument is `uop_idx`, the value
+# the hardware uses, 0..39 in the order UOPS lists them. IsaBase checks the
+# ids are unique and dense; the tuple order itself means nothing to hardware.
 #
-# A template carries NO matcher: picking an instruction out of the word is
-# the ENCODING side's job, and the funct rules live on the UopSeq variants in
-# mop.py beside the opcode they refine. A template names the operation only —
-# which is why ecall and ebreak are equal here but for name and id.
+# A template carries NO MATCHER. Picking an instruction out of the word is the
+# encoding side's job, and the funct rules are on the UopSeq variants in
+# mop.py beside the opcode they refine. This is why ecall and ebreak are equal
+# here apart from name and id.
 #
-# Width, sign and branch condition are distinct µops, not sub-fields of one
-# LOAD/STORE/BR_COND kind, so the file is 1:1 with the listing and the record
-# needs no size/sign or condition field: lb/lh/lw/lbu/lhu, sb/sh/sw and
-# beq/bne/blt/bge/bltu/bgeu each get their own template. AUIPC is likewise its
-# own µop, not an ADD with a PC source it has no way to name.
-# ADDI/SLTI/... differ from their register forms only in the second operand
-# rule; SLLI/SRLI/SRAI take SHAMT rather than IMM_I, a 5-bit count instead of
-# a 12-bit signed value. All results wrap at 32 bits; RV32I traps on no
-# arithmetic, and writes to x0 are discarded by rename, never by the FU.
+# Width, sign and branch condition are DISTINCT µops, not sub-fields of one
+# LOAD/STORE/BR_COND kind, so this file is 1:1 with the listing and the record
+# needs no size/sign or condition field. AUIPC is likewise its own µop, not an
+# ADD with a PC source it cannot name. All results wrap at 32 bits; RV32I
+# traps on no arithmetic, and writes to x0 are discarded by rename.
 #
-# The immediate rides in `srcs` as an operand (OPR_IMM_*) because `Uop.imm`
-# does not exist yet. NOTE the tension: contract §2 says an immediate is NOT
-# an operand and rides in its own record field, so the ≤3 src cap does not
-# budget for one. RV32I still fits (store and branch are widest, at 3).
+# The immediate is an operand in `srcs` (OPR_IMM_*) because `Uop.imm` does not
+# exist yet. LIMIT: contract §2 says an immediate is NOT an operand and has its
+# own record field, so the 3-src cap does not allow for one. RV32I still fits;
+# store and branch are the widest, at 3.
 #
-# The instruction's own PC is never among the srcs: no operand can name it
-# (reg.py: PC is not a register class), and none needs to — the µop record
-# carries it and a stage body reads it as ctx.pc() off the generator's context, which
-# is how auipc, jal and jalr get their pc-relative input.
-#
-# KNOWN GAPS carried from the layer below:
-# - A value says WHICH BITS but not where each segment lands in an assembled
-#   field, so the mop table discriminates but the immediate *extractors*
-#   still do not exist (field_match.py). Picking works; building the
-#   immediate value does not.
-# - The branch/jump redirect is not expressed: the control FU takes it from
-#   the op plus the immediate, and no dest names it.
+# NOT here: the instruction's own PC. No operand can name it (reg.py: PC is not
+# a register class) and none needs to — the µop record carries it and a stage
+# body reads it off that record, which is how auipc, jal and jalr get their
+# pc-relative input.
 
 from __future__ import annotations
 
@@ -72,7 +56,7 @@ UOP_AUIPC = Uop("AUIPC", 1, srcs=(OPR_IMM_U,), dests=_RD)   # rd = pc + (imm_u <
 # pops on _STORE (uop_contract: the ISA states the fact, the generator builds
 # the hardware).
 _FEAT_BRANCH = ("is_branch",)   # augments the pc: the ROB's barrier reads it
-_FEAT_STORE  = ("is_store",)    # reaches memory only on retirement
+_FEAT_STORE  = ("is_store",)    # written to memory only on retirement
 
 # --- jumps, opcode 1101111 / 1100111: rd = pc + ilen, then redirect ----------
 # rd = pc + ilen, then redirect: jal to pc + imm (target known at decode),

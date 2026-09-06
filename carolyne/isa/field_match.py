@@ -1,4 +1,4 @@
-# InstrFieldMatch — where a named encoding field lives in the instruction
+# InstrFieldMatch — where a named encoding field is in the instruction
 # word (uop_contract.md §1.3). One rule, one field: a name plus the bit
 # segments it occupies, `(start, end)` with end EXCLUSIVE and bit 0 = LSB.
 # InstrValueMatch is the other half — the values those bits must EQUAL, which

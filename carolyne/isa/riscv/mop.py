@@ -1,47 +1,33 @@
 # The RV32I instruction table: one Mop per opcode group, one UopSeq per
-# instruction in that group (uop_contract.md §6.4). This file is the ENCODING
-# side whole — the opcode grouping AND the funct matcher that picks each
-# UopSeq out of its group. What an instruction does is uop.py's business
-# (a template carries no matcher), and the IsaBase assembly is rv32i.py's.
+# instruction in that group (uop_contract.md §6.4). This file is the whole
+# ENCODING side — the opcode grouping AND the funct matcher that picks each
+# UopSeq out of its group. What an instruction DOES is uop.py's business (a
+# template carries no matcher); the IsaBase assembly is rv32i.py's.
 #
-# The Mop/UopSeq nesting mirrors RISC-V's own decode shape: the Mop matches
-# an opcode (stated as a matcher_value beside FM.OPCODE), each UopSeq the
-# finer funct rule.
+# The Mop/UopSeq nesting mirrors RISC-V's own decode shape: the Mop matches an
+# opcode (a matcher_value beside FM.OPCODE), each UopSeq the finer funct rule.
 #
-# Grouped by OPCODE, not by instruction format — the two are different
-# partitions, since I-type covers LOAD, OP-IMM, JALR and SYSTEM, and one
-# matcher naming the opcode field cannot say four values. Each group names its
-# format in a comment; field_match.FORMATS is declared but not yet consumed.
+# Grouped by OPCODE, not by instruction format. The two are different
+# partitions: I-type covers LOAD, OP-IMM, JALR and SYSTEM, and one matcher
+# naming the opcode field cannot state four values. Each group names its format
+# in a comment; field_match.FORMATS is declared but not yet used.
 #
-# Every UopSeq holds one µop, because RV32I cracks nothing. An
-# instruction that does crack lists several templates, and any µtemp linking
-# them must be minted per instruction, never shared — that instance IS the
-# dataflow link.
+# Every UopSeq holds one µop, because RV32I cracks nothing. An instruction that
+# does crack lists several templates, and any µtemp linking them must be built
+# per instruction, never shared — that instance IS the dataflow link.
 #
 # Exhaustive over uop.UOPS: every template appears in exactly one UopSeq,
-# pinned by test_riscv.py, since no container check catches an instruction
-# written but never wrapped in an encoding. Module CONSTANTS (MOP_<group> +
-# MOP_TABLE), shared like the reg file and the operand constants.
+# checked by test_riscv.py, because no container check catches an instruction
+# that is written but never wrapped in an encoding. Module CONSTANTS
+# (MOP_<group> + MOP_TABLE), shared like the reg file and the operand rules.
 #
-# KNOWN GAPS — what this table cannot say yet, all of them contract-side:
-# 1. No `imm` field on Uop, so the immediates ride in `srcs` as operands
-#    (uop.py header) — which contract §2 says they should not. One of the two
-#    has to give before the µop record is generated.
-# 2. PC is not a register class (reg.py), so the pc-relative shapes — auipc,
-#    and the link value the jumps write — have an input this layer cannot
-#    name: the instruction's own PC. The contract needs to say a µop reads its
-#    instruction PC from the record; until then these shapes are incomplete in
-#    a way the container's cross-checks cannot catch.
-# 3. The branch µops name no destination and the jumps' redirect is invisible
-#    here: control-flow effect is the FU's business, not register dataflow.
-# 4. A matcher discriminates but does not EXTRACT: nothing says where each
-#    segment of a scrambled immediate lands in the assembled value, so a
-#    decoder can pick the instruction and still not build its immediate
-#    (field_match.py).
-# Three former gaps are closed rather than open: field values (both levels
-# state them now), mem width/sign and branch condition being distinct ops
-# rather than record sub-fields (op.py header), and first/last bounds, moot
-# while every instruction is one µop — the last returns with x86mini.
+# LIMIT: `Uop` has no `imm` field, so the immediates are operands in `srcs`
+# (uop.py header), which contract §2 says they should not be. One of the two
+# has to change before the µop record is generated.
+#
+# NOT a gap: the branch µops name no destination. Control-flow effect is the
+# FU's business, not register dataflow — BrExecUnit resolves it and reports
+# through the api.
 
 from __future__ import annotations
 
@@ -58,8 +44,7 @@ def _bind(uop: Uop, matcher_field: Optional[InstrFieldMatch] = None,
           *values: int) -> UopSeq:
     """Bind one µop to the funct rule that picks it out of its opcode group.
 
-    - no field, no values -> the opcode alone identifies it (LUI/AUIPC/JAL)
-    - values in the field's own segment order, reading like the spec table
+    - no field, no values: the opcode alone identifies it (LUI/AUIPC/JAL)
     """
     return UopSeq(uops=(uop,),
                   matcher_field=matcher_field,
@@ -133,7 +118,7 @@ MOP_JALR = Mop(matcher_field=FM.OPCODE, matcher_value=FM.val(0b1100111),
                uop_seq=(_bind(U.UOP_JALR, FM.FUNCT3, 0b000),))
 
 # opcodes 0001111 / 1110011 — MISC-MEM (fence) / SYSTEM (ecall, ebreak),
-# both I-type: fence's operands sit in imm[11:0], ecall/ebreak's imm IS the
+# both I-type: fence's operands are in imm[11:0], ecall/ebreak's imm IS the
 # selector, which is why their UopSeqs match on IMM_I and not FUNCT3.
 MOP_MISC_MEM = Mop(matcher_field=FM.OPCODE, matcher_value=FM.val(0b0001111),
                    uop_seq=(_bind(U.UOP_FENCE, FM.FUNCT3, 0b000),))

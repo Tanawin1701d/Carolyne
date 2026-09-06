@@ -1,7 +1,7 @@
 # The RV32I package as usage documentation for a per-ISA description: it
-# declares its own register classes, µops, units and mop table, and hands the
+# declares its own register classes, µops, units and mop table, and passes the
 # lot to IsaBase — which is what actually validates it. These tests pin the
-# invariants a hand-written ISA package can get wrong, not the RISC-V spec.
+# rules a hand-written ISA package can get wrong, not the RISC-V spec.
 
 import pytest
 
@@ -45,7 +45,7 @@ def test_rv32i_is_a_subclass_supplying_defaults_not_a_factory():
     with pytest.raises(ValueError):
         Rv32i(name="")
     with pytest.raises(ValueError, match="does not declare in uops"):
-        Rv32i(uops=(U.UOP_ADD,))            # a mop reaches the other 39
+        Rv32i(uops=(U.UOP_ADD,))            # a mop uses the other 39
 
     # Defaults are shared instances, which is what the identity checks need.
     assert Rv32i().operands is isa.operands and Rv32i().uops is isa.uops
@@ -107,7 +107,7 @@ def test_the_operand_rules_and_the_description_share_one_register_class():
 
 def test_operand_rules_agree_with_the_field_match_table():
     # A register operand's FieldRef name is derived from the field match,
-    # never spelled twice, and it carries where its bits live.
+    # never spelled twice, and it carries where its bits are.
     for operand, field in ((OPR_RD, FM.RD), (OPR_RS1, FM.RS1), (OPR_RS2, FM.RS2)):
         assert operand.index.name == field.name and operand.matcher is field
         assert operand.target is RegFile
@@ -223,7 +223,7 @@ def test_the_mop_table_wraps_every_uop_template_exactly_once():
 
 def test_every_matcher_in_the_table_states_a_value():
     # The table is discriminable: wherever a rule names bits, it also says what
-    # those bits must equal. The rules live on the Mops and UopSeqs — a Uop
+    # those bits must equal. The rules are on the Mops and UopSeqs: a Uop
     # template carries no matcher. Only LUI/AUIPC/JAL's seqs name no field:
     # their opcode alone identifies them, and that opcode is the Mop's rule.
     isa = Rv32i()
@@ -288,11 +288,11 @@ def test_field_positions_are_32_bit_and_segmented():
 
 
 def test_the_package_is_description_data_only():
-    # CLAUDE.md §3 as amended 2026-08-28: description modules hold data and
-    # never import kathryn; the package's SEMANTICS module (exec_unit.py,
-    # the exec_stage bodies) is the sanctioned exception — hardware code by
-    # nature. carolyne.uarch stays off-limits for EVERY module. Checked on
-    # the actual import statements, so prose in headers may name them.
+    # CLAUDE.md §3: description modules hold data and never import kathryn.
+    # The package's SEMANTICS modules (the exec_stage bodies) are the one
+    # exception, because they are hardware code. carolyne.uarch is off-limits
+    # for EVERY module. Checked on the import statements, so prose in a header
+    # may still name them.
     import ast, pathlib
 
     SEMANTICS = {"exec_unit_alu.py", "exec_unit_br.py", "exec_unit_ls.py",

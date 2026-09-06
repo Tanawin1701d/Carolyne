@@ -50,7 +50,7 @@ class LSExecUnit(ExecUnitBase):
         base    = api.get_src(src, AOPR_SRC_1)
         is_st   = uop_hit(src, U.STORES)
         is_ld   = uop_hit(src, U.LOADS)
-        # a load's immediate rides src_2 (I-type); a store's data rides
+        # a load's immediate is in src_2 (I-type); a store's data is in
         # src_2 and its immediate src_3 (S-type)
         imm     = mux(is_st, api.get_src(src, AOPR_SRC_3),
                              api.get_src(src, AOPR_SRC_2))

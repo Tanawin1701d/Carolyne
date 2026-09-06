@@ -89,7 +89,7 @@ def test_a_station_is_its_table_plus_the_entry_that_issued():
 
 
 def test_only_an_arch_source_is_something_to_wait_for():
-    # A µtemp/immediate source rides with the µop: no physical register, so
+    # A µtemp/immediate source is in the µop record: no physical register, so
     # nothing to wake on and nothing for slot_ready to test.
     cfg  = _cfg()
     host = _drive(cfg, RsvSpec(True, 4, (MEM,), RsvType.RSV_LD_ST))

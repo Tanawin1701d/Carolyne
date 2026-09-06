@@ -7,7 +7,7 @@
 #
 # zync_with_next_stage is handled LOCALLY: the api carries the NEXT stage's
 # arbiter itself, and inside the sync it transfers is_spec / spec_tag /
-# rob_des_idx from `src` to `des` — the triple rides in the body's own
+# rob_des_idx from `src` to `des`: the triple is in the body's own
 # records, but the ENGINE writes it, so a body cannot forget the
 # speculation state a squash matches against nor the ROB entry the
 # writeback reports to.
@@ -54,7 +54,7 @@ class ExecUnitApiO3(ExecUnitApi):
         """The handshake into the next stage, held in a `with` block.
 
         - `src` is the record this stage received, `des` the register
-          record it hands on — the body's own writes to `des` belong
+          record it passes on; the body's own writes to `des` belong
           INSIDE this block, so they fire on the grant that moves the µop
         - the engine transfers its OWN fields from src to des in here —
           `_carried`, which next_stage_fields widens to everything it
@@ -78,7 +78,7 @@ class ExecUnitApiO3(ExecUnitApi):
             with priority(PRI_ISSUE):
                 # The speculation pair goes through the complex's
                 # spec_overrider: on_suc_pred masks it there, so a tag
-                # resolving in this cycle never reaches `des`. Everything
+                # resolving in this cycle never arrives in `des`. Everything
                 # else copies straight across — only the pair can go stale.
                 spec_ovr = self.exu.spec_overriders[self.stage_idx][0]
                 spec_ovr *= {IS_SPEC : to_ref(getattr(src[0], IS_SPEC)),
@@ -93,7 +93,7 @@ class ExecUnitApiO3(ExecUnitApi):
 
     def next_stage_fields(self, src, *dest_oprs: AtomicOperand) -> dict:
         """The machine's fields for the body's next-stage record — the
-        record vocabulary this generator owns, sized off `src`.
+        record vocabulary this generator defines, sized off `src`.
 
         - the speculation pair (a squash matches on it), the ROB entry
           (declare_fin reports against it), the µop kind (uop_hit reads

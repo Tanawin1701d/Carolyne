@@ -123,7 +123,7 @@ def test_a_one_register_class_has_no_architectural_index_to_store():
 
 
 def test_a_utemp_destination_has_nothing_to_retire():
-    # A µtemp dies at the instruction boundary, so it never reaches commit.
+    # A µtemp dies at the instruction boundary, so it never gets to commit.
     cfg  = _cfg()
     temp = AtomicOperand(OperandRole.DEST, "addr",
                          intermediate=Intermediate(32, "addr"))

@@ -1,40 +1,29 @@
-# Every operand rule RV32I instructions draw from — the three register slots
-# (rd, rs1, rs2) and the six immediates. Each is a *rule*, never a value:
-# "this index / this constant arrives from that encoding field at runtime"
+# Every operand rule RV32I instructions use — the three register slots (rd,
+# rs1, rs2) and the six immediates. Each is a *rule*, never a value: "this
+# index, or this constant, comes from that encoding field at runtime"
 # (uop_contract.md §1.1, §2).
 #
 # Module CONSTANTS, shared by every shape, built on four shared AtomicOperand
 # cores. The register rules target reg.RegFile, the one class instance this
-# description declares — IsaBase matches reg files by identity, so the operand
+# description declares: IsaBase matches reg files by identity, so the operand
 # constants and the declared class must be the same object.
 #
 # The FieldRef name of a register operand is taken FROM the field-match table
-# (`FM.RD.name`) rather than spelled again, so the two halves agree by
-# construction, and `matcher` carries that field's bit positions alongside the
+# (`FM.RD.name`) rather than written again, so the two halves agree by
+# construction, and `matcher` carries that field's bit positions beside the
 # index rule.
 #
 # The cores are named per SLOT (src 1 = rs1, src 2 = rs2, src 3 = the
 # immediate, dest 1 = rd); AOPR_SRC_1 and AOPR_SRC_2 are value-equal twins on
-# purpose. Each rule states its role and its target_kind. RV32I reads rs1/rs2
-# and writes rd through three DIFFERENT encoding fields, so no slot is ever
-# both and one OPR_RD serves all 30 instructions that write a register.
+# purpose. RV32I reads rs1/rs2 and writes rd through three DIFFERENT encoding
+# fields, so no slot is ever both, and one OPR_RD serves all 30 instructions
+# that write a register.
 #
 # An immediate operand targets `reg.ImmTarget` and carries NO index: an index
-# answers "which register of the class", which an immediate has not got. The
-# six immediate constants differ only by their matcher. No µtemp operands
+# answers "which register of the class", which an immediate does not have. The
+# six immediate constants differ by their matcher and by `imm_extract`, the
+# rule that turns the matched bits into a value (imm.py). No µtemp operands
 # beyond that — RV32I produces no intra-instruction values.
-#
-# KNOWN GAPS
-# - An immediate operand cannot say how its bits become a value: sign
-#   extension (imm_i/s/b/j are signed, shamt is not), the implicit low zero
-#   of b/j-type, and u-type landing in bits 31:12 are all unstateable. Nor
-#   can InstrFieldMatch say where each segment of a scrambled immediate lands
-#   (field_match.py's gap): imm_s's (7,12) is imm[4:0] and (25,32) is
-#   imm[11:5]. An extractor cannot be generated from this alone.
-# - These constants are declared but not yet USED by any µop shape: Uop has
-#   no `imm` field while the matcher design is in flight, and contract §2
-#   keeps immediates out of the src slots. rv32i.py marks each site `# imm:`
-#   with the constant that belongs there.
 
 from __future__ import annotations
 

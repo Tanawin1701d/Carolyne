@@ -25,7 +25,7 @@ def test_a_config_is_an_isa_plus_the_machine_knobs():
     assert cfg.isa.name == "rv32i"
     # Derived from the ISA — never copied, so it cannot go stale.
     assert cfg.pc_width == 32 and cfg.instr_width == 32
-    # Derived from the knobs, the same store-the-count/derive-the-log2 bargain
+    # Derived from the knobs, the same store-the-count/derive-the-log2 rule
     # RegFile.amount -> index_width makes.
     assert cfg.rob_idx_width == 5
     # phy_specs read as the map it is: keyed by the RegFile itself.
@@ -39,7 +39,7 @@ def test_a_config_is_an_isa_plus_the_machine_knobs():
 
 def test_phy_specs_is_keyed_by_the_reg_file_instance():
     # A dict cannot hold this map — RegFile carries const_regs, so it is
-    # unhashable — and identity is the discipline IsaBase already runs on.
+    # unhashable, and identity is the rule IsaBase already uses.
     with pytest.raises(TypeError, match="unhashable"):
         {X: 64}
     # Rv32i() shares one RegFile instance by design, so a real twin comes from

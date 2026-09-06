@@ -3,7 +3,7 @@
 # by instance. The later tests are the usage
 # documentation: the family-as-factory-function pattern and the x86
 # `add [mem], reg` 4-µop crack from the contract doc, as real Uop templates
-# (the operand-only version of the same shape lives in test_operand.py).
+# (the operand-only version of the same shape is in test_operand.py).
 #
 # NOTE: the immediate rule (`Uop.imm`, FieldRef vs cracker-baked int) is not
 # covered here any more — the field is out of Uop while the encoding-side
@@ -36,8 +36,8 @@ MEM = ExecUnit("mem", (AGU, LOAD, STORE))
 
 def test_a_uop_names_itself_and_a_unit_lists_the_instance():
     # The template IS the kind: it carries its own name, and the hardware
-    # plane speaks that vocabulary as uop_idx. Membership is by IDENTITY, the
-    # discipline the whole layer runs on — a re-spelt template is a DIFFERENT
+    # plane uses that vocabulary as uop_idx. Membership is by IDENTITY, the
+    # rule the whole layer uses: a re-spelt template is a DIFFERENT
     # µop, so a unit lists the same constants the ISA declares.
     assert ADD.name == "ADD" and str(ADD) == "ADD"
     assert ALU.has(ADD) and not ALU.has(Uop("ADD", 0))
@@ -142,7 +142,7 @@ def test_uop_slots_take_an_operand_and_nothing_else():
 
 def test_encoding_text_reaches_a_template_through_the_unit():
     # An encoding table row names its µop as text; unit.uop() is the
-    # sanctioned (and loudly failing) way in, and it hands back the INSTANCE
+    # sanctioned (and loudly failing) way in, and it returns the INSTANCE
     # the unit runs — which is what identity membership needs.
     row_uop = ALU.uop("SUB")
     assert row_uop is SUB
@@ -167,7 +167,7 @@ def test_riscv_rtype_family_is_a_factory_function():
 
 def test_x86_implicit_register_operand():
     # push reg: ESP (index 4) is the ISA's implicit register, never decoded.
-    # (The -4 adjustment rides in the imm rule — see the NOTE at the top.)
+    # (The -4 adjustment is in the imm rule — see the NOTE at the top.)
     gpr     = RegFile("gpr", 32, 8)
     esp_new = Intermediate(32, "esp_new")
     dec = Uop("ADD", 0, srcs=(Operand(AtomicOperand(SRC, reg_file=gpr), ARCH, 4),), dests=(Operand(AtomicOperand(DEST, intermediate=esp_new), IMM),))

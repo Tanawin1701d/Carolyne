@@ -15,7 +15,7 @@
 # Everything here is written against the ISA-derived field names of
 # rsv_helper: `valid_<n>` / `pr_idx_<n>` / `data_<n>` per source, so a station
 # waits on exactly the operands its exec units read, whatever the ISA is.
-# Only an ARCH source waits — a µtemp/immediate rides with the µop and has no
+# Only an ARCH source waits: a µtemp/immediate is in the µop record and has no
 # physical register to wake on.
 
 from dataclasses import dataclass
@@ -50,7 +50,7 @@ class RsvBypass:
 class RsvBase(Module):
     """A reservation station's storage and the events that move it.
 
-    Build it from the @init of the module that owns the station. `build_issue`
+    Build it from the @init of the module that declares the station. `build_issue`
     is left to a subclass: which ready entry goes next is the station's policy.
     """
 
@@ -110,13 +110,11 @@ class RsvBase(Module):
 
     # --- reads -----------------------------------------------------------------
     def slot_ready(self, row):
-        """This entry is occupied and every source it waits on has landed.
+        """This entry is occupied and every source it waits for has landed.
 
-        A slot the µop does not fill waits on NOTHING, so it reads ready:
-        the record has a group per operand the ISA declares and only some are
-        filled, and `valid` alone would hold an entry forever on a slot no
-        value was ever coming to (RV32I's LUI/AUIPC/JAL fill one source, the
-        system µops none).
+        - a slot the µop does not fill waits for NOTHING, so it reads ready:
+          `valid` alone would hold an entry forever on a slot no value was
+          ever coming to (RV32I's LUI/AUIPC/JAL fill one source, system µops none)
         """
         ready = to_ref(row.valid)
         for atm_operand in self.has_src_arch_operands:
@@ -126,22 +124,14 @@ class RsvBase(Module):
         return ready
 
     def all_row_idxs(self):
-        """Every row index of the table. A Karray selection collapses to ONE
-        element and has no ranges, so logic over the whole table is a Python
-        loop.
-
-        Indices, not cached row handles: `row |= {...}` rebinds the name it is
-        written on to Kathryn's assigned-marker, so a write always names
-        `self.table[idx]` afresh and a handle is only ever read from.
-        """
+        """Every row index: a Karray has no ranges, so table logic is a Python loop."""
         return range(self.rsv_spec.size)
 
     def read_row_fields(self, src_row: KarrayRef, **overrides) -> dict:
         """One row's fields, read out by name, with some of them replaced.
 
-        The spelling for "copy this row but say something else about two of its
-        fields": one write, so nothing depends on the order two writes of equal
-        priority happen to be emitted in.
+        - one write, so nothing depends on the order two writes of equal
+          priority happen to be emitted in
         """
         fields = {name: to_ref(getattr(src_row, name))
                   for name in self.entry_fields if name not in overrides}
@@ -149,8 +139,7 @@ class RsvBase(Module):
         return fields
 
     def connect(self, exec_meta):
-        """The arbiter of the complex this station issues into — what
-        build_issue zyncs against, so a busy unit stalls the station."""
+        """The arbiter of the complex this station issues into: a busy unit stalls it."""
         self.exec_meta = exec_meta
 
     def require_exec_meta(self):
@@ -163,7 +152,7 @@ class RsvBase(Module):
                 f"connected — build_issue runs as this station's own flow and "
                 f"needs the arb it issues into (rsv.connect(exu.exec_meta))")
 
-    # --- the policy a subclass owns --------------------------------------------
+    # --- the policy a subclass supplies ----------------------------------------
     def build_issue(self, *args, **kwargs):
         raise NotImplementedError(
             f"{type(self).__name__}.build_issue: which ready entry issues is the "
@@ -190,10 +179,8 @@ class RsvBase(Module):
 
     # --- writes ----------------------------------------------------------------
     def write_entry(self, idx, src_row):
-        """Dispatch fills one entry from a wire row of the same shape.
-
-        At the rename rung: an entry is written the instant its µop renames, and
-        that write has to beat the same cycle's issue/bypass work on the entry.
+        """Dispatch fills one entry from a wire row of the same shape. At the
+        rename rung, so it beats the same cycle's issue/bypass work.
         """
         with priority(PRI_RENAME):
             self.table[idx] |= src_row
@@ -205,13 +192,8 @@ class RsvBase(Module):
     def lanes_for_me(self, dispatch):
         """That answer for every write port, built ONCE.
 
-        One write port per front-end lane: every lane may dispatch in the same
-        cycle, and any of them may be aimed at this station. Issue stays
-        single — one entry leaves per cycle, to one execution unit.
-
-        Both halves ask — the slot search, to know what an earlier lane takes,
-        and the write side, to know whether to take it — and rebuilding it
-        would be two comparator trees saying one thing.
+        - both the slot search and the write side ask, and rebuilding it would
+          be two comparator trees saying one thing
         """
         if self._lane_targets_me is None:
             self._lane_targets_me = [self.lane_targets_me(dispatch[port])
@@ -220,10 +202,8 @@ class RsvBase(Module):
 
     def entry_squashed(self, row, fix_tag):
         """This entry dies on this mispredict: occupied, speculating, and under
-        one of the tags being killed.
-
-        One definition, so a station that needs the SURVIVORS reads it back
-        rather than restating the predicate and drifting from it.
+        one of the tags being killed. One definition, so a station that needs
+        the SURVIVORS reads it back instead of restating it.
         """
         return (to_ref(row.valid)
                 & to_ref(row.is_spec)
@@ -235,26 +215,16 @@ class RsvBase(Module):
         `dispatch` is a lanes-wide wire Karray of this station's shape plus
         `rsv_id` (rsv_helper.build_rsv_dispatch). A lane is taken when it names
         this station AND the station has a free entry to give it — `free_slots`
-        hands out a DIFFERENT one per port, so two lanes never collide.
+        gives a DIFFERENT one per port, so two lanes never collide.
         """
         raise NotImplementedError(
             f"{type(self).__name__}.on_dispatch: where each lane lands is the "
             f"station's own policy")
 
     def on_issue(self, idx, src_row):
-        """One entry leaves for the FU: its contents land in `exec_src` and the
-        row frees. `idx` is a plain signal or an OH(...) one-hot — a Karray
-        index takes either.
+        """One entry leaves for the FU: contents to `exec_src`, row freed.
 
-        The speculation pair rides in the row, so the copy carries it as it
-        stands — `issue_lane` has already had a tag resolving THIS cycle
-        masked out of it, which is `on_suc_pred`'s business, not this one's.
-
-        At PRI_ISSUE, not plain: a complex masks the tag out of `exec_src`
-        from the register's PREVIOUS contents, so an equal-priority copy
-        could lose to it and a freshly issued entry would take the old
-        entry's tag. The row write rides the same rung, and both still lose
-        to the dispatch that may claim the freed row this cycle.
+        - at PRI_ISSUE, so an equal-priority copy cannot take a stale tag
         """
         with priority(PRI_ISSUE):
             self.exec_src[0] |= src_row
@@ -290,7 +260,7 @@ class RsvBase(Module):
         # the PREVIOUS one and is written at the edge — so this lands on
         # `issue_lane`, reading the candidate `pre_issue`, above the plain
         # whole-row copy that drives it. A tag is ONE-HOT (tag_gen), so an
-        # entry sits under exactly one and `==` is the whole test; there is
+        # entry is under exactly one and `==` is the whole test; there is
         # no residue to leave behind, which is why the write is a flat 0.
         cand = self.pre_issue[0]
         with priority(PRI_SUC_PRED):

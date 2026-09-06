@@ -5,7 +5,7 @@
 # These are PREDICATES, not raisers: every caller refuses for its own hardware
 # reason (a pointer that wraps mod its table, an alignment used as a mask) and
 # that reason belongs in that caller's message. What repeats is the bit trick,
-# and only the bit trick lives here.
+# and only the bit trick is here.
 
 from __future__ import annotations
 

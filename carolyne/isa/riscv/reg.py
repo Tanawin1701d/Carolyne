@@ -8,7 +8,7 @@
 # PC is NOT a register class: it is front-end / ROB state, not something the
 # engine renames through a PRF port. Consequence: the pc-relative µops (auipc,
 # the jumps' link value) never name PC as an operand — the µop record carries
-# it, and a stage body reads it as ctx.pc() off the generator's context.
+# it, and a stage body reads it off that record.
 #
 # `RegFile` below is a module-level SHARED INSTANCE with `x_file()` as its
 # builder, because IsaBase matches register files by identity and the operand
@@ -16,7 +16,7 @@
 # imported under an alias so this name can be the instance.
 #
 # `ImmTarget` is what an immediate operand points at: an Intermediate, not a
-# RegFile, so it allocates no PRF and never reaches rename.
+# RegFile, so it allocates no PRF and never goes through rename.
 
 from __future__ import annotations
 

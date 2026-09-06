@@ -1,5 +1,5 @@
 # Decode — the stage between fetch and rename: it reads the fetched
-# instruction WORD and writes the µop record the rest of the core speaks.
+# instruction WORD and writes the µop record the rest of the core reads.
 #
 # This is the ONE place raw ISA bits are turned into the engine's vocabulary.
 # After it nothing carries an encoding (uop_contract.md §2): a decoded lane
@@ -12,10 +12,10 @@
 #   pip:  seq:  zync(level 1): zif(hit): first µop of each crack
 #               zync(level 2): zif(hit): second µop, ...
 #
-# - each seq child is one cycle; each level hands over on the consumer's
+# - each seq child is one cycle; each level transfers on the consumer's
 #   grant (zync), so the walk paces itself on the handshake
 # - the pip holds fetch for the whole walk: the instr word is stable
-# - a level nothing matches hands a bubble (valid=0, the lane default)
+# - a level nothing matches outputs an empty entry (valid=0, the default)
 # - `group_uops_by_level` is the mop table flattened for that walk
 
 from kathryn import *
@@ -53,7 +53,7 @@ def group_uops_by_level(isa: IsaBase) -> tuple:
     """The mop table flattened for the level walk.
 
     - one guard per (mop, uop_seq): EVERY stated rule on it — the SAME
-      conjunction at every level, so identity cannot drift mid-crack
+      conjunction at every level, so the identity cannot change mid-crack
     - a (mop, uop_seq) with no rule at all is refused: nothing tells it apart
     - levels[k] = ((matchers, uop), ...) for every uop_seq longer than k;
       len(levels) = the ISA's longest crack
@@ -126,7 +126,7 @@ class Decode(Module):
         - every level zyncs on the consumer's arb: its writes fire on the
           grant, so the walk paces itself on the handshake
         - the pip holds fetch for the whole walk (instr stays stable), and
-          a level nothing matches hands a bubble (the lane default)
+          a level nothing matches outputs an empty entry (the lane default)
         - named `transfer`, not `decode`: `self.decode` is the TABLE
         """
         with pip(self.decode_meta, auto_restart=True):
@@ -168,7 +168,7 @@ class Decode(Module):
 
         - runs inside the caller's match guard (the zif that picked this µop)
         - one `|=` for the whole row: no two writes at equal priority
-        - valid=1, pc, npc ride along; the no-hit half is
+        - valid=1, pc and npc are written too; the no-hit half is
           write_lane_default's valid=0, one rung below
         - unfilled operand slots are written ZERO — the rows are REGs, and
           silence would keep the previous instruction's claim
@@ -208,23 +208,17 @@ class Decode(Module):
         decode_entry |= row
 
     def write_lane_default(self, decode_entry: DecodeEntryBase):
-        """The empty-lane default: valid=0, once per lane.
-
-        - call it in the SAME granted scope as the match guards, OUTSIDE them
-        - one rung below the row writes (PRI_DECODE_DEFAULT), so any matched
-          branch beats it and a no-hit lane decodes to empty
+        """The empty-lane default: valid=0, once per lane. Call it in the SAME
+        granted scope as the match guards, OUTSIDE them.
         """
         with priority(PRI_DECODE_DEFAULT):
             decode_entry |= {"valid": 0}
 
     def build_imm(self, word, operand):
-        """The operand's immediate, landed on a wire of its own width.
+        """The operand's immediate, driven onto a wire of its own width.
 
-        - the rule is the ISA's (`Operand.imm_extract`, isa/imm_api.py); it
-          DRIVES this wire slice by slice, so the width is the selected
-          target's and the bits nothing places read zero
-        - one wire per extraction site: the value is a named net in the
-          waveform, and the record field it feeds is sized independently
+        - the rule is the ISA's (`Operand.imm_extract`); it drives the wire
+          slice by slice, so bits nothing places read zero
         """
         out = wire(operand.width,
                    f"imm_{operand.atomic.name}_{self._imm_wire_cnt}")
@@ -236,17 +230,17 @@ class Decode(Module):
 
         - mirrors decode_helper.decode_operand_fields: only kinds the record
           has are written
-        - `data` rides on a has_imm source; `ar_idx` only where the class
+        - `data` needs a has_imm source; `ar_idx` only where the class
           has an index to choose (has_arch, index_width > 0)
         """
         active = operand is not None
         group  = {field_name(ACTIVE, atm_opr): int(active)}
 
         if atm_opr.is_src:
-            # valid = the value is already in hand — an IMMEDIATE, whose
+            # valid = the value is already known: an IMMEDIATE, whose
             # matcher says which bits. A matcher-less µtemp target is a
             # LINKING µtemp: an earlier µop of this crack produces it, so
-            # nothing is in hand at decode.
+            # nothing is known at decode.
             # LIMIT: nothing wakes a linking µtemp downstream yet — that is
             # the cracker/rename story, not decode's.
             is_imm = (active and operand.is_intermediate
@@ -267,14 +261,8 @@ class Decode(Module):
         return group
 
     def rsv_id_for(self, uop: Uop, lane: int) -> int:
-        """Which station this lane sends that µop to — STATIC, no hardware.
-
-        - the candidates are every station whose units run the kind
-          (`config.rsv_ids_for`); one of them has to be chosen
-        - chosen by `lane % len(candidates)`, so a µop several stations can
-          run is spread across them by lane instead of piling on the first
-        - a constant per (µop, lane), so the decoder wires it and builds
-          no comparison
+        """Which station this lane sends that µop to. STATIC: a constant per
+        (µop, lane), so the decoder wires it and builds no comparison.
         """
         ids = self.config.rsv_ids_for(uop)
         return ids[lane % len(ids)]

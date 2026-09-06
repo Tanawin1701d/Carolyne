@@ -1,9 +1,9 @@
-# ImmApi — what an immediate's EXTRACTION body reaches the engine through:
+# ImmApi — what an immediate's EXTRACTION body uses to call the engine:
 # the rule that turns the fetched instruction word into the value a µop
 # record carries (uop_contract.md §1.3, the extraction half of a matcher).
 #
 # An operand states its rule as a callable on `Operand.imm_extract`. The body
-# WRITES its result rather than returning one — the engine hands it a wire of
+# WRITES its result rather than returning one. The engine gives it a wire of
 # the immediate's width, zero everywhere nothing is placed:
 #
 #     def imm_i(word, api):

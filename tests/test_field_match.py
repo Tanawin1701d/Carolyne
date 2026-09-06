@@ -1,4 +1,4 @@
-# InstrFieldMatch — where a named encoding field lives, and how two of them
+# InstrFieldMatch — where a named encoding field is, and how two of them
 # combine. The union cases are the usage documentation: RISC-V's add and sub
 # share funct3 and differ only in funct7, so selecting either needs one rule
 # spanning both fields. InstrValueMatch is the other half — what those bits
@@ -140,7 +140,7 @@ def test_rv32i_uses_a_union_where_one_field_cannot_select():
 
     assert FM.FUNCT3_7.match_idx == FM.FUNCT3.match_idx + FM.FUNCT7.match_idx
     # add vs sub, srl vs sra, and the three shift-immediates need both fields.
-    # The rules live on the UopSeqs — a template carries no matcher.
+    # The rules are on the UopSeqs: a template carries no matcher.
     seqs   = [seq for mop in M.MOP_TABLE for seq in mop.uop_seq]
     both   = [seq for seq in seqs if seq.matcher_field is FM.FUNCT3_7]
     by_uop = {seq.uops[0].name: seq for seq in seqs}

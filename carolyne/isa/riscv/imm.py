@@ -1,9 +1,9 @@
 # RV32I immediate extraction — what each immediate's bits MEAN, beside the
-# field_match rules that say WHERE they sit.
+# field_match rules that say WHERE they are.
 #
 # One body per immediate form, each reading like the spec's own table: a
 # placement per segment, then one sign extension. A body WRITES through the
-# api and returns nothing; the engine owns the result wire.
+# api and returns nothing; the engine declares the result wire.
 #
 # The bodies state their bit positions directly (the ISA manual's numbering),
 # so a rule reads on its own without chasing a segment list.
@@ -41,10 +41,8 @@ def imm_b(word: Any, api: ImmApi) -> None:
 
 
 def imm_u(word: Any, api: ImmApi) -> None:
-    """U-type: word[31:12] -> imm[31:12], low 12 bits zero.
-
-    No sign extension: the field's top bit already IS bit 31 of the value.
-    """
+    """U-type: word[31:12] -> imm[31:12], low 12 bits zero."""
+    # no sign extension: the field's top bit already IS bit 31 of the value
     api.place(word, 31, 12, at=12)
 
 

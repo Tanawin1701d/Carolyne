@@ -6,27 +6,26 @@
 #
 # THE TEMPLATE IS THE KIND. A µop names ITSELF: `name` is what the description
 # calls this operation, unique across the ISA, and `uop_idx` is the id the
-# hardware plane speaks — the value every record's `uop_idx` field carries,
+# hardware plane uses — the value every record's `uop_idx` field carries,
 # DECLARED on the template rather than read off its position in `isa.uops`
 # (position is declaration order and nothing more, so reordering the tuple can
 # never renumber the hardware). IsaBase holds the declared ids to unique and
-# dense 0..N-1, which is what keeps the record field's width honest. An `Op`
-# type sat between name and id until 2026-08-23 and was removed: it held a
-# name and nothing else, and no record ever carried an op index for a body to
-# compare against.
+# dense 0..N-1, which is what keeps the record field's width correct.
 #
 # Operand counts are capped at the record's shape (§2: src[0..2], dest[0..1]).
 # An instruction family sharing one shape is a factory function in the per-ISA
-# package. The template names no unit: which ExecUnit executes it is answered
-# by the unit set at elaboration. It carries NO matcher either — picking an
-# instruction out of the word is the ENCODING side's job, and Mop/UopSeq
-# (mop.py) hold those rules; a template names the operation, never its
-# encoding.
-# A slot holds an Operand and nothing else, and this is the one place that sees
-# both an operand's own role and its position, so it holds them to each other.
-# No first/last bound here — that comes from position in the cracker sequence.
-# mem (size/sign) and br (cond-kind) sub-fields are deferred until the FU
-# semantics that consume them land.
+# package.
+#
+# The template names NO UNIT: which ExecUnit runs it is decided by the unit set
+# at elaboration. It carries NO MATCHER: picking an instruction out of the word
+# is the encoding side's job, and Mop/UopSeq (mop.py) hold those rules.
+#
+# A slot holds an Operand and nothing else. This is the one place that sees both
+# an operand's role and its position, so it checks one against the other.
+#
+# NOT here: the first/last bound, which comes from position in the cracker
+# sequence, and the mem (size/sign) and br (cond-kind) sub-fields, deferred
+# until the FU semantics that read them exist.
 
 from __future__ import annotations
 
@@ -47,12 +46,12 @@ MAX_DESTS = 2       # 2nd dest: flags write (x86), link reg
 class Uop:
 
     name    : str                       # what this µop IS, e.g. "ADD"
-    uop_idx : int                       # the id the hardware plane speaks;
+    uop_idx : int                       # the id the hardware plane uses;
                                         # unique + dense per ISA (IsaBase)
     srcs    : Tuple[Operand, ...] = ()
     dests   : Tuple[Operand, ...] = ()
     # What this µop IS to the machine, beyond its operands: "is_branch",
-    # "is_store", ... A REQUEST, the same bargain ExecUnit.needs makes — the
+    # "is_store", ... A REQUEST, the same rule ExecUnit.needs follows: the
     # ISA states the fact and the generator decides what hardware it means,
     # so no vocabulary ships here and an ISA may name one nobody reads yet.
     specified_feature : Tuple[str, ...] = ()
@@ -97,11 +96,10 @@ class Uop:
                     raise ValueError(
                         f"Uop '{self.name}': {kind} slot {slot} holds an operand "
                         f"declared {operand.role} — an operand's role must match "
-                        f"the list it sits in")
+                        f"the list it is in")
 
     def has_feature(self, feature: str) -> bool:
-        """This µop declares that feature — the one door a generator reads,
-        so no consumer spells `in uop.specified_feature` itself."""
+        """This µop declares that feature. The one way to ask."""
         return feature in self.specified_feature
 
     def __str__(self) -> str:

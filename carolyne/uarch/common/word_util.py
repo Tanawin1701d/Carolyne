@@ -66,7 +66,7 @@ def extract_arch_index(word: Any, operand: Operand) -> Any:
         raise ValueError(
             f"operand '{operand.atomic.name}' decodes its index from "
             f"field '{operand.index.name}' but carries no matcher saying "
-            f"where that field sits")
+            f"where that field is")
     return extract_field_bits(word, operand.matcher)
 
 

@@ -1,5 +1,5 @@
 # TagGen — the speculation-tag allocator: which tag an in-flight instruction
-# carries, and how many tags are still available to hand out.
+# carries, and how many tags are still available.
 #
 # A tag is ONE-HOT (`next_tag` is sptag_len bits, resets to 1, rotates left), so
 # a squash can mask a whole set of speculations with one AND instead of a
@@ -86,17 +86,10 @@ class TagGen(Module):
 
     # ---- rename ----------------------------------------------------------------
     def book_rename(self, port, is_branch):
-        """Hand lane `port` its one-hot tag; a branch also consumes one.
+        """Give lane `port` its one-hot tag; a branch also consumes one.
 
-        Returns (is_spec, tag):
-        - is_spec: the lane sits under an open speculation — a tag is already
-          out (free_tag below full), or a lane before it books a branch this
-          cycle
-        - tag: the pointer rotated once per BRANCH booked by a lane before it,
-          so the lanes of one cycle take consecutive tags and a non-branch
-          simply repeats its predecessor's
-        It reads the other lanes' port wires, which is legal whether or not
-        they are driven yet.
+        - is_spec: a tag is already out, or a lane before it books a branch
+        - tag: the pointer rotated once per BRANCH booked before it
         """
         self.branch_port[port] *= is_branch
         earlier = self.branch_port[:port]
@@ -109,9 +102,7 @@ class TagGen(Module):
 
     def _spec_before(self, earlier):
         """Open speculation covering a lane behind the bookings in `earlier`.
-
-        - reads free_tag PRE-resolve: the caller stalls rename in a cycle
-          on_suc_pred fires, so a booking never sees a same-cycle refill
+        Reads free_tag PRE-resolve; the caller stalls rename on a resolve.
         """
         outstanding = self.free_tag != (self.config.sptag_len - 1)
         return any_of([outstanding, *earlier])
@@ -129,7 +120,7 @@ class TagGen(Module):
 
     # ---- a prediction resolves correctly ----------------------------------------
     def on_suc_pred(self, valid):
-        """Hand the resolved branch's tag back; `valid` is a 1-bit enable."""
+        """Return the resolved branch's tag to the pool; `valid` enables it."""
         self.resolve_port *= valid
         self.rename_success_trigger *= 1
 
@@ -140,7 +131,7 @@ class TagGen(Module):
         """The cycle's one clocked write per counter — TagGen's own flow.
 
         - automatic and UNGATED: built once at gen_flow, in this module's scope
-        - the gating rides in `rename_success_trigger`: driven in the granted
+        - the gating is in `rename_success_trigger`: driven in the granted
           scopes by on_rename/on_suc_pred, reading 0 otherwise, so an idle
           cycle moves neither counter
         """
@@ -156,7 +147,7 @@ class TagGen(Module):
         anything a caller accumulated.
 
         The resolve leads STRUCTURALLY — it is wired ahead of the rename
-        subtractions — so a branch resolving beside a rename really does hand its
+        subtractions, so a branch resolving beside a rename really does return its
         tag back in time for that rename, whatever order the calls came in.
         Reading wires instead of recorded terms is also what frees this method
         from having to run last.

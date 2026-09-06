@@ -13,11 +13,11 @@
 # complex stalls the station. The body is called INSIDE its stage's pip, so
 # its scwait/cwhile compose with the stage's arbiter; stage k receives the
 # record stage k-1 RETURNED — always a REGISTER Karray the body writes
-# itself, carrying everything the later stages need (the station owns the
+# itself, carrying everything the later stages need (the station holds the
 # first register transition: exec_src) — and the body places its own
 # transfer with `with api.zync_with_next_stage(src, des):`, INSIDE which
 # the api transfers is_spec / spec_tag / rob_des_idx from src to des (the
-# triple rides in the body's records; the ENGINE writes it). Each stage's
+# triple is in the body's records; the ENGINE writes it). Each stage's
 # api (ExecUnitApiO3, exec_unit_api.py) carries the NEXT stage's arbiter
 # itself and proxies declare_*/wb_reg BACK ONTO THIS COMPLEX — the landing
 # stubs below, each raising until its machinery lands.
@@ -53,7 +53,7 @@ class ExecUnitO3(Module):
             raise ValueError(
                 f"ExecUnitO3 '{rsv_spec.label}': the station was built from a "
                 f"DIFFERENT spec ('{rsv.rsv_spec.label}') — the complex and its "
-                f"station must read one spec, or their unit sets drift")
+                f"station must read one spec, or their unit sets disagree")
         if len(rsv_spec.exec_unit) != 1:
             raise ValueError(
                 f"ExecUnitO3 '{rsv_spec.label}': the spec feeds "
@@ -79,7 +79,7 @@ class ExecUnitO3(Module):
 
         # A unit's `needs` may name record fields its body reads (pc/npc) —
         # the station KIND is what carries them, so a kind without them
-        # would hand the body a field that does not exist.
+        # would give the body a field that does not exist.
         kind_fields = {field for field, _ in
                        rsv_type_fields(rsv_spec.rsv_type, config.pc_width)}
         for facility in ("pc", "npc"):
@@ -111,7 +111,7 @@ class ExecUnitO3(Module):
         self.exec_meta = PipCon(name=f"{self.label}_exec")
 
         # One arbiter per stage, stage 0's BEING the issue arb — the station
-        # hands the entry straight into the first stage's pip.
+        # passes the entry straight into the first stage's pip.
         self.stage_metas = [self.exec_meta] + [
             PipCon(name=f"{self.label}_s{stage_idx}")
             for stage_idx in range(1, self.exec_unit.stage_cnt)]
@@ -136,18 +136,13 @@ class ExecUnitO3(Module):
     # silently building no hardware; each lands with its machinery.
 
     def declare_mis_pred(self, src, stage_idx: int, dyn_cond=None):
-        """A stage resolved a prediction WRONG under `dyn_cond`: the whole
-        core rolls back, keyed by the record this stage carries.
+        """A stage resolved a prediction WRONG under `dyn_cond`: the whole core
+        rolls back, keyed by the record this stage carries.
 
-        - `src`'s SPEC_TAG is the branch's own tag, ROB_DES_IDX its entry —
-          the two the fan-out needs (the api hands its stage's record in)
-        - the zif is what scopes the squash: every flush wire and rollback
-          write the core builds takes `dyn_cond` as its gate
-        - this complex EXCLUDES ITSELF from the per-stage kill (see
-          on_mis_pred): the mispredicting branch is older than everything
-          the squash kills, and it still has to finish and report
-        - LIMIT: `dest_renames` rides empty — the record cannot say whether
-          the branch writes its dest, so no RT/PRF pointer rolls back yet
+        - the zif scopes the squash: every flush takes `dyn_cond` as its gate
+        - this complex EXCLUDES ITSELF from the per-stage kill: the branch is
+          older than everything it kills and still has to report
+        - LIMIT: `dest_renames` is empty, so no RT/PRF pointer rolls back yet
         """
         if dyn_cond is None:
             raise ValueError(
@@ -163,7 +158,7 @@ class ExecUnitO3(Module):
         stops covering anything, core-wide (CoreO3.on_suc_pred).
 
         - `src`'s SPEC_TAG is the branch's own tag, ROB_DES_IDX its entry —
-          the api hands its stage's record in, exactly the declare_mis_pred
+          the api passes its stage's record in, exactly the declare_mis_pred
           shape
         - this complex EXCLUDES ITSELF from the stage mask (see
           on_suc_pred), the declare_mis_pred symmetry
@@ -178,26 +173,16 @@ class ExecUnitO3(Module):
                                    to_ref(getattr(src[0], ROB_DES_IDX)))
 
     def declare_fin(self, src, stage_idx: int):
-        """A µop finished — report it against the `rob_des_idx` carried in
-        `src`, the stage's own record (Rob.on_write_back).
-
-        - built in the caller's scope: the wb_fin write fires on this
-          stage's grant, and on any body zif around the call
-        """
+        """A µop finished: report it against the `rob_des_idx` in `src`."""
         self._core.rob.on_write_back(to_ref(getattr(src[0], ROB_DES_IDX)))
 
     def wb_reg(self, src, stage_idx: int, atm_opr, value):
-        """Write `value` back to that dest slot's promised physical register
-        — the class's PRF entry plus the bypass broadcast to every station.
+        """Write `value` back to that dest slot's promised physical register:
+        the class's PRF entry plus the bypass broadcast to every station.
 
-        - `pr_idx` is the stage record's own field for the slot, the index
-          rename promised at dispatch
-        - the PRF entry takes the value and its `fin`; the broadcast wakes
-          every station's waiting sources naming that class
-        - respects the enclosing Kathryn scope: a zif-gated call builds
-          gated writes, so a gated-out cycle writes and broadcasts nothing
-        - Prf.on_wb bypasses the value into its read view, so a reader in
-          THIS cycle sees it rather than the stale register
+        - respects the enclosing Kathryn scope, so a gated-out cycle writes
+          and broadcasts nothing
+        - Prf.on_wb bypasses the value into its read view
         """
         pr_idx = to_ref(getattr(src[0], field_name(PR_IDX, atm_opr)))
         self._core.reg_arch_mng.prf(atm_opr.reg_file).on_wb(pr_idx, value)
@@ -211,7 +196,7 @@ class ExecUnitO3(Module):
         return self._core.store_buf.is_full()
 
     def lsq_push_store(self, src, mem_addr, data):
-        # The speculation pair rides the stage record — the engine reads it,
+        # The speculation pair is in the stage record; the engine reads it,
         # so a body cannot push a store that forgets its tags.
         self._core.store_buf.on_new_entry(to_ref(getattr(src[0], IS_SPEC)),
                                           to_ref(getattr(src[0], SPEC_TAG)),
@@ -229,7 +214,7 @@ class ExecUnitO3(Module):
         """The unit's pipeline: one pip per stage, the body called inside it.
 
         - stage 0's src is the station's issued entry (exec_src) — the
-          station owns that first register transition; stage k's is the
+          station makes that first register transition; stage k's is the
           NEW register Karray stage k-1 returned, never src passed on
         - the body places its own transfer (api.zync_with_next_stage);
           the LAST stage returns None — its results leave through
@@ -256,7 +241,7 @@ class ExecUnitO3(Module):
                 raise ValueError(
                     f"ExecUnitO3 '{self.label}': stage {stage_idx} of unit "
                     f"'{self.exec_unit.name}' returned None — a stage before "
-                    f"the last hands a NEW register record to the next stage")
+                    f"the last returns a NEW register record to the next stage")
             self.stage_srcs.append(src)
 
     # --- mispredict ---------------------------------------------------------------
@@ -312,7 +297,7 @@ class ExecUnitO3(Module):
         """A prediction resolved correctly: every stage record stops
         speculating under the resolved tag.
 
-        - `suc_tag` is ONE-HOT (tag_gen), so an entry sits under it or
+        - `suc_tag` is ONE-HOT (tag_gen), so an entry is under it or
           it does not: the test is `is_spec & spec_tag == suc_tag` and
           the write is a flat 0. NOT on_mis_pred's shape, where
           `fix_tag` is a multi-tag kill MASK needing the overlap test
@@ -324,7 +309,7 @@ class ExecUnitO3(Module):
           its tag BEFORE the mask lands — the race on_issue solves
           with substitution; the api's transfer learns the same
         - REFUSES if a later stage's record is not built yet: stage 0 is
-          always safe (the station owns exec_src), but the rest need this
+          always safe (the station drives exec_src), but the rest need this
           complex's transfer to have run first, and skipping them would
           leave those stages with no tag-clearing hardware at all
         """

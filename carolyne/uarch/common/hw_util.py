@@ -1,11 +1,11 @@
-# Elaboration-time arithmetic every block reaches for. Pure Python on ints — no
+# Elaboration-time arithmetic every block uses. Pure Python on ints: no
 # Kathryn import, nothing here builds hardware, and nothing names an ISA.
 #
 # `ceil_log2` names the repo's most-repeated idiom, `(n - 1).bit_length()`.
 # It returns 0 for n == 1 — correct as a log, and NOT a legal Kathryn width, so
 # a caller sizing a signal with it must decide what one entry means.
 #
-# `rotate_left` lives in Kathryn (`combinational.py`, exported from the package
+# `rotate_left` is in Kathryn (`combinational.py`, exported from the package
 # root), not here: it builds hardware, and inside Kathryn it can read its width
 # off the signal. Import it from `kathryn`.
 

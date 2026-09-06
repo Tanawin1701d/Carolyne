@@ -1,35 +1,34 @@
 # CPUO3_Config — everything one O3 core is built from: the ISA description, and
 # the numbers the description does NOT decide.
 #
-# The ISA comes in whole, as an IsaBase, and is never copied out of: the config
+# The ISA comes in whole, as an IsaBase, and is never copied out of. The config
 # DERIVES its hardware numbers instead, so a block reads one object and never
 # has to know which half a number came from. The knobs are only what the ISA
-# cannot say — how wide the machine is, how deep its structures are, and which
+# cannot state: how wide the machine is, how deep its structures are, and which
 # execution units it builds.
 #
-# `phy_specs` is a TUPLE OF PAIRS rather than a dict, because a RegFile carries
-# `const_regs` and is unhashable; matching by identity is the discipline
-# IsaBase already runs on. EVERY renamed class must be listed — there is no
-# default size — and a size must EXCEED the class's architectural count, or
-# rename can never allocate.
+# `phy_specs` is a TUPLE OF PAIRS, not a dict, because a RegFile carries
+# `const_regs` and is unhashable; matching by identity is the rule IsaBase
+# already uses. EVERY renamed class must be listed, there is no default size,
+# and a size must EXCEED the class's architectural count or rename can never
+# allocate.
 #
 # `rsv_specs` is the execution side: one entry per reservation station, naming
 # the units it feeds and what KIND of station it is. Between them they must
 # cover every µop the ISA's instructions use. The kind decides the extra entry
 # fields (`RsvType` / `rsv_type_fields`): an exec station carries its pc, a
-# branch station its pc and the next one, a load/store station neither — an
-# address is a value it computes, not one it is handed. A machine may add more
-# through `extra_fields`.
+# branch station its pc and the next one, a load/store station neither, because
+# an address is a value it computes rather than one it is given. A machine may
+# add more through `extra_fields`.
 #
 # `fe_lanes` and `commit_lanes` are the machine's two widths: how many µops may
-# arrive per cycle and how many instructions may retire. Both are CEILINGS the
-# hardware is built to — what actually moves in a cycle is whatever is ready —
-# so a cycle cannot retire more than the ROB holds, which is checked here.
+# arrive per cycle, and how many instructions may retire. Both are CEILINGS the
+# hardware is built to, so a cycle cannot retire more than the ROB holds, which
+# is checked here.
 #
 # `sptag_len` is stated in BITS, the one knob holding a width where every other
 # holds a count and derives its log2: a tag is a value records carry and
-# compare, not an index into a structure. Blocks use it as written —
-# `FetchEntryBase(..., spectag=kaf(cfg.sptag_len))`.
+# compare, not an index into a structure.
 #
 # Frozen data, checked at construction: a config that cannot work fails here,
 # not deep in elaboration.
@@ -63,7 +62,7 @@ class RsvType(Enum):
         return self.value
 
 
-# What each kind adds to an entry, by NAME. Names live here rather than beside
+# What each kind adds to an entry, by NAME. Names are here rather than beside
 # the widths because a RsvSpec never sees a config and must still check its own
 # extras against them; every one of them is PC-shaped today, which is what lets
 # rsv_type_fields size them all from pc_width.
@@ -161,8 +160,7 @@ class RsvSpec:
         object.__setattr__(self, "extra_fields", tuple(fields))
 
     def entry_fields(self, pc_width: int) -> Tuple[Tuple[str, int], ...]:
-        """Every ADDED field this station's entries carry: its kind's, then
-        whatever this machine put on top."""
+        """Every ADDED field this station's entries carry: its kind's first."""
         return rsv_type_fields(self.rsv_type, pc_width) + self.extra_fields
 
     @property
@@ -176,9 +174,8 @@ class RsvSpec:
 
     @property
     def uops(self) -> Tuple[Uop, ...]:
-        """Every µop issuable from this station, deduped by identity — the
-        discipline the description layer runs on, and a Uop is unhashable
-        anyway (it reaches a RegFile, which holds a dict)."""
+        """Every µop issuable from this station, deduped by identity: a Uop
+        refers to a RegFile, which holds a dict, so it is unhashable."""
         found = {}
         for unit in self.exec_unit:
             for uop in unit.uops:
@@ -216,7 +213,7 @@ class CPUO3_Config:
                 f"CPUO3_Config: {self.commit_lanes} commit lanes over a "
                 f"{self.rob_depth}-entry ROB — a cycle cannot retire more "
                 f"instructions than the buffer can hold")
-        # The pointer-wrap bargain RsvIOR and the ROB already make: circular
+        # The same pointer-wrap rule RsvIOR and the ROB follow: circular
         # pointers step modulo the table, so the size is a power of two, and
         # one entry would leave them 0 bits wide.
         if self.st_buf_depth < 2 or not is_power_of_two(self.st_buf_depth):
@@ -307,9 +304,7 @@ class CPUO3_Config:
 
     @property
     def uop_idx_width(self) -> int:
-        """Bits naming ONE µop of the ISA's vocabulary — the id an in-flight
-        record carries to say what it is. Sized from the templates the ISA
-        declares, so one index means the same µop anywhere in the core."""
+        """Bits naming ONE µop of the ISA's whole vocabulary."""
         return ceil_log2(len(self.isa.uops))
 
     # --- derived from the knobs -----------------------------------------------
@@ -327,8 +322,7 @@ class CPUO3_Config:
             f"(sized: {', '.join(rf.name for rf, _ in self.phy_specs) or 'none'})")
 
     def phy_idx_width(self, reg_file: RegFile) -> int:
-        """Bits addressing that class's physical file. Per class, because each
-        renamed class gets its own PRF (uop_contract.md Q1)."""
+        """Bits addressing that class's physical file: one PRF per class."""
         return (self.phy_size(reg_file) - 1).bit_length()
 
     def rsv_ids_for(self, uop: Uop) -> Tuple[int, ...]:

@@ -35,7 +35,7 @@ def _cfg(**overrides):
 
 
 def _build(cfg, spec, name=""):
-    """Build one table in a fresh arena; hand back the module holding it."""
+    """Build one table in a fresh arena; return the module holding it."""
     reset()
 
     class Host(Module):
@@ -102,7 +102,7 @@ def test_the_uop_id_is_sized_from_the_isa_not_the_rob():
 
 def test_a_utemp_source_carries_only_its_data():
     # src_3 targets ImmTarget, an Intermediate: there is no PRF entry to wake
-    # on, so the value rides with the µop and the entry holds data alone.
+    # on, so the value is in the µop record and the entry holds data only.
     cfg  = _cfg()
     spec = RsvSpec(True, 16, (MEM,), RsvType.RSV_LD_ST)
     atm_operand = next(c for c in station_atm_operands(ISA, spec) if c.name == "src_3")

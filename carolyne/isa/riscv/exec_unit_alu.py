@@ -2,7 +2,7 @@
 # to rd. A natural-Kathryn exec_stage body (isa/exec_unit.py) over the
 # station record's fields.
 #
-# AUIPC lives HERE, not in BrExecUnit: it reads the pc as an INPUT but never
+# AUIPC is HERE, not in BrExecUnit: it reads the pc as an INPUT but never
 # redirects, and the unit split is by what AUGMENTS the pc.
 #
 # One stage, so exec_stage returns None: the result leaves through

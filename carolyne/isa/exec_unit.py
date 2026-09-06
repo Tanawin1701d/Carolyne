@@ -1,44 +1,39 @@
 # ExecUnitBase — one execution-unit class of the engine (uop_contract.md §1.2):
 # a named unit, the µops it executes, the operand slots it reads and writes,
-# and — for an ISA that supplies them — what it COMPUTES.
+# and, for an ISA that supplies them, what it COMPUTES.
 #
-# The unit set IS the kind→FU map (no global registry, and a µop template does
-# not name its unit); a custom function unit is just another unit an ISA
-# declares. One µop may sit in several units; which one claims it is a machine
-# configuration choice, resolved at elaboration. No standard catalog ships
-# here: every ISA/machine declares the µops and units it needs.
+# The unit set IS the kind->FU map. There is no global registry and a µop
+# template does not name its unit, so a custom function unit is only another
+# unit an ISA declares. One µop may appear in several units; which one runs it
+# is a machine configuration choice, made at elaboration.
 #
-# `uops` is a TUPLE matched by IDENTITY, not a frozenset: a Uop reaches a
-# RegFile, which holds a dict, so it is unhashable — and identity is the
-# discipline the whole description layer runs on, so a unit lists the same
-# template constants the ISA declares.
+# `uops` is a TUPLE matched by IDENTITY, not a frozenset: a Uop refers to a
+# RegFile, which holds a dict, so a Uop is unhashable. Identity is also the
+# rule the whole description layer uses, so a unit lists the same template
+# constants the ISA declares.
 #
-# THE OPERAND SLOTS ARE DECLARED, not derived from the µops that happen to
-# reach the unit. They are the unit's PORT SHAPE — what the elaborator sizes
-# read and write ports from — and IsaBase holds every µop to them: an
-# instruction may not ask a unit for a slot the unit does not have.
+# THE OPERAND SLOTS ARE DECLARED, not derived from the µops that use the unit.
+# They are the unit's PORT SHAPE, which is what read and write ports are sized
+# from, and IsaBase checks every µop against them: an instruction may not ask a
+# unit for a slot the unit does not have.
 #
 # THE SEMANTICS ARE A SUBCLASS'S. `stage_cnt` declares how many stages the
-# unit's pipeline is, and `exec_stage(stage_idx, src, api)` is one stage's
-# body: NATURAL KATHRYN (|= *= seq par zif scwait ...) over `src`, the Karray
-# record the stage receives, RETURNING the Karray the next stage receives —
-# the last stage's return is the writeback record, its dest slots read by
-# operand field name. A unit that never overrides exec_stage is still a legal
-# description object; only a generator building a real function unit demands
-# one, the same bargain AtomicOperand makes with its name.
+# pipeline has; `exec_stage(stage_idx, src, api)` is one stage's body, natural
+# Kathryn over `src` (the record the stage receives), returning the record the
+# next stage receives. THE LAST STAGE RETURNS None — its results are written
+# through `api.wb_reg()`. A unit that never overrides exec_stage is still a
+# legal description object; only a generator building real hardware needs one.
 #
-# The generator owns the stage skeleton (the pip/zync chain, the kill) and
-# threads rob_des_idx / is_spec / spec_tag between stages ITSELF; everything
-# else a later stage needs, the body carries in the record it returns. What a
-# body cannot reach with raw Kathryn it reaches through the ExecUnitApi
-# (exec_unit_api.py), which the O3 generator overrides. `needs` is what a
-# stage body requires beyond its operands, so a generator can build the right
-# api or refuse early.
+# The generator builds the stage skeleton (the pip/zync chain, the kill) and
+# copies rob_des_idx / is_spec / spec_tag between stages itself. Anything else
+# a later stage needs is carried in the record the body returns. What a body
+# cannot do with raw Kathryn it does through the ExecUnitApi
+# (exec_unit_api.py). `needs` states what a stage body requires beyond its
+# operands, so a generator can build the right api or refuse early.
 #
-# Since 2026-08-28 this is the ISA layer's sanctioned COMPROMISE of the
-# no-Kathryn rule: description TYPES still import no hardware (this module's
-# hints never evaluate), but a package's semantics — its exec_stage bodies —
-# are hardware code and write Kathryn directly.
+# This module is where the no-Kathryn rule is relaxed: description TYPES still
+# import no hardware (the type hints here never evaluate), but a package's
+# semantics — its exec_stage bodies — are hardware code and write Kathryn.
 
 from __future__ import annotations
 
@@ -144,14 +139,12 @@ class ExecUnitBase:
         return self.src_operands + self.dest_operands
 
     def covers(self, atm_operand: AtomicOperand) -> bool:
-        """This unit has that slot — by IDENTITY, the discipline the whole
-        description layer runs on."""
+        """This unit has that slot, by IDENTITY."""
         return any(mine is atm_operand for mine in self.operands())
 
     # --- µops -----------------------------------------------------------------
     def has(self, uop: Uop) -> bool:
-        """This unit runs that µop — by IDENTITY, like every other membership
-        question in this layer."""
+        """This unit runs that µop, by IDENTITY."""
         return any(mine is uop for mine in self.uops)
 
     def uop(self, name: str) -> Uop:

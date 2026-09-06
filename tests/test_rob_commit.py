@@ -22,7 +22,7 @@ X   = ISA.reg_file("x")
 
 
 def _store_buf(cfg):
-    """A ROB needs one: a store reaches memory only when commit says so."""
+    """A ROB needs one: a store is written to memory only when commit says so."""
     return StoreBuf(cfg, EasyMem(blk_request=1))
 
 
@@ -57,7 +57,7 @@ def _drive(cfg, commit_ports=None):
             self.rob.on_dispatch(self.disp)
             with zif(self.wb_en):
                 self.rob.on_write_back(self.wb_idx)
-            # Commit is the ROB's OWN @flow (it owns the arbiter), so nothing
+            # Commit is the ROB's own @flow (it declares the arbiter), so nothing
             # calls it here; on_mis_pred flushes that arb, and the zif guard
             # is what says a squash stops commit.
             with zif(self.mis_pred):

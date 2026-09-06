@@ -54,12 +54,13 @@ contract bug — fix the contract, not the engine.
 | ----------------------------- | ----------------------------------------------------- |
 | `docs/design/uop_contract.md` | normative ISA↔µarch boundary spec                     |
 | `docs/open_items.md`          | every known gap: what, where, what closes it          |
-| `carolyne/isa/`               | description types + `ExecContext` + per-ISA packages   |
+| `carolyne/isa/`               | description types + the ISA-facing apis + per-ISA pkgs |
 | `carolyne/uarch/`             | generic OoO engine, Kathryn code lives here           |
 | `carolyne/util/`              | helpers BOTH planes reach — no kathryn, no isa/uarch  |
 | `examples/regfile_demo.py`    | smallest end-to-end Kathryn flow (CPU-flavored)       |
 | `generated/`                  | emitted Verilog (gitignored)                          |
 | `tests/`                      | pytest; tests double as usage documentation           |
+| `example_comment.py`          | the comment pattern, shown as code (§7)               |
 
 Rules: `isa` never imports `uarch`; its description types never import
 `kathryn` (a package's semantics modules — `exec_stage` bodies — may, since
@@ -1980,6 +1981,21 @@ elaboration from a `RegFile` in `uarch`.
   `NOT here:` markers), names that state the fact they hold (no metaphors;
   a cache takes its method's name; verb-first helpers), and shared file
   prefixes for sibling modules (`exec_unit_*`).
+
+- **`example_comment.py`** (repo root) is the worked pattern: eight sections,
+  each showing GOOD against BAD. Read it before any comment pass. Two rules it
+  states that a reader gets wrong most often:
+  - **The doc is never longer than the body it describes.** A 1-2 line body
+    gets the name alone or one line; 3-8 lines gets one line plus at most one
+    bullet. If the bullets outnumber the statements, the doc is wrong. The one
+    exception is an abstract method whose body is a stub — there the docstring
+    IS the contract. When a short body still needs an outside rule stated, it
+    goes in a trailing inline note, not the docstring.
+  - **Plain language, for a reader whose first language is not English.**
+    Common words, one idea per sentence, no metaphors, and never describe
+    hardware as if it were a person. Domain terms (µop, rename, bypass) are
+    kept: those are exact. Do not write *rides*, *lives*, *sits*, *owns*,
+    *hands*, *speaks*, *bargain*, *earns its place*, *load-bearing*.
 
 - Discuss design decisions before coding them; when a choice is made, record
   the *why* in **§4 of this file** (the design log), never in the source. A

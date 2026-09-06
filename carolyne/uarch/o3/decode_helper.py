@@ -2,22 +2,24 @@
 # lane, built from the ISA description the way the ROB's and a station's tables
 # are.
 #
-# The fixed half is what every decoded µop carries whatever it is: whether the
-# lane holds one at all, where it came from, where the next instruction is,
-# WHICH µop of the ISA's vocabulary it is (`uop_idx`, the id the whole core
-# speaks in after decode — no raw ISA bits ride along, uop_contract.md §2),
-# whether it is a BRANCH (`is_branch` — what dispatch books a speculation tag
-# against) or a STORE (`is_store` — with is_branch, the commit barrier the ROB
-# groups on), and WHICH STATION it is for (`rsv_id` — routing, decode's to
-# supply the way branch-ness is).
+# The fixed half is what every decoded µop carries, whatever it is:
+#
+#   valid        the lane holds a µop at all
+#   pc / npc     where it came from, and where the next instruction is
+#   uop_idx      WHICH µop of the ISA's vocabulary it is: the id the whole core
+#                uses after decode, since no raw ISA bits are carried past it
+#                (uop_contract.md §2)
+#   is_branch    dispatch books a speculation tag against it
+#   is_store     with is_branch, the commit barrier the ROB groups on
+#   rsv_id       which station it is for; routing is decode's to supply
 #
 # The part that varies with the ISA is one field group per atomic operand,
 # core-wide: decode happens before a µop is routed anywhere, so the record must
 # be able to carry ANY µop the ISA declares.
 #
 #   src   active_<n>       this µop fills that slot at all
-#         valid_<n>        its value is already in hand, so rename has nothing
-#                          to look up and it reaches its station already woken
+#         valid_<n>        its value is already known, so rename has nothing
+#                          to look up and it arrives at its station awake
 #         ar_idx_<n>       the architectural register the decoder extracted
 #         data_<n>         the value itself
 #   dest  active_<n>       this µop writes that slot
@@ -29,14 +31,15 @@
 # NO pr_idx anywhere: decode is BEFORE rename, so a physical index does not
 # exist yet — ar_idx is what rename reads and pr_idx is what it answers.
 #
-# A group carries only the kinds its core can answer: `ar_idx` rides on
-# `has_arch`, since a slot naming a µtemp only has no architectural class, and
-# `data` on `has_imm`, which is how an immediate reaches the record (RV32I's
-# ImmTarget). LIMIT: `has_imm` is true of ANY µtemp target, and a real µtemp is
-# not known at decode but produced by an earlier µop of the same crack — the
-# description layer cannot yet tell the two apart (the open `Uop.imm` gap), so
-# the field is there either way and `valid_<n>` is what the decoder must answer
-# honestly per slot.
+# A group carries only the kinds its core can answer: `ar_idx` needs
+# `has_arch`, and `data` needs `has_imm`, which is how an immediate enters the
+# record (RV32I's ImmTarget).
+#
+# LIMIT: `has_imm` is true of ANY µtemp target. A real µtemp is not known at
+# decode; it is produced by an earlier µop of the same crack, and the
+# description layer cannot yet tell the two apart (the open `Uop.imm` gap). So
+# the field is built either way, and `valid_<n>` is what the decoder must
+# answer correctly per slot.
 
 from kathryn import *
 
@@ -84,11 +87,7 @@ class DecodeEntryBase(Karray):
 
 
 def decode_atm_operands(isa: IsaBase) -> tuple:
-    """Every atomic operand the ISA's µops fill, sources then destinations.
-
-    Core-wide, not per unit: a decoded µop has not been routed to a station
-    yet, so the record has to hold whatever it turns out to be.
-    """
+    """Every atomic operand the ISA's µops fill, sources then destinations."""
     return named_atomic_operands(isa, f"decode of ISA '{isa.name}'")
 
 
@@ -116,10 +115,10 @@ def decode_entry_shape(config: CPUO3_Config) -> tuple:
     """The entry class decode uses, and the widths of every field it holds.
 
     Shared by the table and by any wire row a stage builds of the same shape,
-    so the two cannot drift.
+    so the two cannot disagree.
     """
     fields = {"pc"     : config.pc_width,
-              "npc"    : config.pc_width,       # where the next instruction sits
+              "npc"    : config.pc_width,       # where the next instruction is
               "uop_idx": config.uop_idx_width,  # which µop of the ISA this is
               "rsv_id" : rsv_id_width(config)}  # sized as the bus's, so the
                                                 # k2k copy pairs the two
@@ -133,7 +132,7 @@ def build_decode_table(config: CPUO3_Config, name: str = "decode"):
     """The decode stage's record: a Karray of `config.fe_lanes` rows.
 
     Declares hardware, so it must be called from inside an open Kathryn module
-    scope — the @init of the module that owns decode.
+    scope: the @init of the module that declares decode.
     """
     entry_cls, fields = decode_entry_shape(config)
     table = entry_cls(HwComponentType.REG, (config.fe_lanes,), name, **fields)

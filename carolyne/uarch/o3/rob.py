@@ -2,7 +2,7 @@
 # the commit that retires them into architectural state.
 #
 # TWO POINTERS AND A COUNT. `alloc_ptr` is where the next instruction lands,
-# `com_ptr` the oldest one, and `used_entry_cnt` how many sit between them. The
+# `com_ptr` the oldest one, and `used_entry_cnt` how many are between them. The
 # count is what tells a full buffer from an empty one, which two pointers of
 # the same width cannot; it takes ONE clocked write per cycle from
 # `on_update_meta`, the way Prf resolves rename against commit, so allocating
@@ -25,7 +25,7 @@
 # predictor update once. It is the C++ `com2Cond = wbFin & ~com1(isBranch) &
 # ~com1(storeBit)` written for any number of lanes.
 #
-# The commit body sits in a `pip` block on the commit stage's arbiter, so a
+# The commit body is in a `pip` block on the commit stage's arbiter, so a
 # mispredict CLEARS the grant and nothing retires that cycle.
 
 from kathryn import *
@@ -76,7 +76,7 @@ class Rob(Module):
         if not isinstance(store_buf, StoreBuf):
             raise TypeError(
                 f"Rob: store_buf must be a StoreBuf, got "
-                f"{type(store_buf).__name__} — a store reaches memory ONLY on "
+                f"{type(store_buf).__name__} — a store is written to memory ONLY on "
                 f"retirement, so the buffer is what commit reports into and a "
                 f"core cannot run without one")
 
@@ -100,7 +100,7 @@ class Rob(Module):
 
         self.table = build_rob_table(self.config, self.label)
 
-        # The commit stage's arbiter — the ROB owns it, and its on_mis_pred
+        # The commit stage's arbiter. The ROB declares it, and its on_mis_pred
         # binds the squash as the reset, so nothing retires in that cycle.
         self.commit_meta = PipCon(name=f"{self.label}_commit")
 
@@ -129,7 +129,7 @@ class Rob(Module):
         self._free_built = False
 
         # PORTS. Allocation and commit both move the count, so each states what
-        # it did and on_update_meta commits the one write — the Prf bargain,
+        # it did and on_update_meta makes the one write, the same rule Prf follows:
         # which is what makes their call order irrelevant.
         self.alloc_cnt  = wire(self.cnt_width, f"{self.label}_alloc_cnt").default(0)
         self.commit_cnt = wire(self.cnt_width, f"{self.label}_commit_cnt").default(0)
@@ -140,13 +140,11 @@ class Rob(Module):
         return val(self.cnt_width, lane) < self.used_entry_cnt
 
     def room_left(self):
-        """Entries the buffer still has. Both sides of the compare stay inside
-        the count's width, which `depth + a group` would not."""
+        """Entries the buffer still has, computed inside the count's width."""
         return val(self.cnt_width, self.depth) - self.used_entry_cnt
 
     def group_fits(self, wanted):
-        """The WHOLE dispatch group fits. A group lands together or not at all,
-        so this one answer serves every lane of it."""
+        """The WHOLE dispatch group fits: one answer for every lane of it."""
         return wanted <= self.room_left()
 
     # --- dispatch -----------------------------------------------------------------
@@ -229,7 +227,7 @@ class Rob(Module):
     def run_commit(self):
         """Retire the head group, inside the commit stage's pip block.
 
-        The ROB's OWN flow: it owns `commit_meta`, so it owns the block that
+        The ROB's own flow: it declares `commit_meta`, so it builds the block that
         runs on it — nobody calls this, gen_flow does.
 
         NOTHING RETIRES IN A SQUASHED CYCLE, and the arbiter is what says so:
@@ -320,12 +318,11 @@ class Rob(Module):
 
     # --- squash -------------------------------------------------------------------
     def on_mis_pred(self, rob_idx):
-        """A prediction was wrong: everything YOUNGER than that entry goes.
+        """A prediction was wrong: everything YOUNGER than that entry is removed.
 
-        The branch itself stays — it still has to retire — so the tail lands one
-        past it and the count becomes the run from the head to it inclusive.
-        The head does not move. The commit arb flushes with it, so nothing
-        retires in the squashed cycle.
+        - the branch itself stays, because it still has to retire, so the tail
+          lands one past it and the head does not move
+        - the commit arb flushes too, so nothing retires in the squashed cycle
         """
         self.commit_meta.flush()
         with priority(PRI_MIS_PRED):

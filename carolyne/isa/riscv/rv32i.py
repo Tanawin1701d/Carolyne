@@ -1,6 +1,6 @@
 # The RV32I assembly: the IsaBase that ties the vocabularies together
-# (uop_contract.md §6). The instruction table itself moved to mop.py on
-# 2026-08-15 — this file is now the handoff point and nothing else.
+# (uop_contract.md §6). The instruction table itself is in mop.py; this file
+# only collects the parts.
 #
 # `Rv32i` is a SUBCLASS of IsaBase supplying every vocabulary as a field
 # DEFAULT, so `Rv32i()` is the whole description and `Rv32i(name=...)` varies
@@ -18,7 +18,7 @@
 # The three addressing scalars are named from field_match.py, not written as
 # literals here, so they stay beside the field positions they belong with.
 #
-# The KNOWN GAPS of the description live with the parts that carry them:
+# The KNOWN GAPS of the description are stated with the parts that have them:
 # mop.py for the encoding table, uop.py for the µop shapes, field_match.py for
 # the field positions. Nothing about the assembly below is blocked on them.
 

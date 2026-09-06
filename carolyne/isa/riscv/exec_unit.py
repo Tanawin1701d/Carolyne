@@ -1,5 +1,5 @@
 # The execution units this machine provides for RV32I's µop vocabulary
-# (uop_contract.md §1.2) — the FACTORY only; each unit's semantics lives in
+# (uop_contract.md §1.2) — the FACTORY only; each unit's semantics is in
 # its own module:
 #
 #   exec_unit_alu.py   AluExecUnit — the integer templates (AUIPC included:
@@ -10,7 +10,7 @@
 #
 # The unit split is a MACHINE choice, not an ISA one: one unit per kind is
 # the plain default, and this file is where an issue-port / unit-count knob
-# will sit. MULDIV is absent — the M extension is not RV32I. The unit NAME
+# will go. MULDIV is absent: the M extension is not RV32I. The unit NAME
 # STRINGS ("alu", "mem", "control", "system") are stable: every lookup in
 # the tests and configs keys on them; the class is what carries semantics.
 #

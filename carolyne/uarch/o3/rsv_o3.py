@@ -66,7 +66,7 @@ class RsvO3(RsvBase):
         self.track_ptr.reset(0)
 
         # The winning entry: its whole record on a wire row (what the issue
-        # block reads and hands to the FU), plus which row it came from and
+        # block reads and passes to the FU), plus which row it came from and
         # whether it was ready at all.
         self.issue_oh    = wire(self.size, f"{self.label}_issue_oh")
         self.issue_ready = wire(1, f"{self.label}_issue_ready")
@@ -150,9 +150,8 @@ class RsvO3(RsvBase):
     def _free_view(self, view, free):
         """A subtree's answer: is anything free under it, and at which index.
 
-        A leaf covers ONE row, so its answer is that row's free bit and its own
-        index — the values the fold is seeded with. Anything wider has been
-        folded already and reads its answer back out of the two slots.
+        - a leaf covers ONE row, so its answer is that row's free bit and its
+          own index; anything wider reads its answer out of the two slots
         """
         if len(view.indices) == 1:
             row_idx = view.indices[0]
@@ -182,9 +181,8 @@ class RsvO3(RsvBase):
     def write_entry(self, idx, src_row):
         """Fill one entry and stamp it with the current age.
 
-        The stamp is SUBSTITUTED into the row copy, not written on top of it:
-        the dispatch row carries a track field of its own, and two writes of
-        equal priority would not order the way they read.
+        - the stamp is SUBSTITUTED into the row copy, not written on top: two
+          writes of equal priority would not order the way they read
         """
         with priority(PRI_RENAME):
             self.table[idx] |= self.read_row_fields(src_row,
@@ -192,10 +190,8 @@ class RsvO3(RsvBase):
                                                     is_lower_track=0)
 
     def roll_track_epoch(self):
-        """Every entry in the table is now a wrap behind the counter.
-
-        Below the dispatch rung on purpose: entries written this cycle take the
-        NEW epoch, and their write has to land after this one.
+        """Every entry in the table is now a wrap behind the counter. Below the
+        dispatch rung, so entries written this cycle take the NEW epoch.
         """
         with priority(PRI_TRACK_ROLL):
             for row_idx in self.all_row_idxs():
@@ -227,7 +223,7 @@ class RsvO3(RsvBase):
         """One node of the reduce fold: which of two subtrees issues first.
 
         Ready beats not ready; between two ready ones the older stamp wins.
-        `entry_ready` and the one-hot mask ride up as extras, so a node above
+        `entry_ready` and the one-hot mask are carried up as extras, so a node above
         compares subtree answers rather than rebuilding them.
         """
         lhs_ready, lhs_oh = self._folded(lhs)

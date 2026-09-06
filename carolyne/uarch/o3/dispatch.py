@@ -27,10 +27,7 @@ from carolyne.uarch.o3.reg_arch_mng import collect_arch_dest_atm_oprs
 
 
 def booking_ok(block):
-    """READY-polarity read of a block's over_use: its bookings all fit.
-
-    Works on anything with the port — TagGen and every class's Prf.
-    """
+    """READY-polarity read of a block's over_use: its bookings all fit."""
     return ~to_ref(block.over_use)
 
 
@@ -97,15 +94,12 @@ class Dispatch(Module):
     # warm system means wire connect / no update register typically used for protocol handshake and give promiss data
 
     def warm_tag_gen(self):
-        """Book every lane's speculation tag on the core-wide TagGen — wires only.
+        """Book every lane's speculation tag on the core-wide TagGen. Wires only.
 
-        - is_branch = the lane's `valid` & the decode row's `is_branch`, so an
-          empty lane consumes no tag
-        - the booking lands in self.tag_acquisition, keyed by lane, as
-          (is_branch, is_spec, tag) — the request bit beside what the bus's
-          is_spec/spec_tag will carry
-        - nothing commits here: the counters move on TagGen's update half
-        - returns READY: no lane booked a tag the pool has not got
+        - an empty lane consumes no tag: is_branch = `valid` & row `is_branch`
+        - the booking is saved in self.tag_acquisition, keyed by lane
+        - nothing is committed here: the counters move on TagGen's update half
+        - returns READY: no lane booked a tag the pool does not have
         """
         self.tag_acquisition = {}
         for lane in range(self.config.fe_lanes):
@@ -175,36 +169,21 @@ class Dispatch(Module):
         return val(1, 1)
 
     def warm_rob(self):
-        """Ask the ROB where every lane would land — wires only.
-
-        - free_slots reads the DECODE rows' valid bits: the bus's own are
-          driven inside the granted zync, and the fit answer must exist
-          BEFORE the grant it helps decide
-        - the promise lands in self.rob_acquisition as (dispatch_fits,
-          free_idx) — the all-or-nothing room bit and one entry per lane,
-          the rob_des_idx the bus will carry
-        - nothing commits here: update_rob (on the grant) is what writes
-          entries and moves the allocation pointer
-        - returns READY: the whole bundle fits the buffer
+        """Ask the ROB where every lane would land. Wires only: it reads the
+        DECODE rows, so the fit answer exists BEFORE the grant it decides.
         """
         fits, free_idx = self.rob.free_slots(self.decode)
         self.rob_acquisition = (fits, free_idx)
         return fits
 
     def warm_rsvs(self):
-        """Convert the lanes onto the bus, then ask every station whether
-        the cycle's lanes can land — wires only.
+        """Convert the lanes onto the bus, then ask every station whether the
+        cycle's lanes can land. Wires only.
 
-        - the conversion runs HERE, not in the granted zync: the bus rows
-          are wires, so driving them at warm time is what lets a station's
-          wants read valid before the grant they help decide
-        - free_slots builds each station's allocation wires and answers
-          all_ok: every lane aimed at that station gets an entry, or is not
+        - the conversion runs HERE, not in the granted zync: the bus rows are
+          wires, so a station's wants can read valid before the grant
+        - all_ok per station: every lane aimed there gets an entry, or is not
           aimed there at all
-        - nothing commits here: update_rsvs (on the grant) is what writes
-          the entries
-        - rsv_id copies from the decode row, which now names the station
-          the µop's kind actually routes to (Decode.rsv_id_for)
         - returns READY: the AND of every station's all_ok
         """
         for lane in range(self.config.fe_lanes):
@@ -219,11 +198,7 @@ class Dispatch(Module):
     # it is used when everything is good and ready to go to
 
     def update_tag_gen(self):
-        """Commit the cycle's tag bookings on the core-wide TagGen.
-
-        - MUST run inside the granted zync: the trigger on_rename fires is
-          what opens TagGen's on_update_meta gate
-        """
+        """Commit the cycle's tag bookings. MUST run inside the granted zync."""
         self.tag_gen.on_rename()
 
     def update_prfs(self):
@@ -241,42 +216,21 @@ class Dispatch(Module):
 
 
     def update_rts(self):
-        """Commit each class's registered renames on its RT.
-
-        - MUST run inside the granted zync: the chain overlays and the
-          branch snapshots take the grant as their gate there
-        - reads the metas warm_rts registered; on_rename walks every port
-          itself, so one call per class
+        """Commit each class's registered renames on its RT. MUST run inside the
+        granted zync: the overlays take it as their gate.
         """
         for atm_opr in self.arch_dest_atm_oprs:
             rt = self.reg_arch_mng.rt(atm_opr.reg_file)
             rt.on_rename()
 
     def update_rob(self):
-        """Commit the cycle's allocations on the ROB.
-
-        - MUST run inside the granted zync: the entry writes and the
-          pointer advance take the grant as their gate there
-        - passes the BUS rows: free_slots already built its wants off the
-          decode rows (warm_rob), so on_dispatch reuses those and takes
-          each entry's CONTENT off the filled lane
-        """
+        """Commit the cycle's allocations on the ROB. MUST be inside the grant."""
         self.rob.on_dispatch(self.dispatch_bus)
 
     def update_rsvs(self):
         """Commit the cycle's dispatches on every station.
 
-        - MUST run inside the granted zync: write_entry and the age/pointer
-          work take the grant as their gate there
-        - passes the BUS rows: free_slots already built its wants and slots
-          at warm time (warm_rsvs), so on_dispatch reuses those and takes
-          each entry's content off the filled lane
-        - at PRI_RENAME: a dispatch IS the rename moment, so the whole call
-          runs on the rung write_entry already names. What it adds is the
-          plain writes (RsvO3's track_ptr), which now match RsvIOR's
-          alloc_ptr. roll_track_epoch keeps PRI_TRACK_ROLL — priority
-          restores on exit — and so still LOSES to the entry write, which
-          is what puts a same-cycle dispatch in the new epoch
+        - MUST run inside the granted zync: the writes take it as their gate
         """
         with priority(PRI_RENAME):
             for rsv in self.rsvs:
@@ -342,14 +296,8 @@ class Dispatch(Module):
             self.rename_dest_operand(lane, atm_opr)
 
     def rename_dest_operand(self, lane: int, atm_opr):
-        """Fill one dest slot's rename half on the bus — the promised
-        physical register.
-
-        - warm_prfs' booking for (lane, dest), written under the pr_idx_<n>
-          name the bus carries it as; the request bit stays behind — whether
-          the promise is consumed is the entry's active_<n> business
-        - its own `*=` on a fresh selection, legal beside the other writes:
-          nothing else drives a dest pr_idx
+        """Fill one dest slot's rename half on the bus: the promised register.
+        Its own `*=`, legal because nothing else drives a dest pr_idx.
         """
         _req, pr_idx = self.prf_acquisition[(lane, id(atm_opr))]
         self.dispatch_bus[lane] *= {field_name(PR_IDX, atm_opr): pr_idx}
@@ -359,7 +307,7 @@ class Dispatch(Module):
 
         - an INACTIVE slot is not rename's business: every path carries the
           `active` term and fills nothing the µop does not read
-        - a value already in hand (decode's valid_<n>: an immediate) keeps
+        - a value already known (decode's valid_<n>: an immediate) keeps
           exactly what the copy put there
         - active and NOT renamed: the committed value IS architectural
           state, so valid_<n>=1 and data_<n> reads the Arf (a const
@@ -370,7 +318,7 @@ class Dispatch(Module):
           decoded and pr_idx_<n> carries the RT's physical index, what the
           station wakes on
         - lane k reads the RT state AFTER earlier lanes' renames and BEFORE
-          its own (Rt.read_rename); an unrenamed class lives in the Arf
+          its own (Rt.read_rename); an unrenamed class is read from the Arf
           and nowhere else
         - at PRI_RENAME: valid/data overlay the k2k copy's own writes, the
           one-priority-per-layer rule
@@ -402,10 +350,10 @@ class Dispatch(Module):
         prf_entry = prf.on_get_entry_with_bp(prf_idx)
         prf_fin   = to_ref(prf_entry.fin)
 
-        # the slot has no value in hand and the µop reads it: rename answers
+        # the slot has no value yet and the µop reads it: rename answers
         needs_value = ~dec_opr_valid & active
         # the value exists somewhere readable NOW — the Arf (not renamed) or
-        # a written-back PRF entry — and the mux says which one hands it over
+        # a written-back PRF entry, and the mux picks which one supplies it
         value_ready = ~renamed | prf_fin
         ready_value = mux(renamed, to_ref(prf_entry.data), arch_value)
 

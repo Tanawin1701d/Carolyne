@@ -1,6 +1,6 @@
 # AtomicOperand — the core of an operand: the value(s) a slot may name and the
 # direction it flows. These tests are the usage documentation for the two-target
-# form and for the selection that resolves it, which lives on Operand.
+# form and for the selection that resolves it, which is on Operand.
 
 import pytest
 

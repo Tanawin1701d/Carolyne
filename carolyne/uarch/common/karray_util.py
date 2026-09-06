@@ -14,12 +14,10 @@ from kathryn import any_of
 def OH(one_hot_sig):
     """Index a Karray dimension with a ONE-HOT signal.
 
-    Kathryn's callable index splits by DIRECTION. On a write destination it is
-    called once per index and returns that element's 1-bit enable; on a read
-    source the dimension folds through a reduce tree and the callable is a 2:1
-    select, picking the side whose covered indices hold the hot bit. It
-    dispatches on how many arguments Kathryn hands it, so one `arr[OH(tag)]`
-    serves both directions.
+    - Kathryn's callable index splits by DIRECTION: on a write it returns
+      each element's 1-bit enable; on a read the dimension folds through a
+      reduce tree and the callable is a 2:1 select
+    - it dispatches on the argument count, so one `arr[OH(tag)]` serves both
     """
     def index(*args):
         if len(args) == 1:                          # write: fn(i) -> enable bit

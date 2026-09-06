@@ -9,14 +9,14 @@
 #
 #   src on a register class   valid_<n>  pr_idx_<n>  data_<n>
 #   src on a µtemp only       data_<n>              (no PRF entry to wake on:
-#                                                    the value rides with the µop)
+#                                                    the value is in the µop record)
 #   dest                                       pr_idx_<n>
 #   dest, writeback required  wb_required_<n>  pr_idx_<n>
 #
 # `uop_idx` names one µop of the ISA's vocabulary, so it is sized from the
 # template count and means the same µop anywhere in the CPU core.
 # `rob_des_idx` names the ROB entry the µop belongs to, sized from the buffer's
-# depth — it rides in from dispatch and is what a writeback reports against.
+# depth. It arrives from dispatch and is what a writeback reports against.
 # `track` is an out-of-order station's age order, ceil_log2 of its own rows.
 #
 # The PC is NOT in the base: which stations carry one is a question of what
@@ -115,16 +115,11 @@ def operand_fields(config: CPUO3_Config,
                    atm_operand: AtomicOperand) -> dict:
     """The entry fields one atomic operand contributes, as kaf() specs.
 
-    Which KINDS a waiting entry keeps, in the order they read: a source waits
-    on a value, so it carries the wake pair and the value; a µtemp source has
-    no physical register to wake on, so the value rides alone. A destination
-    carries where its result goes, plus the bit that says the write is
-    required — which operand_field drops on a plain DEST, where the role is
-    the constant answer. The names and widths themselves are operand_field's.
-
-    An arch source also carries ACTIVE: the record has a slot per operand the
-    ISA declares and a µop fills only some, so `slot_ready` needs the bit that
-    says whether this one is waiting on anything at all.
+    - an arch source waits for a value: ACTIVE, the wake pair, and the value
+    - a µtemp source has no physical register to wake on: the value only
+    - a destination carries where its result goes, plus `wb_required` on a
+      DEST_W_REQ core (operand_field drops it on a plain DEST)
+    - ACTIVE is what `slot_ready` reads: a µop fills only some of the slots
     """
     if atm_operand.is_src:
         kinds = (ACTIVE, VALID, DATA, PR_IDX) if atm_operand.has_arch else (DATA,)
@@ -138,7 +133,7 @@ def operand_fields(config: CPUO3_Config,
 def rsv_entry_shape(config: CPUO3_Config, rsv_spec: RsvSpec) -> tuple:
     """The entry class one station uses, and the widths of every field it holds.
 
-    Shared by the table and the issued-entry slot, so the two cannot drift.
+    Shared by the table and the issued-entry slot, so the two cannot disagree.
     """
     entry_cls = RsvO3Entry if rsv_spec.issue_o3 else RsvIOREntry
 
@@ -172,9 +167,8 @@ def rsv_entry_shape(config: CPUO3_Config, rsv_spec: RsvSpec) -> tuple:
 def rsv_field_names(config: CPUO3_Config, rsv_spec: RsvSpec) -> tuple:
     """Every field one station's entries carry, declared ones then added ones.
 
-    What a caller needs to copy a row field by field — the spelling that lets
-    one write substitute a field instead of layering a second write on top of a
-    whole-row copy, which equal priorities would order the wrong way round.
+    - what a caller needs to copy a row field by field, so one write can
+      substitute a field instead of adding a second write at equal priority
     """
     entry_cls, fields = rsv_entry_shape(config, rsv_spec)
     declared = tuple(name for name, _ in entry_cls.__karray_fields__)
@@ -186,7 +180,7 @@ def build_rsv_table(config: CPUO3_Config, rsv_spec: RsvSpec, name: str = ""):
     """One station's entry table: a Karray of `rsv_spec.size` rows.
 
     Declares hardware, so it must be called from inside an open Kathryn module
-    scope — the @init of the module that owns the station.
+    scope: the @init of the module that declares the station.
     """
     entry_cls, fields = rsv_entry_shape(config, rsv_spec)
     table = entry_cls(HwComponentType.REG, (rsv_spec.size,),
@@ -196,9 +190,7 @@ def build_rsv_table(config: CPUO3_Config, rsv_spec: RsvSpec, name: str = ""):
 
 
 def rsv_id_width(config: CPUO3_Config) -> int:
-    """Bits naming one station of the machine — how wide the dispatch bus's
-    `rsv_id` is. At least one: a single-station machine still has to carry the
-    field a lane compares against."""
+    """Bits naming one station: how wide the bus's `rsv_id` is."""
     return max(1, ceil_log2(len(config.rsv_specs)))
 
 

@@ -75,7 +75,7 @@ def test_rv32i_reaches_every_uop_in_one_level():
 
 
 def test_uop_idx_is_declared_and_covers_the_vocabulary():
-    # The id the whole core speaks after decode: DECLARED on the template, so
+    # The id the whole core uses after decode: DECLARED on the template, so
     # reordering UOPS cannot silently renumber the emitted hardware.
     reached = [uop for _matchers, uop in LEVELS[0]]
     assert sorted(u.uop_idx for u in reached) == list(range(len(ISA.uops)))
@@ -84,8 +84,8 @@ def test_uop_idx_is_declared_and_covers_the_vocabulary():
 
 def test_a_uop_carries_every_rule_on_its_path():
     # The mop's bits AND the uop_seq's: add and sub share an opcode and differ
-    # only in funct7, so both rules ride on the path. A template itself carries
-    # no matcher — the encoding side owns them.
+    # only in funct7, so both rules are on the path. A template itself carries
+    # no matcher: the encoding side holds them.
     by_name = {uop.name: matchers for matchers, uop in LEVELS[0]}
     assert {f.name for f, _v in by_name["SUB"]} == {"opcode", "funct3+funct7"}
     # LUI's opcode alone identifies it, so its path carries the mop's rule only.
@@ -96,7 +96,7 @@ def test_a_uop_carries_every_rule_on_its_path():
 def test_a_crack_becomes_one_level_per_uop():
     # x86's AGU->LOAD->ADD->STORE is this shape: decode walks the sequence
     # breadth-first, one LEVEL per cycle, and every level carries the SAME
-    # conjunction so the identity cannot drift mid-crack.
+    # conjunction so the identity cannot change mid-crack.
     agu, load = Uop("AGU", 0), Uop("LOAD", 1)
     unit      = ExecUnit("agu_mem", (agu, load))
     field     = InstrFieldMatch("op", ((0, 7),))

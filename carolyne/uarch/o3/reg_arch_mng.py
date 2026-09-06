@@ -8,7 +8,7 @@
 #
 # NOT a Kathryn Module: it declares no hardware of its own, has no ports and
 # emits no Verilog, so it is a plain object. It BUILDS IN `__init__`, like the
-# blocks it owns — which is the one rule a caller has to know: construct it
+# blocks it declares, which is the one rule a caller has to know: construct it
 # inside an open Kathryn module scope, from the @init of the module that should
 # own these blocks. Built from nowhere it panics; built from the wrong @init it
 # lands in the wrong module.
@@ -27,12 +27,12 @@
 # wide the front end fetches, not how many renames or retirements a cycle
 # allows. When the config grows those fields they replace these arguments.
 #
-# Lookup is BY IDENTITY, scanning a tuple, the same bargain CPUO3_Config makes
+# Lookup is BY IDENTITY, scanning a tuple, the same rule CPUO3_Config follows
 # with `phy_specs`. The FAN-OUTS are only the calls that take no per-class
 # argument (`on_update_meta`, `on_rename`) plus the mispredict, which takes one
 # and says so. Commit is deliberately absent: it needs a port index, an
 # architectural index and a physical index per class per port, so a commit stage
-# reaches `mng.rt(rf)` / `mng.prf(rf)` and drives them itself.
+# calls `mng.rt(rf)` / `mng.prf(rf)` and drives them itself.
 #
 # This file names no Kathryn symbol: it builds Kathryn modules by constructing
 # them, which is a different thing from declaring hardware.
@@ -65,7 +65,7 @@ def collect_arch_dest_atm_oprs(isa: IsaBase, where: str) -> tuple:
 class RegClassHw:
     """The hardware of ONE architectural register class.
 
-    `prf` and `rt` are None exactly when the class is not renamed — it lives in
+    `prf` and `rt` are None exactly when the class is not renamed: it is in
     the Arf and nowhere else.
     """
 
@@ -106,7 +106,7 @@ class RegArchMng:
         """What this class itself knows. The per-block rules — a physical file
         must be a power of two, a renamed class must have a size — belong to Prf
         and CPUO3_Config and are left to them, so there is one statement of each
-        rule rather than a copy here that can drift."""
+        rule rather than a copy here that can disagree."""
         if not isinstance(config, CPUO3_Config):
             raise TypeError(
                 f"RegArchMng: config must be a CPUO3_Config, got {type(config).__name__}")

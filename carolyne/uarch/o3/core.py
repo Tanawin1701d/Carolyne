@@ -12,11 +12,11 @@
 #   _wire_stages()       every connect slot, filled HERE and nowhere else
 #
 # The PipCon map of the machine: Fetch/Decode/Dispatch own their stage arbs
-# (fetch_meta/decode_meta/dispatch_meta), the ROB owns `commit_meta`, each
-# complex owns its exec-stage chain's; the core adds only the one nobody
-# owns — `backend_meta` (the arb dispatch's granted transfer runs against).
+# (fetch_meta/decode_meta/dispatch_meta), the ROB declares `commit_meta`, each
+# complex declares its exec-stage chain's; the core adds only the one nothing
+# else declares: `backend_meta`, which dispatch's granted transfer runs against.
 #
-# The instruction memory is ENVIRONMENT, not the core's: a machine hands it
+# The instruction memory is ENVIRONMENT, not the core's: a machine passes it
 # in, the way the eventual SoC will (the reconfigurable-component story).
 
 from kathryn import *
@@ -45,7 +45,7 @@ class CoreO3(Module):
                  data_mem  : EasyMem):
         self.config          = config
         self.instr_mem       = instr_mem     # both memories are ENVIRONMENT:
-        self.data_mem        = data_mem      # a machine hands them in
+        self.data_mem        = data_mem      # a machine passes them in
         self._mis_pred_built = False         # on_mis_pred is build-once (arb resets)
         self._suc_pred_built = False         # on_suc_pred too (the hold is set-once)
         super().__init__()
@@ -110,7 +110,7 @@ class CoreO3(Module):
         self.dispatch.connect(self.decode      , self.backend_meta,
                               self.reg_arch_mng, self.tag_gen     ,
                               self.rob         , self.rsvs)
-        # Station <-> complex, by position: the complex reaches the core for
+        # Station <-> complex, by position: the complex calls back into the core for
         # the declare fan-outs, the station takes the arb its issue zyncs on.
         for rsv, exu in zip(self.rsvs, self.exus):
             exu.connect(self)               # declare fan-outs land core-wide
@@ -128,14 +128,14 @@ class CoreO3(Module):
           mispredict condition — every flush wire and write here takes that
           guard as its gate
         - `last_valid_spec_tag_dyn` is the branch's one-hot tag,
-          `rob_des_idx_dyn` its ROB entry (rides the stage record)
+          `rob_des_idx_dyn` its ROB entry (carried in the stage record)
         - `dest_renames` is (active, atomic_operand, phy_idx) per dest slot
           of the branch: under its active bit that class's RT restores the
           branch's snapshot and its PRF rolls back to just past the
           branch's own allocation
         - the Arf is untouched on purpose: it holds committed state only
         - LIMIT: mpft booking (on_book_rename/on_rename) is unwired — it
-          needs the open-tag mask nobody owns yet; the consult reads an
+          needs the open-tag mask no block drives yet; the read returns an
           unbooked table until that lands
         - LIMIT: a branch with no active dest (a plain BEQ) restores no RT
           and rolls no PRF pointer back, so squashed youngers' renames of
@@ -186,7 +186,7 @@ class CoreO3(Module):
         - the BRANCH EXECUTION UNIT is that caller, inside a zif on its own
           correct-prediction condition — every write here takes that guard
         - `last_valid_spec_tag_dyn` is the resolved branch's one-hot tag;
-          `rob_des_idx_dyn` rides for the commit-side resolve work to come
+          `rob_des_idx_dyn` is carried for the commit-side resolve work to come
           (predictor update) — nothing in the ROB masks today, its entries
           carry no spec tag
         - RT and PRF keep everything: a confirmed speculation IS the
