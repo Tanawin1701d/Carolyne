@@ -68,8 +68,35 @@ class Mpft(Module):
     def on_book_rename(self, port_idx, is_branch_sig, tag_sig):
         self.rename_sigs[port_idx] = (is_branch_sig, tag_sig)
 
-    def on_rename(self, cur_sp_tag_dyn):
-        temp_next_sp_tag_dyn = cur_sp_tag_dyn
+    def open_tags(self, last_tag_dyn):
+        """The tags open right now, read back off this table.
+
+        Row T holds every tag T sits under plus T itself, so the row of the
+        NEWEST open tag already IS the open set. No block has to publish one.
+
+        - `last_tag_dyn` is TagGen.get_last_tag(): one-hot, or 0 when nothing
+          is open. Zero would index a one-hot with no bit set and the fold
+          would land on an arbitrary row, so it is muxed away
+        - a REGISTER read, so this is the state before the cycle's bookings,
+          which is what on_rename's chain then ORs into
+        """
+        sptag_len = self.config.sptag_len
+        last_ref  = to_ref(last_tag_dyn)
+        return mux(last_ref != 0,
+                   to_ref(self.storage[OH(last_ref)].fix_tag),
+                   0, width=sptag_len, name="mpft_open_tags")
+
+    def on_rename(self, last_tag_dyn):
+        """Write one row per booking lane: the tags that lane sits under.
+
+        - seeded from `open_tags`, so a row records EVERY open tag, not only
+          the most recent. get_fix_tag reads a column with no transitive
+          closure, so a bit missing here is a speculation that survives a
+          squash
+        - the running OR carries this cycle's own bookings down the lanes, so
+          a later lane sits under an earlier one
+        """
+        temp_next_sp_tag_dyn = self.open_tags(last_tag_dyn)
         for port_idx in range(self.rename_ports):
 
             valid, tag_idx = self.rename_sigs[port_idx]

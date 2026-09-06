@@ -243,8 +243,8 @@ class Dispatch(Module):
 
     def update_mpft(self):
         """Commit the cycle's Mpft rows. MUST run inside the granted zync."""
-        # LIMIT: the newest open tag, not the mask, so a squash under-kills
-        # a REGISTER read, so it is the pre-booking value whatever order runs
+        # the last tag is an INDEX here: the Mpft reads that row to recover the
+        # open-tag set, and a register read gives the pre-booking value
         self.mpft.on_rename(self.tag_gen.get_last_tag())
 
     def update_rob(self):
