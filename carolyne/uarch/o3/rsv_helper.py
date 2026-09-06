@@ -32,6 +32,7 @@ from carolyne.uarch.o3.config import CPUO3_Config, RsvSpec
 from carolyne.uarch.o3.operand_field import (ACTIVE, DATA, PR_IDX, WB_REQUIRED, VALID,
                                              operand_fields as build_fields,
                                              require_named)
+from carolyne.uarch.o3.common_field import ROB_DES_IDX, SPEC_TAG, TRACK, UOP_IDX
 
 
 class RsvEntryBase(Karray):
@@ -137,16 +138,16 @@ def rsv_entry_shape(config: CPUO3_Config, rsv_spec: RsvSpec) -> tuple:
     """
     entry_cls = RsvO3Entry if rsv_spec.issue_o3 else RsvIOREntry
 
-    fields = {"spec_tag"   : config.sptag_len,
-              "uop_idx"    : config.uop_idx_width,   # which µop of the ISA
-              "rob_des_idx": config.rob_idx_width}   # which ROB entry it is
+    fields = {SPEC_TAG   : config.sptag_len,
+              UOP_IDX    : config.uop_idx_width,   # which µop of the ISA
+              ROB_DES_IDX: config.rob_idx_width}   # which ROB entry it is
 
     if rsv_spec.issue_o3:
         if rsv_spec.size < 2:
             raise ValueError(
                 f"reservation station '{rsv_spec.label}': out-of-order issue needs at "
                 f"least 2 entries, {rsv_spec.size} leaves the age track 0 bits wide")
-        fields["track"] = ceil_log2(rsv_spec.size)
+        fields[TRACK] = ceil_log2(rsv_spec.size)
 
     for atm_operand in station_atm_operands(config.isa, rsv_spec):
         fields.update(operand_fields(config, rsv_spec, atm_operand))

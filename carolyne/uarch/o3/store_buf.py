@@ -41,7 +41,9 @@ from kathryn        import *
 from kathryn.signal import to_ref
 
 from carolyne.uarch.common          import ceil_log2
-from carolyne.uarch.o3.common_field import SpecLane
+from carolyne.uarch.o3.common_field import (BUSY, COMPLETE, DATA, IS_SPEC, MEM_ADDR,
+                                            SEARCH_HIT, SEARCH_PRE_WRAP, SPEC_TAG,
+                                            SpecLane)
 from carolyne.uarch.o3.config       import CPUO3_Config
 from carolyne.uarch.o3.easy_mem     import EasyMem
 from carolyne.uarch.o3.priority     import PRI_MIS_PRED, PRI_SUC_PRED
@@ -117,21 +119,21 @@ class StoreBuf(Module):
           out of it before the row write reads it. Reading the caller's
           register directly would store a tag already resolved.
         """
-        self.spec_overrider[0] *= {"is_spec": is_spec, "spec_tag": spec_tag}
+        self.spec_overrider[0] *= {IS_SPEC: is_spec, SPEC_TAG  : spec_tag}
 
         spec_ovr = self.spec_overrider[0]
-        self.table[self.alloc_ptr] |= {"busy"    : 1,
-                                       "complete": 0,
-                                       "is_spec" : to_ref(spec_ovr.is_spec),
-                                       "spec_tag": to_ref(spec_ovr.spec_tag),
-                                       "mem_addr": mem_addr,
-                                       "data"    : data}
+        self.table[self.alloc_ptr] |= {BUSY    : 1,
+                                       COMPLETE: 0,
+                                       IS_SPEC : to_ref(spec_ovr.is_spec),
+                                       SPEC_TAG: to_ref(spec_ovr.spec_tag),
+                                       MEM_ADDR: mem_addr,
+                                       DATA    : data}
         self.alloc_ptr |= self.alloc_ptr + 1
 
     def on_commit(self):
         """The ROB retired the store at com_ptr: memory write may now go.
         Call in the commit scope, gated on the lane's is_store."""
-        self.table[self.com_ptr] |= {"complete": 1}
+        self.table[self.com_ptr] |= {COMPLETE: 1}
         self.com_ptr             |= self.com_ptr + 1
 
     def search_newest(self, mem_addr):
@@ -181,8 +183,8 @@ class StoreBuf(Module):
             pick_lhs = ((lhs_hit & ~rhs_hit)
                         | (lhs_hit & rhs_hit & ~lhs_pre_wrap & rhs_pre_wrap))
             return pick_lhs, {
-                "search_hit"     : mux(pick_lhs, lhs_hit, rhs_hit, width=1),
-                "search_pre_wrap": mux(pick_lhs, lhs_pre_wrap,
+                SEARCH_HIT     : mux(pick_lhs, lhs_hit, rhs_hit, width=1),
+                SEARCH_PRE_WRAP: mux(pick_lhs, lhs_pre_wrap,
                                                  rhs_pre_wrap, width=1)}
 
         row = self.table[pick_newest]
@@ -196,8 +198,8 @@ class StoreBuf(Module):
           is on. That, not the raw index, orders two entries by age
         """
         if "search_hit" in view.fields:
-            return view.fields["search_hit"], view.fields["search_pre_wrap"]
-        hit = view.fields["busy"] & (view.fields["mem_addr"] == addr)
+            return view.fields[SEARCH_HIT], view.fields[SEARCH_PRE_WRAP]
+        hit = view.fields[BUSY] & (view.fields[MEM_ADDR] == addr)
         return hit, self.alloc_ptr <= view.indices[0]
 
     # --- squash / resolve -----------------------------------------------------------
@@ -216,7 +218,7 @@ class StoreBuf(Module):
                             & ((to_ref(row.spec_tag) & fix_tag) != 0))
                 survivors.append(to_ref(row.busy) & ~squashed)
                 with zif(squashed):
-                    self.table[row_idx] |= {"busy": 0}
+                    self.table[row_idx] |= {BUSY: 0}
             self.alloc_ptr |= self.ret_ptr \
                           + sum_cnt(survivors).extend(self.ptr_width)
 
@@ -231,15 +233,15 @@ class StoreBuf(Module):
             row  = self.table[row_idx]
             left = to_ref(row.spec_tag) & ~suc_tag
             with zif(to_ref(row.busy) & to_ref(row.is_spec)):
-                self.table[row_idx] |= {"spec_tag": left,
-                                        "is_spec" : left != 0}
+                self.table[row_idx] |= {SPEC_TAG: left,
+                                        IS_SPEC : left != 0}
 
         # a tag is ONE-HOT, so an entry is under it or is not
         spec_ovr_row = self.spec_overrider[0]
         with priority(PRI_SUC_PRED):
             with zif(spec_ovr_row.is_spec
                      & (spec_ovr_row.spec_tag == suc_tag)):
-                self.spec_overrider[0] *= {"is_spec": 0, "spec_tag": 0}
+                self.spec_overrider[0] *= {IS_SPEC: 0, SPEC_TAG  : 0}
 
     # --- retire to memory -----------------------------------------------------------
     @flow
@@ -252,5 +254,5 @@ class StoreBuf(Module):
         head = self.table[self.ret_ptr]
         with zif(to_ref(head.busy) & to_ref(head.complete)):
             self.data_mem.write(0, to_ref(head.mem_addr), to_ref(head.data))
-            self.table[self.ret_ptr] |= {"busy": 0, "complete": 0}
+            self.table[self.ret_ptr] |= {BUSY: 0, COMPLETE  : 0}
             self.ret_ptr |= self.ret_ptr + 1

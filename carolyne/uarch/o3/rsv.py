@@ -31,6 +31,7 @@ from carolyne.uarch.o3.priority import (PRI_ISSUE, PRI_MIS_PRED,
 from carolyne.uarch.o3.rsv_helper import (build_rsv_slot, build_rsv_table,
                                           rsv_entry_shape, rsv_field_names,
                                           station_atm_operands)
+from carolyne.uarch.o3.common_field import IS_SPEC, SPEC_TAG, VALID
 
 
 @dataclass(frozen=True, eq=False)
@@ -228,7 +229,7 @@ class RsvBase(Module):
         """
         with priority(PRI_ISSUE):
             self.exec_src[0] |= src_row
-            self.table[idx]  |= {"valid": 0}
+            self.table[idx]  |= {VALID: 0}
 
     def on_mis_pred(self, fix_tag):
         """A prediction was wrong: every entry speculating under a killed tag
@@ -238,7 +239,7 @@ class RsvBase(Module):
         with priority(PRI_MIS_PRED):
             for row_idx in self.all_row_idxs():
                 with zif(self.entry_squashed(self.table[row_idx], fix_tag)):
-                    self.table[row_idx] |= {"valid": 0}
+                    self.table[row_idx] |= {VALID: 0}
 
     def on_suc_pred(self, suc_tag):
         """A prediction resolved correctly: its tag stops covering anything.
@@ -253,8 +254,8 @@ class RsvBase(Module):
             row  = self.table[row_idx]
             left = to_ref(row.spec_tag) & ~suc_tag
             with zif(to_ref(row.valid) & to_ref(row.is_spec)):
-                self.table[row_idx] |= {"spec_tag": left,
-                                        "is_spec" : left != 0}
+                self.table[row_idx] |= {SPEC_TAG: left,
+                                        IS_SPEC : left != 0}
 
         # The entry issuing THIS cycle is still only a wire — `exec_src` holds
         # the PREVIOUS one and is written at the edge — so this lands on
@@ -265,7 +266,7 @@ class RsvBase(Module):
         cand = self.pre_issue[0]
         with priority(PRI_SUC_PRED):
             with zif(cand.is_spec & (cand.spec_tag == suc_tag)):
-                self.issue_lane[0] *= {"spec_tag": 0, "is_spec": 0}
+                self.issue_lane[0] *= {SPEC_TAG: 0, IS_SPEC  : 0}
 
     def on_bypass(self, *bypasses: RsvBypass):
         """Writeback broadcasts: a waiting source whose physical index matches

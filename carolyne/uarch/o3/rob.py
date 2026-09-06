@@ -41,6 +41,7 @@ from carolyne.uarch.o3.reg_arch_mng import RegArchMng
 from carolyne.uarch.o3.store_buf import StoreBuf
 from carolyne.uarch.o3.rob_helper import (build_rob_table, rob_dest_operands,
                                           rob_entry_shape)
+from carolyne.uarch.o3.common_field import WB_FIN
 
 
 class Rob(Module):
@@ -220,7 +221,7 @@ class Rob(Module):
     # --- writeback ----------------------------------------------------------------
     def on_write_back(self, idx):
         """An execution unit finished: that entry may now retire."""
-        self.table[idx] |= {"wb_fin": 1}
+        self.table[idx] |= {WB_FIN: 1}
 
     # --- commit -------------------------------------------------------------------
     @flow

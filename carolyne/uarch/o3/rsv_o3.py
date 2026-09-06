@@ -37,6 +37,9 @@ from carolyne.uarch.o3.config import CPUO3_Config, RsvSpec
 from carolyne.uarch.o3.priority import PRI_RENAME, PRI_TRACK_ROLL
 from carolyne.uarch.o3.operand_field import VALID, field_name
 from carolyne.uarch.o3.rsv import RsvBase
+from carolyne.uarch.o3.common_field import (ENTRY_OH, ENTRY_READY,
+                                            IS_LOWER_TRACK, NODE_OH,
+                                            NODE_READY, TRACK, VALID)
 
 
 class RsvO3(RsvBase):
@@ -126,8 +129,8 @@ class RsvO3(RsvBase):
             lhs_free, lhs_idx = self._free_view(lhs, free)
             rhs_free, rhs_idx = self._free_view(rhs, free)
             # Prefer the left subtree, so a tie takes the lower row.
-            return lhs_free, {"valid": lhs_free | rhs_free,
-                              "track": mux(lhs_free, lhs_idx, rhs_idx,
+            return lhs_free, {VALID: lhs_free | rhs_free,
+                              TRACK: mux(lhs_free, lhs_idx, rhs_idx,
                                            width=self.track_width)}
 
         return any_of(free), to_ref(self.table[select].track)
@@ -156,7 +159,7 @@ class RsvO3(RsvBase):
         if len(view.indices) == 1:
             row_idx = view.indices[0]
             return free[row_idx], val(self.track_width, row_idx)
-        return view.fields["valid"], view.fields["track"]
+        return view.fields[VALID], view.fields[TRACK]
 
     def on_dispatch(self, dispatch):
         """Take every dispatch lane aimed at this station, all in one cycle."""
@@ -195,7 +198,7 @@ class RsvO3(RsvBase):
         """
         with priority(PRI_TRACK_ROLL):
             for row_idx in self.all_row_idxs():
-                self.table[row_idx] |= {"is_lower_track": 1}
+                self.table[row_idx] |= {IS_LOWER_TRACK: 1}
 
     # --- issue ------------------------------------------------------------------
     @flow
@@ -212,7 +215,7 @@ class RsvO3(RsvBase):
         self._root = None
         self.pre_issue[0] *= self.table[self._select_oldest]
         self.issue_lane[0] *= self.pre_issue[0]
-        self.issue_oh     *= self._root["oh"]
+        self.issue_oh     *= self._root[NODE_OH]
         self.issue_ready  *= self.slot_ready(self.pre_issue[0])
 
         with pip(self.issue_meta, auto_req=True, auto_restart=True):
@@ -229,9 +232,9 @@ class RsvO3(RsvBase):
         lhs_ready, lhs_oh = self._folded(lhs)
         rhs_ready, rhs_oh = self._folded(rhs)
 
-        older = ((lhs.fields["is_lower_track"] & ~rhs.fields["is_lower_track"])
-                 | ((lhs.fields["is_lower_track"] == rhs.fields["is_lower_track"])
-                    & (lhs.fields["track"] < rhs.fields["track"])))
+        older = ((lhs.fields[IS_LOWER_TRACK] & ~rhs.fields[IS_LOWER_TRACK])
+                 | ((lhs.fields[IS_LOWER_TRACK] == rhs.fields[IS_LOWER_TRACK])
+                    & (lhs.fields[TRACK] < rhs.fields[TRACK])))
         pick_lhs = lhs_ready & (~rhs_ready | older)
 
         ready = lhs_ready | rhs_ready
@@ -240,9 +243,9 @@ class RsvO3(RsvBase):
         # The node covering every row IS the root, whatever order the fold
         # visits its nodes in — that is what the issue wires read.
         if len(lhs.indices) + len(rhs.indices) == self.size:
-            self._root = {"ready": ready, "oh": oh}
+            self._root = {NODE_READY: ready, NODE_OH: oh}
 
-        return pick_lhs, {"entry_ready": ready, "entry_oh": oh}
+        return pick_lhs, {ENTRY_READY: ready, ENTRY_OH  : oh}
 
     def _folded(self, view):
         """A subtree's answer: ready, and the one-hot of where it came from.
@@ -251,9 +254,9 @@ class RsvO3(RsvBase):
         and the mask is its own index.
         """
         if "entry_ready" in view.fields:
-            return view.fields["entry_ready"], view.fields["entry_oh"]
+            return view.fields[ENTRY_READY], view.fields[ENTRY_OH]
 
-        ready = view.fields["valid"]
+        ready = view.fields[VALID]
         for atm_operand in self.has_src_arch_operands:
             ready = ready & view.fields[field_name(VALID, atm_operand)]
         return ready, val(self.size, 1 << view.indices[0])

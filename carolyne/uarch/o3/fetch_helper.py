@@ -18,6 +18,7 @@
 from kathryn import *
 
 from carolyne.uarch.o3.config import CPUO3_Config
+from carolyne.uarch.o3.common_field import INSTR, PC
 
 
 class FetchEntryBase(Karray):
@@ -37,8 +38,8 @@ class FetchEntryBase(Karray):
 def fetch_entry_shape(config: CPUO3_Config) -> tuple:
     """The entry class fetch uses, and the widths of every field it holds.
     Shared with any wire row of the same shape, so the two cannot disagree."""
-    return FetchEntryBase, {"pc"   : config.pc_width,
-                     "instr": config.instr_width}   # ilen_bytes * 8
+    return FetchEntryBase, {PC: config.pc_width,
+                     INSTR: config.instr_width}   # ilen_bytes * 8
 
 
 def build_fetch_table(config: CPUO3_Config, name: str = "fetch"):

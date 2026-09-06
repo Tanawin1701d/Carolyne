@@ -50,6 +50,7 @@ from carolyne.uarch.o3.operand_field import (ACTIVE, AR_IDX, DATA, WB_REQUIRED,
                                              named_atomic_operands,
                                              operand_fields as build_fields)
 from carolyne.uarch.o3.rsv_helper import rsv_id_width
+from carolyne.uarch.o3.common_field import NPC, PC, RSV_ID, UOP_IDX, VALID
 
 
 class DecodeEntryBase(Karray):
@@ -117,10 +118,10 @@ def decode_entry_shape(config: CPUO3_Config) -> tuple:
     Shared by the table and by any wire row a stage builds of the same shape,
     so the two cannot disagree.
     """
-    fields = {"pc"     : config.pc_width,
-              "npc"    : config.pc_width,       # where the next instruction is
-              "uop_idx": config.uop_idx_width,  # which µop of the ISA this is
-              "rsv_id" : rsv_id_width(config)}  # sized as the bus's, so the
+    fields = {PC     : config.pc_width,
+              NPC    : config.pc_width,       # where the next instruction is
+              UOP_IDX: config.uop_idx_width,  # which µop of the ISA this is
+              RSV_ID : rsv_id_width(config)}  # sized as the bus's, so the
                                                 # k2k copy pairs the two
 
     for atm_operand in decode_atm_operands(config.isa):
@@ -138,7 +139,7 @@ def build_decode_table(config: CPUO3_Config, name: str = "decode"):
     table = entry_cls(HwComponentType.REG, (config.fe_lanes,), name, **fields)
 
     # Powers up empty, with no slot claimed by anything.
-    resets = {"valid": 0}
+    resets = {VALID: 0}
     for atm_operand in decode_atm_operands(config.isa):
         resets[field_name(ACTIVE, atm_operand)] = 0
     return table.reset(**resets)

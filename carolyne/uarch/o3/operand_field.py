@@ -24,15 +24,13 @@
 from kathryn import kaf
 
 from carolyne.isa import AtomicOperand, IsaBase
+from carolyne.uarch.o3.common_field import (ACTIVE, AR_IDX, DATA, PR_IDX,
+                                            VALID, WB_REQUIRED)
 from carolyne.uarch.o3.config import CPUO3_Config
 
-ACTIVE      = "active"
-VALID       = "valid"
-WB_REQUIRED = "wb_required"
-DATA        = "data"    # isa/exec_unit_api.py restates this stem (get_src) —
-                        # isa cannot import uarch, so a rename here renames there
-PR_IDX      = "pr_idx"
-AR_IDX      = "ar_idx"
+# The kinds come from common_field, the one place every field name is spelled;
+# they are re-exported here because a caller asking for kinds imports this
+# module for the sizing rules anyway.
 
 # The ONE order a group's fields are built in, whatever order a caller lists
 # them: the status bits, then the value, then the indexes. Every record here

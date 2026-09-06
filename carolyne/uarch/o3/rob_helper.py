@@ -28,6 +28,7 @@ from carolyne.uarch.o3.operand_field import (ACTIVE, AR_IDX, PR_IDX, WB_REQUIRED
                                              field_name,
                                              operand_fields as build_fields,
                                              require_named)
+from carolyne.uarch.o3.common_field import PC, WB_FIN
 
 
 class RobEntry(Karray):
@@ -82,7 +83,7 @@ def rob_entry_shape(config: CPUO3_Config) -> tuple:
     Shared by the table and by any wire row a stage builds of the same shape,
     so the two cannot disagree.
     """
-    fields = {"pc": config.pc_width}
+    fields = {PC: config.pc_width}
     for atm_operand in rob_dest_operands(config.isa):
         fields.update(rob_operand_fields(config, atm_operand))
     return RobEntry, fields
@@ -108,7 +109,7 @@ def build_rob_table(config: CPUO3_Config, name: str = "rob"):
     table = entry_cls(HwComponentType.REG, (config.rob_depth,), name, **fields)
 
     # Powers up with nothing written back and no destination claimed.
-    resets = {"wb_fin": 0}
+    resets = {WB_FIN: 0}
     for atm_operand in rob_dest_operands(config.isa):
         resets[field_name(ACTIVE, atm_operand)] = 0
     return table.reset(**resets)

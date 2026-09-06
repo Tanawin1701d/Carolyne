@@ -42,6 +42,7 @@ from typing import Tuple
 from ...isa import ExecUnit, IsaBase, RegFile, Uop
 from ...util import is_power_of_two
 from ..common import ceil_log2
+from .common_field import NPC, PC
 
 # The map from a register class to its physical file size. A dict is impossible
 # (RegFile is unhashable — header), so the pairs ARE the map; read one with
@@ -67,8 +68,8 @@ class RsvType(Enum):
 # extras against them; every one of them is PC-shaped today, which is what lets
 # rsv_type_fields size them all from pc_width.
 _RSV_TYPE_FIELD_NAMES = {
-    RsvType.RSV_EXEC  : ("pc",),
-    RsvType.RSV_BRANCH: ("pc", "npc"),
+    RsvType.RSV_EXEC  : (PC,),
+    RsvType.RSV_BRANCH: (PC, NPC),
     RsvType.RSV_LD_ST : (),
 }
 

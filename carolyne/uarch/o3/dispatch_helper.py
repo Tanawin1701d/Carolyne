@@ -49,6 +49,8 @@ from carolyne.uarch.o3.operand_field import (ACTIVE, AR_IDX, DATA, PR_IDX,
                                              named_atomic_operands,
                                              operand_fields)
 from carolyne.uarch.o3.rsv_helper import rsv_id_width
+from carolyne.uarch.o3.common_field import (NPC, PC, ROB_DES_IDX, RSV_ID, SPEC_TAG,
+                                            UOP_IDX)
 
 # In operand_field.KIND_ORDER, which is the order the fields land in — every
 # record here lists its kinds the same way, so the groups can be read against
@@ -121,12 +123,12 @@ def dispatch_entry_shape(config: CPUO3_Config) -> tuple:
     cannot disagree.
     """
     where  = f"dispatch of ISA '{config.isa.name}'"
-    fields = {"spec_tag"   : config.sptag_len,
-              "uop_idx"    : config.uop_idx_width,   # which µop of the ISA
-              "rob_des_idx": config.rob_idx_width,   # which ROB entry it is
-              "rsv_id"     : rsv_id_width(config),   # which station it is for
-              "pc"         : config.pc_width,
-              "npc"        : config.pc_width}
+    fields = {SPEC_TAG   : config.sptag_len,
+              UOP_IDX    : config.uop_idx_width,   # which µop of the ISA
+              ROB_DES_IDX: config.rob_idx_width,   # which ROB entry it is
+              RSV_ID     : rsv_id_width(config),   # which station it is for
+              PC         : config.pc_width,
+              NPC        : config.pc_width}
 
     for atm_operand in named_atomic_operands(config.isa, where):
         fields.update(operand_fields(config, atm_operand,

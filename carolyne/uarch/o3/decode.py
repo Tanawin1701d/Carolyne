@@ -32,6 +32,8 @@ from carolyne.uarch.o3.priority import PRI_DECODE_DEFAULT
 from carolyne.uarch.o3.fetch_helper import FetchEntryBase
 from carolyne.uarch.o3.operand_field import (ACTIVE, AR_IDX, DATA, VALID,
                                              WB_REQUIRED, field_name)
+from carolyne.uarch.o3.common_field import (IS_BRANCH, IS_STORE, NPC, PC, RSV_ID,
+                                            UOP_IDX, VALID)
 
 
 def _collect_matchers(mop: Mop, uop_seq: UopSeq) -> tuple:
@@ -194,13 +196,13 @@ class Decode(Module):
         # elaboration; the write must exist even when a µop has neither
         # feature, since the rows are REGs and silence would keep the
         # previous instruction's claim.
-        row = {"valid"    : 1,
-               "pc"       : pc,
-               "npc"      : pc + self.config.isa.ilen_bytes,
-               "uop_idx"  : uop.uop_idx,
-               "is_branch": int(uop.has_feature("is_branch")),
-               "is_store" : int(uop.has_feature("is_store")),
-               "rsv_id"   : self.rsv_id_for(uop, lane)}
+        row = {VALID    : 1,
+               PC       : pc,
+               NPC      : pc + self.config.isa.ilen_bytes,
+               UOP_IDX  : uop.uop_idx,
+               IS_BRANCH: int(uop.has_feature(IS_BRANCH)),
+               IS_STORE : int(uop.has_feature(IS_STORE)),
+               RSV_ID   : self.rsv_id_for(uop, lane)}
         for atm_opr in self.atm_operands:
             operand = operand_by_atm_opr.get(id(atm_opr))   # None = slot left empty
             group   = self._operand_group(word, atm_opr, operand)
@@ -212,7 +214,7 @@ class Decode(Module):
         granted scope as the match guards, OUTSIDE them.
         """
         with priority(PRI_DECODE_DEFAULT):
-            decode_entry |= {"valid": 0}
+            decode_entry |= {VALID: 0}
 
     def build_imm(self, word, operand):
         """The operand's immediate, driven onto a wire of its own width.

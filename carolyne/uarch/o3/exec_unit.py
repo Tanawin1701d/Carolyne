@@ -27,8 +27,8 @@
 from kathryn import *
 from kathryn.signal import to_ref
 
-from carolyne.uarch.o3.common_field import (IS_SPEC, ROB_DES_IDX,
-                                            SPEC_TAG, SpecLane)
+from carolyne.uarch.o3.common_field import (IS_SPEC, NPC, PC, ROB_DES_IDX, SPEC_TAG,
+                                            SpecLane)
 from carolyne.uarch.o3.config import CPUO3_Config, RsvSpec, rsv_type_fields
 from carolyne.uarch.o3.exec_unit_api import ExecUnitApiO3
 from carolyne.uarch.o3.operand_field import PR_IDX, field_name
@@ -82,7 +82,7 @@ class ExecUnitO3(Module):
         # would give the body a field that does not exist.
         kind_fields = {field for field, _ in
                        rsv_type_fields(rsv_spec.rsv_type, config.pc_width)}
-        for facility in ("pc", "npc"):
+        for facility in (PC, NPC):
             if facility in self.exec_unit.needs and facility not in kind_fields:
                 raise ValueError(
                     f"ExecUnitO3 '{rsv_spec.label}': unit "

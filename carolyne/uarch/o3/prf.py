@@ -46,6 +46,7 @@ from carolyne.util import is_power_of_two
 # One rung of the engine-wide ladder (priority.py): a mispredict write overrides
 # the rename/commit write of the same cycle.
 from carolyne.uarch.o3.priority import PRI_ISSUE, PRI_MIS_PRED
+from carolyne.uarch.o3.common_field import DATA, FIN
 
 
 class PrfEntry(Karray):
@@ -230,7 +231,7 @@ class Prf(Module):
         with priority(PRI_ISSUE):
             for idx in range(self.phy_amount):
                 with zif(dyn_idx == idx):
-                    self.read_lane[idx] *= {"fin": 1, "data": data}
+                    self.read_lane[idx] *= {FIN: 1, DATA  : data}
 
     # ---- mispredict ---------------------------------------------------------------
     def on_mis_pred(self, last_phy_idx):
