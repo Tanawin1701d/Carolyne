@@ -197,7 +197,7 @@ class StoreBuf(Module):
         - `pre_wrap` is `alloc_ptr <= idx`: which side of the wrap the entry
           is on. That, not the raw index, orders two entries by age
         """
-        if "search_hit" in view.fields:
+        if SEARCH_HIT in view.fields:
             return view.fields[SEARCH_HIT], view.fields[SEARCH_PRE_WRAP]
         hit = view.fields[BUSY] & (view.fields[MEM_ADDR] == addr)
         return hit, self.alloc_ptr <= view.indices[0]

@@ -65,12 +65,32 @@ def test_no_o3_module_names_a_field_with_a_literal():
     so a MISSPELLING fails here too. That is the point — a constant catches a
     typo only if the typo is in the constant's name, where Python catches it.
 
-    - checked where a string MEANS a field: a dict key, or a `[...]` subscript
+    Checked in every position a string can name a field:
+
+    - a dict key                {"pc": ...}          ANY literal is refused
+    - a `[...]` subscript       view.fields["pc"]    ANY literal is refused
+    - an `in` test on .fields   if "pc" in v.fields  ANY literal is refused
+    - getattr / hasattr         getattr(row, "pc")   a VOCABULARY word only
+
+    The first three refuse a literal whatever it says, so a MISSPELLING fails
+    too. getattr is narrower on purpose: it also reads ordinary Python
+    attributes (`getattr(self, "stage_srcs")`), which are not fields.
+
+    The `in` form is here because it was missed once: store_buf tested
+    `"search_hit" in view.fields` on the line above `view.fields[SEARCH_HIT]`.
+    It is scoped to `.fields` so that a different vocabulary — the ISA's
+    facility names, `"mem" in unit.needs` — is not swept up with it.
+
     - a Karray class body declares by attribute, not by string, so it does not
       appear here; the test above is what holds those to the constants
-    - a signal name that reads the same (fetch's `reg(w, "pc")`) is a
-      different thing and is not a dict key, so it is left alone
+    - a signal NAME that reads the same (fetch's `reg(w, "pc")`) is a
+      different thing and is in none of these positions, so it is left alone
     """
+    VOCAB = {v for k, v in vars(CF).items() if k.isupper() and isinstance(v, str)}
+
+    def _str(node):
+        return isinstance(node, ast.Constant) and isinstance(node.value, str)
+
     offenders = []
     for f in sorted(O3.glob("*.py")):
         if f.name == "common_field.py":
@@ -78,12 +98,20 @@ def test_no_o3_module_names_a_field_with_a_literal():
         for node in ast.walk(ast.parse(f.read_text())):
             lits = []
             if isinstance(node, ast.Dict):
-                lits = [k for k in node.keys
-                        if isinstance(k, ast.Constant) and isinstance(k.value, str)]
-            elif (isinstance(node, ast.Subscript)
-                  and isinstance(node.slice, ast.Constant)
-                  and isinstance(node.slice.value, str)):
+                lits = [k for k in node.keys if _str(k)]
+            elif isinstance(node, ast.Subscript) and _str(node.slice):
                 lits = [node.slice]
+            elif (isinstance(node, ast.Compare)
+                  and any(isinstance(o, (ast.In, ast.NotIn)) for o in node.ops)
+                  and any(isinstance(c, ast.Attribute) and c.attr == "fields"
+                          for c in node.comparators)):
+                lits = [node.left] if _str(node.left) else []
+            elif (isinstance(node, ast.Call)
+                  and isinstance(node.func, ast.Name)
+                  and node.func.id in ("getattr", "hasattr")
+                  and len(node.args) > 1 and _str(node.args[1])
+                  and node.args[1].value in VOCAB):
+                lits = [node.args[1]]
             offenders += [f"{f.name}:{k.lineno} {k.value!r}" for k in lits]
     assert not offenders, ("field names must come from common_field, not a "
                            "literal: " + ", ".join(offenders))

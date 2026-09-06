@@ -253,7 +253,7 @@ class RsvO3(RsvBase):
         A leaf has neither yet — it is one entry, so ready is its own sources
         and the mask is its own index.
         """
-        if "entry_ready" in view.fields:
+        if ENTRY_READY in view.fields:
             return view.fields[ENTRY_READY], view.fields[ENTRY_OH]
 
         ready = view.fields[VALID]
