@@ -32,7 +32,8 @@ from carolyne.uarch.o3.config import CPUO3_Config, RsvSpec
 from carolyne.uarch.o3.operand_field import (ACTIVE, DATA, PR_IDX, WB_REQUIRED, VALID,
                                              operand_fields as build_fields,
                                              require_named)
-from carolyne.uarch.o3.common_field import ROB_DES_IDX, SPEC_TAG, TRACK, UOP_IDX
+from carolyne.uarch.o3.common_field import (IS_BRANCH, ROB_DES_IDX, SPEC_TAG,
+                                            TRACK, UOP_IDX)
 
 
 class RsvEntryBase(Karray):
@@ -92,22 +93,31 @@ def station_atm_operands(isa: IsaBase, rsv_spec: RsvSpec) -> tuple:
     Deduped by identity — two units of one station may run µops that share an
     atomic operand — and held to unique, non-empty names, since a name becomes
     a field name.
+
+    A station that can issue a BRANCH keeps EVERY dest the ISA declares, not
+    only the ones its units name: decode forces `active` on all of them for a
+    branch, so a slot with no field here would lose its bit in the bus's k2k
+    copy and the squash would never roll that class's PRF pointer back.
     """
+    srcs = [a for unit in rsv_spec.exec_unit
+              for a in isa.src_atomic_operands_for(unit)]
+    if any(unit.has_feature(IS_BRANCH) for unit in rsv_spec.exec_unit):
+        dests = [a for a in isa.used_atomic_operands() if a.is_dest]
+    else:
+        dests = [a for unit in rsv_spec.exec_unit
+                   for a in isa.dest_atomic_operands_for(unit)]
+
     atm_operands, by_name = [], {}
-    for want_src in (True, False):
-        for unit in rsv_spec.exec_unit:
-            found = (isa.src_atomic_operands_for(unit) if want_src
-                     else isa.dest_atomic_operands_for(unit))
-            for atm_operand in found:
-                if any(seen is atm_operand for seen in atm_operands):
-                    continue
-                require_named(atm_operand, f"reservation station '{rsv_spec.label}'")
-                if atm_operand.name in by_name:
-                    raise ValueError(
-                        f"reservation station '{rsv_spec.label}': two atomic operands "
-                        f"named '{atm_operand.name}' — one name, one set of fields")
-                by_name[atm_operand.name] = atm_operand
-                atm_operands.append(atm_operand)
+    for atm_operand in srcs + dests:
+        if any(seen is atm_operand for seen in atm_operands):
+            continue
+        require_named(atm_operand, f"reservation station '{rsv_spec.label}'")
+        if atm_operand.name in by_name:
+            raise ValueError(
+                f"reservation station '{rsv_spec.label}': two atomic operands "
+                f"named '{atm_operand.name}' — one name, one set of fields")
+        by_name[atm_operand.name] = atm_operand
+        atm_operands.append(atm_operand)
     return tuple(atm_operands)
 
 

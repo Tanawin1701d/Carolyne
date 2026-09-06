@@ -28,7 +28,7 @@ SYSTEM  = ISA.unit("system")        # ecall/ebreak: no operands at all
 
 def _cfg(**overrides):
     kwargs = dict(isa=ISA, fe_lanes=2, commit_lanes=2, phy_specs=((X, 64),),
-                  rsv_specs=(RsvSpec(True, 16, ISA.exec_units, RsvType.RSV_BRANCH),),
+                  rsv_specs=(RsvSpec(False, 16, ISA.exec_units, RsvType.RSV_BRANCH),),
                   rob_depth=32, sptag_len=8, st_buf_depth=4)
     kwargs.update(overrides)
     return CPUO3_Config(**kwargs)
@@ -165,7 +165,7 @@ def test_an_out_of_order_station_needs_room_to_order():
 
 def test_atomic_operands_are_gathered_once_across_the_stations_units():
     # A station feeding several units collects each one once, srcs then dests.
-    found = station_atm_operands(ISA, RsvSpec(True, 16, ISA.exec_units, RsvType.RSV_BRANCH))
+    found = station_atm_operands(ISA, RsvSpec(False, 16, ISA.exec_units, RsvType.RSV_BRANCH))
     assert [a.name for a in found] == ["src_1", "src_2", "src_3", "dest_1"]
     assert len({id(a) for a in found}) == len(found)
 

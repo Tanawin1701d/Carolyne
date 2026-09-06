@@ -147,6 +147,14 @@ class ExecUnitBase:
         """This unit runs that µop, by IDENTITY."""
         return any(mine is uop for mine in self.uops)
 
+    def has_feature(self, feature: str) -> bool:
+        """Any µop this unit runs declares that feature.
+
+        - the caller names the FEATURE: a µop states facts and the generator
+          decides what each means, so no vocabulary ships here
+        """
+        return any(uop.has_feature(feature) for uop in self.uops)
+
     def uop(self, name: str) -> Uop:
         """Look a µop of this unit up by name (encoding tables carry text)."""
         for candidate in self.uops:

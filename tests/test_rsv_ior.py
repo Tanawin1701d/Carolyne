@@ -19,14 +19,16 @@ from carolyne.uarch.o3.rsv_ior import RsvIOR
 
 ISA      = Rv32i()
 X        = ISA.reg_file("x")
-O3_SPEC  = RsvSpec(True,  4, (ISA.unit("alu"), ISA.unit("control")), RsvType.RSV_BRANCH)
+O3_SPEC  = RsvSpec(True,  4, (ISA.unit("alu"),), RsvType.RSV_EXEC)
 IOR_SPEC = RsvSpec(False, 4, (ISA.unit("mem"), ISA.unit("system")), RsvType.RSV_LD_ST)
+# a branch resolves in order, so its station must be in-order too
+BR_SPEC  = RsvSpec(False, 4, (ISA.unit("control"),), RsvType.RSV_BRANCH)
 
 
 def _cfg(fe_lanes=2):
     return CPUO3_Config(isa=ISA, fe_lanes=fe_lanes, commit_lanes=2,
                         phy_specs=((X, 64),),
-                        rsv_specs=(O3_SPEC, IOR_SPEC), rob_depth=32, sptag_len=4, st_buf_depth=4)
+                        rsv_specs=(O3_SPEC, IOR_SPEC, BR_SPEC), rob_depth=32, sptag_len=4, st_buf_depth=4)
 
 
 def _drive(station_cls, spec, rsv_idx=0, fe_lanes=2):

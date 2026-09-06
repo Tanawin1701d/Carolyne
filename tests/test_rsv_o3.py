@@ -19,14 +19,16 @@ from carolyne.uarch.o3.rsv_o3 import RsvO3
 
 ISA      = Rv32i()
 X        = ISA.reg_file("x")
-O3_SPEC  = RsvSpec(True,  4, (ISA.unit("alu"), ISA.unit("control")), RsvType.RSV_BRANCH)
+O3_SPEC  = RsvSpec(True,  4, (ISA.unit("alu"),), RsvType.RSV_EXEC)
 IOR_SPEC = RsvSpec(False, 4, (ISA.unit("mem"), ISA.unit("system")), RsvType.RSV_LD_ST)
+# a branch resolves in order, so its station must be in-order too
+BR_SPEC  = RsvSpec(False, 4, (ISA.unit("control"),), RsvType.RSV_BRANCH)
 
 
 def _cfg(fe_lanes=2):
     return CPUO3_Config(isa=ISA, fe_lanes=fe_lanes, commit_lanes=2,
                         phy_specs=((X, 64),),
-                        rsv_specs=(O3_SPEC, IOR_SPEC), rob_depth=32, sptag_len=4, st_buf_depth=4)
+                        rsv_specs=(O3_SPEC, IOR_SPEC, BR_SPEC), rob_depth=32, sptag_len=4, st_buf_depth=4)
 
 
 def _drive(station_cls, spec, rsv_idx=0, fe_lanes=2):
@@ -94,7 +96,7 @@ def test_the_dispatch_bus_says_which_station_a_lane_is_for():
     # rsv id and every station checks it. It is an ADDED field: the station
     # answers it on the way in and stores nothing.
     cfg = _cfg()
-    assert rsv_id_width(cfg) == 1            # two stations
+    assert rsv_id_width(cfg) == 2            # three stations
     host = _drive(RsvO3, O3_SPEC, rsv_idx=0)
     assert host.station.rsv_idx == 0
 
@@ -165,7 +167,7 @@ def test_more_lanes_than_entries_is_safe_out_of_order():
     # allocation pointer plus an offset. This one does not: port k's fold drops
     # what earlier lanes took, so with more lanes than rows the later folds
     # simply find nothing free and those ports accept nothing.
-    small = RsvSpec(True, 2, (ISA.unit("alu"), ISA.unit("control")), RsvType.RSV_BRANCH)
+    small = RsvSpec(True, 2, (ISA.unit("alu"),), RsvType.RSV_EXEC)
     host = _drive(RsvO3, small, fe_lanes=4)
     assert host.station.size == 2 and len(host.station.free_ok) == 4
     _all_ok, slots = host.station.free_slots(host.dispatch)

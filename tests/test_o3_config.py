@@ -14,7 +14,7 @@ UNITS = ISA.exec_units                      # every unit RV32I declares
 
 def _cfg(**overrides):
     kwargs = dict(isa=ISA, fe_lanes=2, commit_lanes=2, phy_specs=((X, 64),),
-                  rsv_specs=(RsvSpec(True, 16, UNITS, RsvType.RSV_BRANCH),), rob_depth=32,
+                  rsv_specs=(RsvSpec(False, 16, UNITS, RsvType.RSV_BRANCH),), rob_depth=32,
                   sptag_len=8, st_buf_depth=4)
     kwargs.update(overrides)
     return CPUO3_Config(**kwargs)
@@ -81,7 +81,7 @@ def test_every_op_the_isa_uses_must_reach_a_station():
 
 def test_a_station_is_checked_on_its_own_terms():
     with pytest.raises(ValueError, match="size must be >= 1"):
-        RsvSpec(True, 0, UNITS, RsvType.RSV_BRANCH)
+        RsvSpec(False, 0, UNITS, RsvType.RSV_BRANCH)
     with pytest.raises(ValueError, match="names no exec unit"):
         RsvSpec(True, 16, (), RsvType.RSV_EXEC)
     with pytest.raises(TypeError, match="issue_o3 must be a bool"):
@@ -97,24 +97,24 @@ def test_a_station_states_what_kind_it_is():
     # differently, and a station feeding several kinds still has to say which
     # shape its entries have. So it is required, with no default.
     with pytest.raises(TypeError, match="rsv_type must be a RsvType"):
-        RsvSpec(True, 16, UNITS, "branch")
+        RsvSpec(False, 16, UNITS, "branch")
     with pytest.raises(TypeError):
-        RsvSpec(True, 16, UNITS)                     # nothing to default to
+        RsvSpec(False, 16, UNITS)                     # nothing to default to
 
 
 def test_the_kind_decides_the_added_entry_fields():
     pc = ISA.pc_width
-    assert RsvSpec(True, 4, UNITS, RsvType.RSV_EXEC).entry_fields(pc) \
+    assert RsvSpec(False, 4, UNITS, RsvType.RSV_EXEC).entry_fields(pc) \
         == (("pc", pc),)
-    assert RsvSpec(True, 4, UNITS, RsvType.RSV_BRANCH).entry_fields(pc) \
+    assert RsvSpec(False, 4, UNITS, RsvType.RSV_BRANCH).entry_fields(pc) \
         == (("pc", pc), ("npc", pc))
     # A load/store station is handed no PC: the address is a value it computes.
-    assert RsvSpec(True, 4, UNITS, RsvType.RSV_LD_ST).entry_fields(pc) == ()
+    assert RsvSpec(False, 4, UNITS, RsvType.RSV_LD_ST).entry_fields(pc) == ()
 
 
 def test_a_machines_own_entry_fields_are_checked_as_pairs():
     def spec(extra):
-        return RsvSpec(True, 16, UNITS, RsvType.RSV_LD_ST, extra_fields=extra)
+        return RsvSpec(False, 16, UNITS, RsvType.RSV_LD_ST, extra_fields=extra)
 
     assert spec((("lsq_idx", 5),)).extra_fields == (("lsq_idx", 5),)
     assert spec([["lsq_idx", 5]]).extra_fields == (("lsq_idx", 5),)   # normalized

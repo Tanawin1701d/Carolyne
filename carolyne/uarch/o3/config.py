@@ -42,7 +42,7 @@ from typing import Tuple
 from ...isa import ExecUnit, IsaBase, RegFile, Uop
 from ...util import is_power_of_two
 from ..common import ceil_log2
-from .common_field import NPC, PC
+from .common_field import IS_BRANCH, NPC, PC
 
 # The map from a register class to its physical file size. A dict is impossible
 # (RegFile is unhashable — header), so the pairs ARE the map; read one with
@@ -117,6 +117,17 @@ class RsvSpec:
                 f"RsvSpec '{self.label}': rsv_type must be a RsvType, got "
                 f"{type(self.rsv_type).__name__} "
                 f"({', '.join(t.name for t in RsvType)})")
+        # A tag is handed out by rotating a one-hot pointer and given back in
+        # order, so branches must RESOLVE in order. Out-of-order issue would
+        # let a younger branch resolve first and return a tag the pool then
+        # rebooks while an older speculation is still open.
+        branchy = [u.name for u in self.exec_unit if u.has_feature(IS_BRANCH)]
+        if branchy and self.issue_o3:
+            raise ValueError(
+                f"RsvSpec '{self.label}': unit(s) {', '.join(branchy)} run a "
+                f"branch on an OUT-OF-ORDER station — speculation tags are "
+                f"returned in order, so a branch station must be "
+                f"issue_o3=False")
         self._check_extra_fields()
 
     # --- construction checks --------------------------------------------------
