@@ -54,6 +54,7 @@ contract bug — fix the contract, not the engine.
 | ----------------------------- | ----------------------------------------------------- |
 | `docs/design/uop_contract.md` | normative ISA↔µarch boundary spec                     |
 | `docs/open_items.md`          | every known gap: what, where, what closes it          |
+| `docs/codestyle.md`           | vendored copy of the codestyle skill (the skill wins) |
 | `carolyne/isa/`               | description types + the ISA-facing apis + per-ISA pkgs |
 | `carolyne/uarch/`             | generic OoO engine, Kathryn code lives here           |
 | `carolyne/util/`              | helpers BOTH planes reach — no kathryn, no isa/uarch  |
@@ -1973,7 +1974,8 @@ elaboration from a `RegFile` in `uarch`.
 ## 7. Conventions
 
 - **Code style applies at WRITE time, every file** — the rules of Tanawin's
-  codestyle skill (`~/.claude/skills/codestyle-skill/SKILL.md`) govern all
+  codestyle skill (`~/.claude/skills/codestyle-skill/SKILL.md`, vendored as
+  `docs/codestyle.md`; the skill is authoritative if they disagree) govern all
   code written or edited in this repo, not only on request: column-aligned
   `:` / `=` / dict colons in grouped declarations, aligned dots across
   parallel calls, dashed section separators, one-line getters, scannable
