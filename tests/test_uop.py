@@ -78,6 +78,23 @@ def test_exec_unit_validation():
         ExecUnit("clash", (ADD, Uop("ADD", 9)))  # two µops cannot share a name
 
 
+def test_a_unit_states_its_uop_ids_as_runs():
+    # A generator guarding on the kind compares a RANGE per contiguous run of
+    # ids instead of one equality per µop — so the ids a unit runs are read
+    # back compressed, ascending, and never touching.
+    assert ALU.uop_idx_ranges() == ((0, 1),)
+    assert MEM.uop_idx_ranges() == ((2, 4),)
+    # Scattered ids stay separate runs; one id is a run of its own.
+    scattered = ExecUnit("vec", (ADD, STORE, Uop("VADD", 5), Uop("VMUL", 9)))
+    assert scattered.uop_idx_ranges() == ((0, 0), (4, 5), (9, 9))
+    # RV32I is what the compression is for: 21 ALU µops in two runs.
+    from carolyne.isa.riscv import Rv32i
+    isa = Rv32i()
+    assert isa.unit("alu").uop_idx_ranges()     == ((0, 1), (18, 36))
+    assert isa.unit("mem").uop_idx_ranges()     == ((10, 17),)
+    assert isa.unit("control").uop_idx_ranges() == ((2, 9),)
+
+
 def test_routing_lives_in_the_unit_set_not_the_uop():
     # A Uop names only what it does. WHICH unit executes it is a machine
     # configuration question the unit set answers (ExecUnit.uops read the

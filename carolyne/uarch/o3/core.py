@@ -5,9 +5,10 @@
 # the machine reads as a table of parts:
 #
 #   _build_reg_arch()    TagGen + RegArchMng — what dispatch books against
-#   _build_back_end()    Rob + StoreBuf; one station + one exec
-#                        complex per RsvSpec (the spec's own issue_o3 picks
-#                        RsvO3/RsvIOR, its POSITION is the rsv_id a lane names)
+#   _build_back_end()    Rob + StoreBuf; one IssueLane per RsvSpec — its
+#                        station and one exec complex per unit the station
+#                        feeds (the spec's own issue_o3 picks RsvO3/RsvIOR,
+#                        its POSITION is the rsv_id a dispatch lane names)
 #   _build_front_end()   Fetch -> Decode -> Dispatch, and backend_meta
 #   _wire_stages()       every connect slot, filled HERE and nowhere else
 #
@@ -25,13 +26,11 @@ from carolyne.uarch.o3.config import CPUO3_Config
 from carolyne.uarch.o3.decode import Decode
 from carolyne.uarch.o3.dispatch import Dispatch
 from carolyne.uarch.o3.easy_mem import EasyMem
-from carolyne.uarch.o3.exec_unit import ExecUnitO3
 from carolyne.uarch.o3.fetch import Fetch
+from carolyne.uarch.o3.issue_lane import build_issue_lanes
 from carolyne.uarch.o3.mpft import Mpft
 from carolyne.uarch.o3.reg_arch_mng import RegArchMng
 from carolyne.uarch.o3.rob import Rob
-from carolyne.uarch.o3.rsv_ior import RsvIOR
-from carolyne.uarch.o3.rsv_o3 import RsvO3
 from carolyne.uarch.o3.store_buf import StoreBuf
 from carolyne.uarch.o3.tag_gen import TagGen
 
@@ -71,23 +70,25 @@ class CoreO3(Module):
 
     # --- the back end -----------------------------------------------------------
     def _build_back_end(self):
-        """The ROB and the store buffer, and one station + one exec complex
-        per RsvSpec — named by POSITION (rsv{k}/exu{k}), since the position
-        is the rsv_id a dispatch lane names and two specs may otherwise
-        read alike. Commit is the ROB's own flow; the core drives nothing."""
+        """The ROB and the store buffer, then one IssueLane per RsvSpec —
+        its station and the complexes it issues into (issue_lane.py). Commit
+        is the ROB's own flow; the core drives nothing."""
         self.store_buf = StoreBuf(self.config, self.data_mem)
         self.rob       = Rob     (self.config, self.reg_arch_mng,
                                   self.store_buf)
 
-        rsvs, exus = [], []
-        for rsv_idx, rsv_spec in enumerate(self.config.rsv_specs):
-            station_cls = RsvO3 if rsv_spec.issue_o3 else RsvIOR
-            rsv = station_cls(self.config, rsv_spec, f"rsv{rsv_idx}", rsv_idx)
-            rsvs.append(rsv)
-            exus.append(ExecUnitO3(self.config, rsv, rsv_spec,
-                                   f"exu{rsv_idx}"))
-        self.rsvs = tuple(rsvs)
-        self.exus = tuple(exus)
+        self.issue_lanes = build_issue_lanes(self.config)
+
+    # --- the back end, read flat ------------------------------------------------
+    @property
+    def rsvs(self):
+        """Every reservation station, in spec order."""
+        return tuple(lane.rsv for lane in self.issue_lanes)
+
+    @property
+    def exus(self):
+        """Every execution complex: each lane's, in unit order."""
+        return tuple(exu for lane in self.issue_lanes for exu in lane.execs)
 
     # --- the front end ----------------------------------------------------------
     def _build_front_end(self):
@@ -111,11 +112,8 @@ class CoreO3(Module):
                               self.reg_arch_mng, self.tag_gen     ,
                               self.mpft        , self.rob         ,
                               self.rsvs)
-        # Station <-> complex, by position: the complex calls back into the core for
-        # the declare fan-outs, the station takes the arb its issue zyncs on.
-        for rsv, exu in zip(self.rsvs, self.exus):
-            exu.connect(self)               # declare fan-outs land core-wide
-            rsv.connect(exu.exec_meta)      # a busy unit stalls the station
+        for lane in self.issue_lanes:
+            lane.connect(self)          # its station <-> its complexes
 
     # --- mispredict -------------------------------------------------------------
     def on_mis_pred(self, last_valid_spec_tag_dyn, rob_des_idx_dyn,

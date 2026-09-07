@@ -10,6 +10,7 @@ from kathryn import (Module, PipCon, build_flow, flow, gen_flow, init, reset,
                      set_top, wire, zif)
 
 from carolyne.isa.riscv import Rv32i
+from carolyne.uarch.o3.common_field import NODE_IDX, NODE_READY
 from carolyne.uarch.o3.config import CPUO3_Config, RsvSpec, RsvType
 from carolyne.uarch.o3.priority import PRI_MIS_PRED, PRI_RENAME, PRI_TRACK_ROLL
 from carolyne.uarch.o3.rsv import RsvBypass
@@ -25,6 +26,14 @@ IOR_SPEC = RsvSpec(False, 4, (ISA.unit("mem"),), RsvType.RSV_LD_ST)
 # a branch resolves in order, so its station must be in-order too
 BR_SPEC  = RsvSpec(False, 4, (ISA.unit("control"),), RsvType.RSV_BRANCH)
 SYS_SPEC = RsvSpec(False, 4, (ISA.unit("system"),), RsvType.RSV_EXEC)
+# Only an out-of-order station may feed several units (RsvSpec), and each of
+# them gets an issue path of its own.
+TWO_SPEC = RsvSpec(True,  4, (ISA.unit("alu"), ISA.unit("system")),
+                   RsvType.RSV_EXEC)
+# Two pipes running one description: a unit may be listed TWICE, since how
+# many ALUs a machine has is its own choice and not the ISA's.
+DUAL_ALU = RsvSpec(True,  4, (ISA.unit("alu"), ISA.unit("alu")),
+                   RsvType.RSV_EXEC)
 
 
 def _cfg(fe_lanes=2):
@@ -44,8 +53,9 @@ def _drive(station_cls, spec, rsv_idx=0, fe_lanes=2):
         def decl(self):
             self.station  = station_cls(cfg, spec, "rsv_test", rsv_idx)
             self.dispatch = build_dispatch(cfg, cfg.fe_lanes, "disp")
-            self.exec_arb = PipCon(name="exec_unit")
-            self.station.connect(self.exec_arb)
+            self.exec_arbs = [PipCon(name=f"exec_unit{unit_idx}")
+                              for unit_idx in range(len(spec.exec_unit))]
+            self.station.connect(*self.exec_arbs)
             self.fix_tag  = wire(cfg.sptag_len).mark_input("fix_tag")
             self.suc_tag  = wire(cfg.sptag_len).mark_input("suc_tag")
             self.bp_valid = wire(1).mark_input("bp_valid")
@@ -137,8 +147,45 @@ def test_an_o3_station_keeps_its_own_age_counter():
 
     assert st.track_width == 2                  # ceil_log2(4 entries)
     assert st.track_ptr is not None
-    # The winner lands on a wire row, with the one-hot of where it came from.
-    assert st.pre_issue is not None and st.issue_oh is not None
+    # The winner lands on a wire row, with the binary index it came from.
+    assert st.pre_issue is not None and st.issue_idx is not None
+
+
+def test_every_unit_of_a_station_issues_through_its_own_path():
+    # A station may feed several units out of order, and each contends for its
+    # OWN unit: its own issued-entry slot, its own winner, its own arbiter. So
+    # a busy unit stalls only itself, and two units issue two DIFFERENT entries
+    # in one cycle — the chain that keeps them apart is in _issuable_bits.
+    host = _drive(RsvO3, TWO_SPEC)
+    st   = host.station
+
+    assert st.unit_cnt == 2
+    assert len(st.exec_src) == len(st.issue_metas) == 2
+    assert len(st.issue_idx) == len(st.issue_ready) == 2
+    assert st.issue_idx[0] is not st.issue_idx[1]    # one winner per unit
+
+
+def test_a_station_may_hold_two_copies_of_one_unit():
+    # Two ALUs on one station are two issue paths over one description. Each
+    # runs every µop the station is routed, so NEITHER pays for an eligibility
+    # test — the same as a station with a single unit.
+    host = _drive(RsvO3, DUAL_ALU)
+    st   = host.station
+
+    assert st.unit_cnt == 2 and len(st.exec_src) == 2
+    assert all(st._unit_covers_station_uops(unit) for unit in DUAL_ALU.exec_unit)
+
+    # The single-unit station is that same answer read the other way round.
+    lone = _drive(RsvO3, O3_SPEC).station
+    assert lone._unit_covers_station_uops(ISA.unit("alu"))
+
+
+def test_a_station_takes_one_arbiter_per_unit():
+    # connect() is where the station learns which arb each unit issues into,
+    # so a count that does not match the unit set is caught there.
+    host = _drive(RsvO3, TWO_SPEC)
+    with pytest.raises(ValueError, match="for 2 execution unit"):
+        host.station.connect()
 
 
 def test_the_epoch_rung_has_to_lose_to_a_dispatch():
@@ -155,7 +202,7 @@ def test_the_winner_is_chosen_by_one_reduce_over_the_table():
     # The root node of the fold covers every row — that is how the station
     # knows which node's answer the issue wires read.
     assert host.station._root is not None
-    assert set(host.station._root) == {"ready", "oh"}
+    assert set(host.station._root) == {NODE_READY, NODE_IDX}
 
 
 def test_an_o3_station_refuses_an_in_order_spec():

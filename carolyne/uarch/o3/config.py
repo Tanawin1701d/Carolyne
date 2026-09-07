@@ -111,6 +111,8 @@ class RsvSpec:
         object.__setattr__(self, "exec_unit", tuple(self.exec_unit))
         if not self.exec_unit:
             raise ValueError("RsvSpec: names no exec unit, so nothing can issue from it")
+        # A unit may be listed TWICE: two ALUs on one station are two pipes
+        # running one description, which is a machine choice, not an ISA one.
         for unit in self.exec_unit:
             if not isinstance(unit, ExecUnit):
                 raise TypeError(

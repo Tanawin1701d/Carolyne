@@ -2,12 +2,12 @@
 # block that takes the station's issued entry and runs the ISA units'
 # exec_stage bodies over it (the natural-Kathryn semantics, isa/exec_unit.py).
 #
-# One complex per station, because issue is the coupling: a station issues one
-# entry per cycle through ONE arbiter — and in THIS VERSION the complex runs
-# exactly ONE ISA unit, so a machine gives each unit its own station. A
-# multi-unit complex needs per-unit routing after issue; that is a later
-# version. An IN-ORDER station is single-unit by its own rule (config.RsvSpec),
-# so this bound only ever refuses an out-of-order one.
+# ONE COMPLEX PER UNIT OF A STATION, named by its position in the spec's unit
+# set: `unit_idx` picks the unit this complex runs, the station's issue slot it
+# reads (`rsv.exec_src[unit_idx]`) and the arbiter it hands back
+# (`rsv.connect`). A station feeding several units therefore has several
+# complexes, each with its own issue path, and only an OUT-OF-ORDER station may
+# feed several (config.RsvSpec).
 #
 # THE STAGE CHAIN (`transfer`): one pip per stage, stage 0's arbiter BEING
 # `exec_meta` — the arb the station's build_issue zyncs against, so a busy
@@ -45,6 +45,7 @@ class ExecUnitO3(Module):
                  config   : CPUO3_Config,
                  rsv      : RsvBase,
                  rsv_spec : RsvSpec,
+                 unit_idx : int = 0,
                  name     : str = ""):
 
         if not isinstance(rsv, RsvBase):
@@ -56,20 +57,21 @@ class ExecUnitO3(Module):
                 f"ExecUnitO3 '{rsv_spec.label}': the station was built from a "
                 f"DIFFERENT spec ('{rsv.rsv_spec.label}') — the complex and its "
                 f"station must read one spec, or their unit sets disagree")
-        if len(rsv_spec.exec_unit) != 1:
+        if not 0 <= unit_idx < len(rsv_spec.exec_unit):
             raise ValueError(
-                f"ExecUnitO3 '{rsv_spec.label}': the spec feeds "
-                f"{len(rsv_spec.exec_unit)} execution units — this version has "
-                f"no per-unit routing after issue, so give each unit its own "
-                f"station")
+                f"ExecUnitO3 '{rsv_spec.label}': unit_idx {unit_idx} names no "
+                f"unit of a station feeding {len(rsv_spec.exec_unit)} — one "
+                f"complex per unit, by position")
 
         self.config    = config
         self.rsv       = rsv
         self.rsv_spec  = rsv_spec
-        # The ONE ISA unit this complex elaborates — this version's bound;
-        # a multi-unit complex needs per-unit routing after issue.
-        self.exec_unit = rsv_spec.exec_unit[0]
-        self.label     = name or f"exu_{rsv_spec.label.replace('/', '_')}"
+        # Which unit of the station this complex is: it runs that unit, reads
+        # that unit's issue slot, and gives back that unit's arbiter.
+        self.unit_idx  = unit_idx
+        self.exec_unit = rsv_spec.exec_unit[unit_idx]
+        self.label     = name or (f"exu_{rsv_spec.label.replace('/', '_')}"
+                                  f"_{unit_idx}")
         # The dest slots a squash rolls back: rename booked a physical register
         # for each, so each has a pointer to restore. The STATION's set, not
         # the core's — a slot the entry has no field for cannot be read.
@@ -229,7 +231,7 @@ class ExecUnitO3(Module):
         - every stage's record lands in self.stage_srcs for debugging:
           [k] is what stage k received; [-1] is the last stage's None
         """
-        src = self.rsv.exec_src
+        src = self.rsv.exec_src[self.unit_idx]
         self.stage_srcs = [src]
         last = self.exec_unit.stage_cnt - 1
         for stage_idx in range(self.exec_unit.stage_cnt):
@@ -287,7 +289,7 @@ class ExecUnitO3(Module):
             return
         for stage_idx, stage_meta in enumerate(self.stage_metas):
             if stage_idx == 0:
-                src      = self.rsv.exec_src[0]
+                src      = self.rsv.exec_src[self.unit_idx][0]
                 squashed = self.rsv.entry_squashed(src, fix_tag)
             else:
                 records  = getattr(self, "stage_srcs", ())
@@ -334,7 +336,7 @@ class ExecUnitO3(Module):
         records = getattr(self, "stage_srcs", ())
         for stage_idx in range(self.exec_unit.stage_cnt):
             if stage_idx == 0:
-                src = self.rsv.exec_src[0]
+                src = self.rsv.exec_src[self.unit_idx][0]
             else:
                 self._require_stage_record(records, stage_idx,
                                            "on_suc_pred")

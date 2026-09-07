@@ -147,6 +147,21 @@ class ExecUnitBase:
         """This unit runs that µop, by IDENTITY."""
         return any(mine is uop for mine in self.uops)
 
+    def uop_idx_ranges(self) -> Tuple[Tuple[int, int], ...]:
+        """The ids of the µops this unit runs, as inclusive (lo, hi) runs.
+
+        - a generator guarding on the kind then compares a RANGE per run
+          instead of one equality per µop
+        - ascending, non-touching: two runs never meet, or they would be one
+        """
+        runs = []
+        for uop_idx in sorted({uop.uop_idx for uop in self.uops}):
+            if runs and uop_idx == runs[-1][1] + 1:
+                runs[-1][1] = uop_idx
+            else:
+                runs.append([uop_idx, uop_idx])
+        return tuple((lo, hi) for lo, hi in runs)
+
     def has_feature(self, feature: str) -> bool:
         """Any µop this unit runs declares that feature.
 

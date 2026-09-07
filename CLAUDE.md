@@ -864,10 +864,34 @@ The winner is chosen by a Karray **REDUCE read** (`table[select_fn]`) rather
 than a hand-built fold: a reduce carries the WHOLE record at every level, so
 one fold builds the comparison tree once and drops the winning row on
 `issue_row` — the wire slot the issue block reads, the C++'s `WireSlot iw`.
-`entry_ready` and the one-hot ride up as extras, so a node compares subtree
-answers instead of rebuilding them, and the node whose covered indices are the
-whole table IS the root (a structural test, not an assumption about the order
-the fold visits nodes in). Issue then runs inside a station-owned issue
+`entry_ready` and the winning INDEX ride up as extras, so a node compares
+subtree answers instead of rebuilding them, and the node whose covered indices
+are the whole table IS the root (a structural test, not an assumption about the
+order the fold visits nodes in).
+Decision (2026-09-07, Tanawin: "OH is difficult for scaling"): that extra is a
+**BINARY index, not a one-hot** — `issue_idx` is `ceil_log2(size)` wide where
+`issue_oh` was `size` wide, and `on_issue` takes `to_ref(issue_idx)` where it
+took `OH(issue_oh)`. What made the one-hot attractive is that both its readers
+were free: the fold's leaf is a constant (`1 << row`), the cross-unit claim is
+a bit select (`one_hot[row]`), and a callable index hands Kathryn each
+element's write enable with no logic at all. What it COST is the mux at every
+NODE — the fold carries `size` bits through `size - 1` nodes, so the selection
+network grows with the SQUARE of the table where a binary one grows as
+`size * log2(size)`. Paid for it: the claim becomes a compare
+(`claim_idx_dyn == row_idx`, the spelling `_free_bits` already used) and the
+dynamic-index write builds one guard per row.
+MEASURED on a standalone station, total declared wire+reg bits: 4 entries
+5822 -> 5802 (noise), 8 entries 10973 -> 10847, 16 entries 21788 -> 21108,
+32 entries 45219 -> 41977 (-7.2%); with two units on one station, 32 entries
+59578 -> 53286 (-10.6%). The added compares are the other half of the trade —
+196 -> 228 `==` at 32 entries with one unit, 228 -> 324 with two — each of them
+`ceil_log2(size)` wide against the thousands of bits the one-hot mux network
+cost. The saving is nothing at 4 entries and grows with the table, which is the
+whole argument. CONSEQUENCE: the issue side now reads like the dispatch side,
+which was binary already (`_find_free` carries its index in the `TRACK` slot,
+`_free_bits` compares); `OH` stays in `karray_util` for `rt`/`mpft`, where the
+index IS a one-hot spec tag by construction (tag_gen) and not a row number a
+fold picked. Issue then runs inside a station-owned issue
 pip (`issue_meta` on `RsvBase`, `auto_req` + `auto_restart` — an eternal
 `cwhile(1)` wrapper until 2026-08-31; `RsvBase.on_mis_pred` flushes it,
 so nothing issues in a squash cycle and the restart revives it) +
@@ -970,6 +994,56 @@ and `on_issue` (the `tryOwSpecBit` fixup, clearing a speculation that resolves
 in the issue cycle) use it, because layering a second write on a whole-row copy
 would put two writes at EQUAL priority and equal priority is not statement
 order. `rsv_helper.rsv_field_names()` is what makes that substitution possible.
+
+Decision (2026-09-07, Tanawin): **ONE ISSUE PATH PER EXECUTION UNIT** — an
+out-of-order station may now feed several units and issue to each of them in
+the same cycle, where issue used to be single. Tanawin's shape: "for rsv with
+o3 issue we have to have multiple pip zync block… if the first exec unit wants
+to issue entry1 the second cannot issue entry1 but can issue entry 2". So
+`RsvBase` holds `exec_src`, `pre_issue`, `issue_lane`, `issue_ready` and the
+issue `PipCon` one per unit, and `connect(*exec_metas)` takes one arbiter per
+unit — a busy unit stalls its OWN path and nothing else, where one shared arb
+would have stalled the station. `on_issue(unit_idx, idx, row)` names the slot
+it fills. Decision: `exec_src` is a LIST of one-row slots, not one N-row array
+— a stage body reads its record as `src[0]` (`ExecUnitApi.get_src`), so a unit
+must be handed a whole slot, and an N-row array would make every ISA body
+index by unit. IN-ORDER is untouched: its spec feeds one unit, so `RsvIOR`
+reads slot 0 and says so.
+`RsvO3.build_issue` runs **one fold per unit**, chained the way the dispatch
+ports already chain: unit k's leaves drop the entry an earlier unit is taking
+(`_issuable_bits`), so two units never issue one entry. The claim is the
+earlier unit's SELECTION, not its grant — the grant lives inside the pip and
+reading it here would be a loop — so a unit whose complex is busy still holds
+its pick against the later ones for that cycle. LIMIT, and it is the safe
+direction: that costs a slot, never correctness, since what is held back stays
+in the table. Fixed priority, unit 0 first, for the same reason `free_slots`'
+ports are fixed. COST: N comparison trees instead of one; there is no shared
+tree, because each unit selects over a different eligible set.
+Which entries a unit may take is a RANGE test on the µop id
+(**`ExecUnitBase.uop_idx_ranges()`** — Tanawin placed the compression in
+`isa/`, where the ids are declared: pure description data, no Kathryn, no
+uarch): one compare per contiguous RUN of the ids a unit declares, not one
+equality per µop, and a bound at the edge of the field is dropped since
+`>= 0` and `<= max` hold for every value an unsigned field carries. A unit that runs
+everything its STATION can be routed tests NOTHING — decode routes a station
+what ANY of its units runs, so that unit cannot fail the test. One rule, both
+free cases: the single-unit station (so every core config that existed before
+this change emits byte-identical logic) and the station holding two copies of
+one unit.
+MEASURED on the whole-core elaboration: a station sharing alu+system emits 40
+compares (8 rows x 5: alu `<=1` and `>=18 & <=36`, system `>=37 & <=39`)
+against the 192 an equality-per-µop guard would need; the same core with one
+unit per station emits ZERO. RV32I's numbering is what makes this cheap — alu
+`(0,1) (18,36)`, mem `(10,17)`, control `(2,9)`, system `(37,39)`. A core with
+TWO ALUs on one station emits two issue paths and zero of these compares.
+FIXED ON THE WAY, a real bug: the fold's LEAF rebuilt readiness out of its
+carried fields (`valid & valid_<n>`) and so never picked up the `| ~active_<n>`
+term `slot_ready` gained on 2026-09-05. Six of RV32I's forty µops fill fewer
+sources than the ISA declares (LUI/AUIPC/JAL fill one, FENCE/ECALL/EBREAK
+none), so such an entry lost every comparison and could only issue when it
+happened to be the row a fold of all-zero readiness falls through to. The
+leaves now take `slot_ready(row)` itself — one definition, computed per row
+outside the fold, the shape `_find_free` already had.
 
 **`carolyne/uarch/o3/operand_field.py`** (2026-08-19) — the ONE place a µop
 operand's hardware fields are named and sized. Both records carry a group per
@@ -1477,12 +1551,46 @@ redundant on purpose, and it REFUSES a station built from a different spec
 (identity), since the spec's `exec_unit` set is the kind→FU map both sides
 must read alike. One complex per station because issue is the coupling: a
 station issues one entry per cycle through one arbiter — and THIS VERSION
-runs exactly ONE ISA unit per complex (`exec_unit`, singular; a spec
-feeding more refuses — give each unit its own station), because a
-multi-unit complex needs per-unit routing after issue. Since 2026-09-07 that
-refusal states ONLY that (no per-unit routing in this version) and fires only
-for an out-of-order spec, since an in-order one is single-unit by
-`RsvSpec`'s own rule; the mem-on-o3 refusal moved to `RsvSpec` the same day. SKELETON so far:
+runs exactly ONE ISA unit per complex. SUPERSEDED 2026-09-07 (Tanawin,
+"we should not check that"): the count refusal is GONE and the complex no
+longer DERIVES its unit — **`ExecUnitO3(config, rsv, rsv_spec, unit_idx)`**
+names which unit of the station it is, and `unit_idx` picks all three
+things at once: the ISA unit it runs, the station issue slot it reads
+(`rsv.exec_src[unit_idx]`) and the position of the arbiter it gives back
+to `rsv.connect`. `CoreO3` builds ONE COMPLEX PER (station, unit),
+grouped in an **`IssueLane(rsv, execs)`** (`uarch/o3/issue_lane.py`, its own
+module — Tanawin's shape and Tanawin's placement, replacing a
+flat build plus an `exu.rsv is rsv` filter in the wiring — "the index is
+misleading"): `self.issue_lanes` is what `_wire_stages` reads, so a
+station and the arbiters it takes are named together. A complex is named
+by the UNIT it runs, and by which COPY of it this one is when the station
+holds several (`issue_lane.exec_labels`): `exu0_alu` / `exu0_system` for
+one each, `exu0_alu0` / `exu0_alu1` for two ALUs — an ordinal nobody can
+read back appears only where it says something. A duplicate-NAME refusal
+was added here on 2026-09-07 and REMOVED the same day (Tanawin: "we can
+have two alu in the same rsv"): a unit listed TWICE is two pipes running
+one description, and how many ALUs a machine has is the machine's choice,
+not the ISA's — which is why the copies are the SAME `ExecUnit` instance
+rather than two the ISA must declare apart. The BUILDER moved with the
+type (`build_issue_lanes(config)`, same module, Tanawin's call): the core
+now says `self.issue_lanes = build_issue_lanes(self.config)` and the
+station-policy pick (RsvO3 vs RsvIOR) left `core.py` with it. So did the
+WIRING — `IssueLane.connect(core)`, the `connect()` name every block of
+the core already answers to: the station and its complexes are the two
+halves of one handshake, so the pairing has one home and `_wire_stages`
+keeps one row per topology edge. Decision:
+the lane is a **NamedTuple, not a dataclass**, and that is load-bearing
+for the SIM — `sim_manifest._attr_node` descends into a Module, a list
+and a TUPLE and answers None for anything else, so a dataclass would have
+hidden every station and complex from KSim. As a tuple the lane is
+walked, and the manifest holds ONE grouped entry (`issue_lanes[k][0]` the
+station, `[k][1][u]` a complex) where it used to hold two flat lists.
+`CoreO3.rsvs` / `.exus` are now one-line PROPERTIES reading the lanes
+back — a property is a class attribute, so `vars(module)` never sees it
+and no flat structure reaches the manifest twice. Deleting the check ALONE would have been silent wrong
+hardware: `exec_unit[0]` dropped the other units while decode kept
+routing their µops to the station, so unit 1's kinds would have run in
+unit 0's body. The mem-on-o3 refusal moved to `RsvSpec` the same day. SKELETON so far:
 `exec_unit` and `exec_meta` (the arb the station's
 build_issue zyncs against — a busy complex stalls the station); an
 auto-`@flow` `take_issue` that called `rsv.build_issue` itself was built

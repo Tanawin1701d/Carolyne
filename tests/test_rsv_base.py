@@ -38,10 +38,12 @@ class OldestFirst(RsvBase):
     """The policy a station has to supply: here, the lowest ready row issues."""
 
     def build_issue(self, issue_en):
+        # Issue slot 0: this station is built with one execution unit, and
+        # each unit has an issue path of its own.
         for row_idx in self.all_row_idxs():
             row = self.table[row_idx]
             with zif(issue_en.land(self.slot_ready(row))):
-                self.on_issue(row_idx, row)
+                self.on_issue(0, row_idx, row)
 
 
 def _drive(cfg, spec, unit_cls=OldestFirst):
@@ -89,8 +91,8 @@ def test_a_station_is_its_table_plus_the_entry_that_issued():
     host = _drive(cfg, RsvSpec(True, 4, (ALU,), RsvType.RSV_EXEC))
     st   = host.station
 
-    # The station holds the waiting entries and the one row the FU reads.
-    assert st.table is not None and st.exec_src is not None
+    # The station holds the waiting entries and one issued row per unit.
+    assert st.table is not None and len(st.exec_src) == 1
     # It knows which operands its units use, straight from the description.
     assert [a.name for a in st.atm_operands] == ["src_1", "src_2", "dest_1"]
 

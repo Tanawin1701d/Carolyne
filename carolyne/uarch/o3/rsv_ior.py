@@ -81,10 +81,6 @@ class RsvIOR(RsvBase):
         self.head_ptr  = reg(self.idx_width, f"{self.label}_head_ptr")
         self.head_ptr.reset(0)
 
-        # The head's record on a wire row, and whether it can go — the same
-        # materialised slot RsvO3 folds its winner onto.
-        self.issue_ready = wire(1, f"{self.label}_issue_ready")
-
         # Where each write port lands. Built on the first free_slots call, like
         # RsvO3's: a second build would double-drive the same wires.
         self.free_ok  = [wire(1, f"{self.label}_free_ok{port}")
@@ -139,8 +135,8 @@ class RsvIOR(RsvBase):
         targets_me        = self.lanes_for_me(dispatch)
         accepted, blocked = [], None
         _all_ok, slots    = self.free_slots(dispatch)
-        for port, (free, idx) in enumerate(slots):
-            accept = targets_me[port] & free
+        for port, (free_ok, free_idx_dyn) in enumerate(slots):
+            accept = targets_me[port] & free_ok
             if blocked is not None:
                 accept = accept & ~blocked
             # An earlier lane that targeted this station and could not land
@@ -150,7 +146,7 @@ class RsvIOR(RsvBase):
 
             accepted.append(accept)
             with zif(accept):
-                self.write_entry(to_ref(idx), dispatch[port])
+                self.write_entry(to_ref(free_idx_dyn), dispatch[port])
 
         with priority(PRI_RENAME):
             self.alloc_ptr |= self.alloc_ptr + sum_cnt(accepted)
@@ -169,15 +165,16 @@ class RsvIOR(RsvBase):
         cleared it into a unit that never took it.
         """
         self.require_exec_meta()
-        head = self.head_ptr
-        self.pre_issue [0] *= self.table[head]
-        self.issue_lane[0] *= self.pre_issue[0]
-        self.issue_ready  *= self.slot_ready(self.pre_issue[0])
+        head_idx_dyn = self.head_ptr
+        self.pre_issue  [0] *= self.table[head_idx_dyn]
+        self.issue_lane [0] *= self.pre_issue[0]
+        self.issue_ready[0] *= self.slot_ready(self.pre_issue[0])
 
-        with pip(self.issue_meta, auto_req=True, auto_restart=True):
-            with zync((self.exec_meta, self.issue_ready)):
-                self.on_issue(head, self.issue_lane[0])
-                self.head_ptr |= head + 1
+        # Slot 0 and nothing else: an in-order station feeds ONE unit (RsvSpec).
+        with pip(self.issue_metas[0], auto_req=True, auto_restart=True):
+            with zync((self.exec_metas[0], self.issue_ready[0])):
+                self.on_issue(0, head_idx_dyn, self.issue_lane[0])
+                self.head_ptr |= head_idx_dyn + 1
 
     # --- squash -----------------------------------------------------------------
     def on_mis_pred(self, fix_tag):

@@ -1,6 +1,12 @@
 # RsvBase — one reservation station: the entries waiting for their sources, and
-# the one entry that issued this cycle. A subclass supplies `build_issue`,
-# which is where the age-ordered and in-order policies differ.
+# the entry each execution unit was issued this cycle. A subclass supplies
+# `build_issue`, which is where the age-ordered and in-order policies differ.
+#
+# ONE ISSUE PATH PER EXECUTION UNIT. A station may feed several units (only out
+# of order — an in-order one feeds exactly one, RsvSpec), so `exec_src`,
+# `pre_issue`, `issue_lane`, `issue_ready` and the issue arbiter are all one
+# row per unit. Each path contends for its OWN unit, so a busy unit stalls
+# only itself, and two units may issue two DIFFERENT entries in one cycle.
 #
 # The three moments this block layers writes for, highest rung first:
 #
@@ -71,13 +77,21 @@ class RsvBase(Module):
     @init
     def com_declare(self):
 
+        self.unit_cnt = len(self.rsv_spec.exec_unit)
         self.table    = build_rsv_table(self.config, self.rsv_spec, self.label)
-        self.exec_src = build_rsv_slot(self.config, self.rsv_spec,
-                                       f"{self.label}_exec")
+        # One issued-entry slot per unit, each a row of its own: a stage body
+        # reads its record as `src[0]`, so a unit is handed a whole slot.
+        self.exec_src = [build_rsv_slot(self.config, self.rsv_spec,
+                                        f"{self.label}_exec{unit_idx}")
+                         for unit_idx in range(self.unit_cnt)]
 
-        # The issue block's own arbiter: always requesting, restarted by a
-        # flush, so build_issue runs as a pip instead of an eternal cwhile.
-        self.issue_meta = PipCon(name=f"{self.label}_issue")
+        # One issue path per unit: its own arbiter, always requesting and
+        # restarted by a flush, so build_issue runs as a pip instead of an
+        # eternal cwhile, and its own "something to send" bit.
+        self.issue_metas = [PipCon(name=f"{self.label}_issue{unit_idx}")
+                            for unit_idx in range(self.unit_cnt)]
+        self.issue_ready = [wire(1, f"{self.label}_issue_ready{unit_idx}")
+                            for unit_idx in range(self.unit_cnt)]
 
         # The entry AS IT WILL LAND: a subclass drives `pre_issue` with its
         # chosen row, this lane copies it, and a prediction resolving in the
@@ -85,9 +99,9 @@ class RsvBase(Module):
         # before the clocked copy into `exec_src`, so nothing has to race a
         # register that has not been written yet.
         entry_cls, fields = rsv_entry_shape(self.config, self.rsv_spec)
-        self.pre_issue    = entry_cls(HwComponentType.WIRE, (1,),
+        self.pre_issue    = entry_cls(HwComponentType.WIRE, (self.unit_cnt,),
                                       f"{self.label}_pre_issue", **fields)
-        self.issue_lane   = entry_cls(HwComponentType.WIRE, (1,),
+        self.issue_lane   = entry_cls(HwComponentType.WIRE, (self.unit_cnt,),
                                       f"{self.label}_issue_lane", **fields)
 
         # The atomic operands this station's entries carry, and the subset a
@@ -104,10 +118,11 @@ class RsvBase(Module):
         # station's own contribution to the dispatch go/stall bit.
         self.all_ok = wire(1, f"{self.label}_all_ok")
 
-        # The execution complex's arbiter, from connect(). The ARB, not the
-        # complex: a station holds no reference back to the block that holds
-        # it, or the sim manifest reads the pair as an attribute cycle.
-        self.exec_meta = None
+        # Each execution complex's arbiter, from connect(), in unit order. The
+        # ARB, not the complex: a station holds no reference back to the block
+        # that holds it, or the sim manifest reads the pair as an attribute
+        # cycle.
+        self.exec_metas = [None] * self.unit_cnt
 
     # --- reads -----------------------------------------------------------------
     def slot_ready(self, row):
@@ -139,15 +154,21 @@ class RsvBase(Module):
         fields.update(overrides)
         return fields
 
-    def connect(self, exec_meta):
-        """The arbiter of the complex this station issues into: a busy unit stalls it."""
-        self.exec_meta = exec_meta
+    def connect(self, *exec_metas):
+        """One arbiter per execution unit, in unit order: a busy unit stalls
+        its own issue path and nothing else."""
+        if len(exec_metas) != self.unit_cnt:
+            raise ValueError(
+                f"{type(self).__name__} '{self.label}': connect got "
+                f"{len(exec_metas)} arbiter(s) for {self.unit_cnt} execution "
+                f"unit(s) — each unit issues through its own")
+        self.exec_metas = list(exec_metas)
 
     def require_exec_meta(self):
         """connect() has been called. build_issue is this station's OWN flow,
         so it runs whether or not anything wired it — an unconnected station
         would otherwise die inside Kathryn on a None arbiter."""
-        if self.exec_meta is None:
+        if any(meta is None for meta in self.exec_metas):
             raise ValueError(
                 f"{type(self).__name__} '{self.label}': no execution complex "
                 f"connected — build_issue runs as this station's own flow and "
@@ -179,12 +200,12 @@ class RsvBase(Module):
             f"station's own policy")
 
     # --- writes ----------------------------------------------------------------
-    def write_entry(self, idx, src_row):
+    def write_entry(self, row_idx_dyn, src_row):
         """Dispatch fills one entry from a wire row of the same shape. At the
         rename rung, so it beats the same cycle's issue/bypass work.
         """
         with priority(PRI_RENAME):
-            self.table[idx] |= src_row
+            self.table[row_idx_dyn] |= src_row
 
     def lane_targets_me(self, disp_row):
         """This dispatch lane is carrying a µop, and it is for this station."""
@@ -222,20 +243,22 @@ class RsvBase(Module):
             f"{type(self).__name__}.on_dispatch: where each lane lands is the "
             f"station's own policy")
 
-    def on_issue(self, idx, src_row):
-        """One entry leaves for the FU: contents to `exec_src`, row freed.
+    def on_issue(self, unit_idx: int, row_idx_dyn, src_row):
+        """One entry leaves for one unit: contents to that unit's `exec_src`,
+        row freed.
 
         - at PRI_ISSUE, so an equal-priority copy cannot take a stale tag
         """
         with priority(PRI_ISSUE):
-            self.exec_src[0] |= src_row
-            self.table[idx]  |= {VALID: 0}
+            self.exec_src[unit_idx][0] |= src_row
+            self.table[row_idx_dyn]    |= {VALID: 0}
 
     def on_mis_pred(self, fix_tag):
         """A prediction was wrong: every entry speculating under a killed tag
-        goes away, and the issue pip flushes — nothing issues in the squash
+        goes away, and every issue pip flushes — nothing issues in the squash
         cycle. `fix_tag` is the one-hot mask of what is being squashed."""
-        self.issue_meta.flush()
+        for issue_meta in self.issue_metas:
+            issue_meta.flush()
         with priority(PRI_MIS_PRED):
             for row_idx in self.all_row_idxs():
                 with zif(self.entry_squashed(self.table[row_idx], fix_tag)):
@@ -243,7 +266,7 @@ class RsvBase(Module):
 
     def on_suc_pred(self, suc_tag):
         """A prediction resolved correctly: its tag stops covering anything.
-
+0
         - an entry stays speculative while any OTHER tag it carries is still
           open, which is what the mask-out says
         - the entry ISSUING this cycle is masked too, on `issue_lane` rather
@@ -263,10 +286,11 @@ class RsvBase(Module):
         # whole-row copy that drives it. A tag is ONE-HOT (tag_gen), so an
         # entry is under exactly one and `==` is the whole test; there is
         # no residue to leave behind, which is why the write is a flat 0.
-        cand = self.pre_issue[0]
-        with priority(PRI_SUC_PRED):
-            with zif(cand.is_spec & (cand.spec_tag == suc_tag)):
-                self.issue_lane[0] *= {SPEC_TAG: 0, IS_SPEC  : 0}
+        for unit_idx in range(self.unit_cnt):
+            cand = self.pre_issue[unit_idx]
+            with priority(PRI_SUC_PRED):
+                with zif(cand.is_spec & (cand.spec_tag == suc_tag)):
+                    self.issue_lane[unit_idx] *= {SPEC_TAG: 0, IS_SPEC  : 0}
 
     def on_bypass(self, *bypasses: RsvBypass):
         """Writeback broadcasts: a waiting source whose physical index matches

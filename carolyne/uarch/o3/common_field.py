@@ -52,10 +52,10 @@ FIX_TAG        = "fix_tag"          # mpft:  the mask a squash kills with
 # --- fold EXTRAS: names a reduce tree hangs on its intermediate view ----------
 # Not record fields. A fold carries its partial answers up the tree in named
 # slots, and the producer and the reader must agree on the name.
-NODE_OH         = "oh"                # rsv_o3: this node's winning row, one-hot
+NODE_IDX        = "idx"               # rsv_o3: this node's winning row, binary
 NODE_READY      = "ready"             # rsv_o3: anything ready under this node
 ENTRY_READY     = "entry_ready"       # rsv_o3: the same two, as leaf extras
-ENTRY_OH        = "entry_oh"
+ENTRY_IDX       = "entry_idx"
 SEARCH_HIT      = "search_hit"        # store_buf: a match under this node
 SEARCH_PRE_WRAP = "search_pre_wrap"   # store_buf: which side of the wrap
 
