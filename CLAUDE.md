@@ -707,6 +707,35 @@ width)` list on top, validated as pairs (identifier, width ≥ 1, unique, not
 shadowing the kind's) — the record-wide collision check belongs to
 `rsv_entry_shape`, which is the only place operand field names are known.
 
+Decision (2026-09-07, Tanawin): **`_check_issue_policy` holds the unit set to
+the issue policy**, and one of its three rules is NEW. An IN-ORDER station
+feeds exactly **ONE** unit: its promise is that entries LEAVE in the order
+they arrived, and that promise must survive past the issue port to be worth
+anything — one stage chain keeps it (a pipeline whose hops zync on the
+chain's own arbiters, so nothing overtakes), where two chains of their own
+`stage_cnt` and their own stalls do not, and two entries issued in order can
+finish in any. An OUT-OF-ORDER station may feed several: `build_issue`
+already picks the oldest READY entry, so it reorders by design and nothing
+downstream may depend on its order — which is exactly why branches and memory
+are refused there — so more units cannot break an order that was never
+promised. What multi-unit STILL needs is per-unit routing after issue, and
+that is `ExecUnitO3`'s bound rather than the spec's: today the relaxation is a
+DESCRIPTION-level statement only and every core config is one unit per
+station. MOVED here the same day: the **mem rule** — a unit whose `needs` name
+`"mem"` must be `issue_o3=False`, since store-to-load forwarding answers "the
+newest OLDER store" — which was in `ExecUnitO3.__init__` and is the same shape
+as the branch rule already here: a unit FEATURE crossed with the issue policy,
+answerable from the spec alone. So all three "what may run on what kind of
+station" rules read in one place and `ExecUnitO3` keeps only VERSION bounds.
+CONSEQUENCE, and it is why no RV32I config changed: branch → in-order →
+single, mem → in-order → single, so each special unit takes a station of its
+own and only plain compute units can ever share one. COST: 22 construction
+sites across 11 test files built in-order multi-unit specs (`RsvSpec(False, …,
+ISA.exec_units, …)`) — legal before, because only a complex refused them and
+those tests build none — and each became a one-unit-per-station tuple. The
+whole core still elaborates on that shape (alu out of order, mem/control/
+system in order).
+
 **`carolyne/uarch/o3/rsv_helper.py`** — `build_rsv_table(config, rsv_spec, name="")`
 builds ONE reservation station's entry table (2026-08-19). `RsvEntryBase`
 states the shape every station has (`valid`, `is_spec`, `spec_tag`, `uop_idx`,
@@ -1450,7 +1479,10 @@ must read alike. One complex per station because issue is the coupling: a
 station issues one entry per cycle through one arbiter — and THIS VERSION
 runs exactly ONE ISA unit per complex (`exec_unit`, singular; a spec
 feeding more refuses — give each unit its own station), because a
-multi-unit complex needs per-unit routing after issue. SKELETON so far:
+multi-unit complex needs per-unit routing after issue. Since 2026-09-07 that
+refusal states ONLY that (no per-unit routing in this version) and fires only
+for an out-of-order spec, since an in-order one is single-unit by
+`RsvSpec`'s own rule; the mem-on-o3 refusal moved to `RsvSpec` the same day. SKELETON so far:
 `exec_unit` and `exec_meta` (the arb the station's
 build_issue zyncs against — a busy complex stalls the station); an
 auto-`@flow` `take_issue` that called `rsv.build_issue` itself was built
@@ -1817,8 +1849,9 @@ a byte mask — and stage 1 extracts/sign-extends (`(v ^ sign) - sign`)
 and writes rd back gated on the load group. Decision, departing from
 the C++ (which reads dmem in stage 2): the WORD IS CAPTURED AT STAGE 0
 into the record — safe exactly because the LS station issues IN ORDER,
-so no older store can execute after this µop's stage 0; `ExecUnitO3`
-now REFUSES a mem-needing unit on an issue_o3 station for that reason.
+so no older store can execute after this µop's stage 0; a mem-needing unit
+on an issue_o3 station is REFUSED for that reason (in `ExecUnitO3` until
+2026-09-07, in `RsvSpec` since).
 LIMIT LIFTED 2026-09-05: decode now fills `is_store` from the
 template and routes loads/stores to the mem station, so the LS path
 carries real traffic; LIMIT: a store pushed in

@@ -24,9 +24,16 @@ ISA = Rv32i()
 X   = ISA.reg_file("x")
 
 
+# One unit per station: an in-order station may feed only one (config.RsvSpec).
+STATIONS = (RsvSpec(False, 4, (ISA.unit("alu"),),     RsvType.RSV_EXEC),
+            RsvSpec(False, 4, (ISA.unit("mem"),),     RsvType.RSV_LD_ST),
+            RsvSpec(False, 4, (ISA.unit("control"),), RsvType.RSV_BRANCH),
+            RsvSpec(False, 4, (ISA.unit("system"),),  RsvType.RSV_EXEC))
+
+
 def _cfg(**overrides):
     kwargs = dict(isa=ISA, fe_lanes=2, commit_lanes=2, phy_specs=((X, 64),),
-                  rsv_specs=(RsvSpec(False, 4, ISA.exec_units, RsvType.RSV_BRANCH),),
+                  rsv_specs=STATIONS,
                   rob_depth=32, sptag_len=4, st_buf_depth=4)
     kwargs.update(overrides)
     return CPUO3_Config(**kwargs)

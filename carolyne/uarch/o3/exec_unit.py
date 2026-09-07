@@ -4,9 +4,10 @@
 #
 # One complex per station, because issue is the coupling: a station issues one
 # entry per cycle through ONE arbiter — and in THIS VERSION the complex runs
-# exactly ONE ISA unit, so the spec's `exec_unit` set must be a single unit
-# and a machine gives each unit its own station. A multi-unit complex needs
-# per-unit routing after issue; that is a later version.
+# exactly ONE ISA unit, so a machine gives each unit its own station. A
+# multi-unit complex needs per-unit routing after issue; that is a later
+# version. An IN-ORDER station is single-unit by its own rule (config.RsvSpec),
+# so this bound only ever refuses an out-of-order one.
 #
 # THE STAGE CHAIN (`transfer`): one pip per stage, stage 0's arbiter BEING
 # `exec_meta` — the arb the station's build_issue zyncs against, so a busy
@@ -58,8 +59,9 @@ class ExecUnitO3(Module):
         if len(rsv_spec.exec_unit) != 1:
             raise ValueError(
                 f"ExecUnitO3 '{rsv_spec.label}': the spec feeds "
-                f"{len(rsv_spec.exec_unit)} execution units — this version runs "
-                f"ONE unit per station, so give each unit its own station")
+                f"{len(rsv_spec.exec_unit)} execution units — this version has "
+                f"no per-unit routing after issue, so give each unit its own "
+                f"station")
 
         self.config    = config
         self.rsv       = rsv
@@ -97,15 +99,6 @@ class ExecUnitO3(Module):
                     f"kind {rsv_spec.rsv_type.name} carries "
                     f"{sorted(kind_fields) or 'no pc fields'} — pick a kind "
                     f"whose entries have it")
-
-        # The store buffer's forwarding answers "the newest OLDER store",
-        # which is only true when memory µops execute in program order.
-        if "mem" in self.exec_unit.needs and rsv_spec.issue_o3:
-            raise ValueError(
-                f"ExecUnitO3 '{rsv_spec.label}': unit "
-                f"'{self.exec_unit.name}' needs 'mem' on an OUT-OF-ORDER "
-                f"station — store-to-load forwarding leans on in-order "
-                f"issue, so a memory station must be issue_o3=False")
 
         super().__init__()
 

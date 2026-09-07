@@ -19,7 +19,10 @@
 # fields (`RsvType` / `rsv_type_fields`): an exec station carries its pc, a
 # branch station its pc and the next one, a load/store station neither, because
 # an address is a value it computes rather than one it is given. A machine may
-# add more through `extra_fields`.
+# add more through `extra_fields`. A spec also checks its unit set against its
+# issue policy: a branch unit and a memory unit both need in-order issue, and
+# an in-order station feeds exactly ONE unit, because issue order survives only
+# one stage chain.
 #
 # `fe_lanes` and `commit_lanes` are the machine's two widths: how many µops may
 # arrive per cycle, and how many instructions may retire. Both are CEILINGS the
@@ -117,10 +120,22 @@ class RsvSpec:
                 f"RsvSpec '{self.label}': rsv_type must be a RsvType, got "
                 f"{type(self.rsv_type).__name__} "
                 f"({', '.join(t.name for t in RsvType)})")
-        # A tag is handed out by rotating a one-hot pointer and given back in
-        # order, so branches must RESOLVE in order. Out-of-order issue would
-        # let a younger branch resolve first and return a tag the pool then
-        # rebooks while an older speculation is still open.
+        self._check_issue_policy()
+        self._check_extra_fields()
+
+    # --- construction checks --------------------------------------------------
+    def _check_issue_policy(self) -> None:
+        """The unit set against the issue policy: what each side needs.
+
+        - a BRANCH unit needs in-order issue: tags are given back in order, so
+          out of order a younger branch would return a tag the pool rebooks
+          while an older speculation is still open
+        - a unit needing 'mem' needs it too: the store buffer forwards the
+          newest OLDER store, which is only true in program order
+        - an IN-ORDER station feeds exactly ONE unit: its promise is that
+          entries LEAVE in the order they arrived, and one stage chain keeps
+          that order where two of their own depth and their own stalls do not
+        """
         branchy = [u.name for u in self.exec_unit if u.has_feature(IS_BRANCH)]
         if branchy and self.issue_o3:
             raise ValueError(
@@ -128,9 +143,19 @@ class RsvSpec:
                 f"branch on an OUT-OF-ORDER station — speculation tags are "
                 f"returned in order, so a branch station must be "
                 f"issue_o3=False")
-        self._check_extra_fields()
+        memory = [u.name for u in self.exec_unit if "mem" in u.needs]
+        if memory and self.issue_o3:
+            raise ValueError(
+                f"RsvSpec '{self.label}': unit(s) {', '.join(memory)} need "
+                f"'mem' on an OUT-OF-ORDER station — store-to-load "
+                f"forwarding answers the newest OLDER store, so a memory "
+                f"station must be issue_o3=False")
+        if not self.issue_o3 and len(self.exec_unit) != 1:
+            raise ValueError(
+                f"RsvSpec '{self.label}': an IN-ORDER station feeds "
+                f"{len(self.exec_unit)} execution units — issue order only "
+                f"survives ONE stage chain, so give each unit its own station")
 
-    # --- construction checks --------------------------------------------------
     def _check_extra_fields(self) -> None:
         """The machine's own entry fields: well-formed pairs, unique among
         themselves, and not colliding with the ones this kind already adds.

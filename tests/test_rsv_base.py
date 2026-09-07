@@ -20,10 +20,17 @@ ALU  = ISA.unit("alu")
 MEM  = ISA.unit("mem")
 
 
+# One unit per station: an in-order station may feed only one (config.RsvSpec).
+STATIONS = (RsvSpec(False, 8, (ISA.unit("alu"),),     RsvType.RSV_EXEC),
+            RsvSpec(False, 8, (ISA.unit("mem"),),     RsvType.RSV_LD_ST),
+            RsvSpec(False, 8, (ISA.unit("control"),), RsvType.RSV_BRANCH),
+            RsvSpec(False, 8, (ISA.unit("system"),),  RsvType.RSV_EXEC))
+
+
 def _cfg():
     return CPUO3_Config(isa=ISA, fe_lanes=2, commit_lanes=2,
                         phy_specs=((X, 64),),
-                        rsv_specs=(RsvSpec(False, 8, ISA.exec_units, RsvType.RSV_BRANCH),),
+                        rsv_specs=STATIONS,
                         rob_depth=32, sptag_len=4, st_buf_depth=4)
 
 
@@ -92,7 +99,7 @@ def test_only_an_arch_source_is_something_to_wait_for():
     # A µtemp/immediate source is in the µop record: no physical register, so
     # nothing to wake on and nothing for slot_ready to test.
     cfg  = _cfg()
-    host = _drive(cfg, RsvSpec(True, 4, (MEM,), RsvType.RSV_LD_ST))
+    host = _drive(cfg, RsvSpec(False, 4, (MEM,), RsvType.RSV_LD_ST))
     st   = host.station
 
     assert [a.name for a in st.atm_operands]  == ["src_1", "src_2", "src_3",

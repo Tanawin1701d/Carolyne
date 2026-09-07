@@ -26,9 +26,16 @@ MEM     = ISA.unit("mem")           # the unit whose µops read the immediate
 SYSTEM  = ISA.unit("system")        # ecall/ebreak: no operands at all
 
 
+# One unit per station: an in-order station may feed only one (config.RsvSpec).
+STATIONS = (RsvSpec(False, 16, (ISA.unit("alu"),),     RsvType.RSV_EXEC),
+            RsvSpec(False, 16, (ISA.unit("mem"),),     RsvType.RSV_LD_ST),
+            RsvSpec(False, 16, (ISA.unit("control"),), RsvType.RSV_BRANCH),
+            RsvSpec(False, 16, (ISA.unit("system"),),  RsvType.RSV_EXEC))
+
+
 def _cfg(**overrides):
     kwargs = dict(isa=ISA, fe_lanes=2, commit_lanes=2, phy_specs=((X, 64),),
-                  rsv_specs=(RsvSpec(False, 16, ISA.exec_units, RsvType.RSV_BRANCH),),
+                  rsv_specs=STATIONS,
                   rob_depth=32, sptag_len=8, st_buf_depth=4)
     kwargs.update(overrides)
     return CPUO3_Config(**kwargs)
@@ -104,7 +111,7 @@ def test_a_utemp_source_carries_only_its_data():
     # src_3 targets ImmTarget, an Intermediate: there is no PRF entry to wake
     # on, so the value is in the µop record and the entry holds data only.
     cfg  = _cfg()
-    spec = RsvSpec(True, 16, (MEM,), RsvType.RSV_LD_ST)
+    spec = RsvSpec(False, 16, (MEM,), RsvType.RSV_LD_ST)
     atm_operand = next(c for c in station_atm_operands(ISA, spec) if c.name == "src_3")
     assert not atm_operand.has_arch
 
@@ -164,8 +171,12 @@ def test_an_out_of_order_station_needs_room_to_order():
 
 def test_atomic_operands_are_gathered_once_across_the_stations_units():
     # A station feeding several units collects each one once, srcs then dests.
-    found = station_atm_operands(ISA, RsvSpec(False, 16, ISA.exec_units, RsvType.RSV_BRANCH))
-    assert [a.name for a in found] == ["src_1", "src_2", "src_3", "dest_1"]
+    # Two ALUs is what a multi-unit station looks like: only an OUT-OF-ORDER
+    # one may feed several, and a branch or memory unit needs in-order issue.
+    alu_2 = ExecUnit("alu_2", ALU.uops, src_operands=ALU.src_operands,
+                     dest_operands=ALU.dest_operands)
+    found = station_atm_operands(ISA, RsvSpec(True, 16, (ALU, alu_2), RsvType.RSV_EXEC))
+    assert [a.name for a in found] == ["src_1", "src_2", "dest_1"]
     assert len({id(a) for a in found}) == len(found)
 
 
@@ -225,7 +236,7 @@ def test_the_station_kind_decides_which_pcs_an_entry_carries():
     br  = _build(cfg, RsvSpec(True, 16, (ALU,), RsvType.RSV_BRANCH))
     assert _has_field(br.table, "pc") and _has_field(br.table, "npc")
 
-    ls  = _build(cfg, RsvSpec(True, 16, (MEM,), RsvType.RSV_LD_ST))
+    ls  = _build(cfg, RsvSpec(False, 16, (MEM,), RsvType.RSV_LD_ST))
     assert not _has_field(ls.table, "pc") and not _has_field(ls.table, "npc")
 
 
@@ -244,7 +255,7 @@ def test_a_machine_may_add_entry_fields_of_its_own():
     # `extra_fields` is what a machine puts on top of its kind's — the kind
     # states the shape, the machine may still need something beside it.
     cfg  = _cfg()
-    spec = RsvSpec(True, 16, (MEM,), RsvType.RSV_LD_ST,
+    spec = RsvSpec(False, 16, (MEM,), RsvType.RSV_LD_ST,
                    extra_fields=(("lsq_idx", 5),))
 
     assert spec.entry_fields(cfg.pc_width) == (("lsq_idx", 5),)
