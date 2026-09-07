@@ -11,33 +11,21 @@ here; a decision already made and recorded goes in CLAUDE.md §4, not here.
 
 ## Load / store
 
-- [ ] **Misaligned `LW` / `LH` return the containing word.** The low two
-      address bits are discarded, so `LW` at `0x2` returns the word at `0x0`
-      and `LH` at an odd address reads the wrong two bytes. Stores have the
-      same gap. RV32I permits an implementation to SUPPORT misaligned accesses
-      or to RAISE an address-misaligned exception — silently-wrong data is
-      neither.
+- [ ] **A misaligned access reads or writes the wrong word.** Naturally
+      aligned accesses are correct as written: `LW`/`SW` at a 4-byte address,
+      `LH`/`LHU`/`SH` at a 2-byte one, `LB`/`LBU`/`SB` at any address. The low
+      two address bits are NOT discarded — they select the byte
+      (`byte_bit_off`) or the halfword (`half_bit_off`) inside the word.
+      What is missing is the access that SPANS two words: `LW` at `0x2`
+      returns the word at `0x0`, and for `LH`/`LHU`/`SH` only address bit 1
+      reaches `half_bit_off`, so `0x1` reads as `0x0` and `0x3` as `0x2`.
+      The store direction is worse than the load one: `SW` at `0x2`
+      overwrites the word at `0x0`, so a misaligned store changes bytes no
+      instruction named. RV32I permits an implementation to SUPPORT
+      misaligned accesses or to RAISE an address-misaligned exception —
+      silently-wrong data is neither.
       *Where:* `isa/riscv/exec_unit_ls.py` (`_address_stage`).
+      *Status:* TODO, deferred on purpose — until this closes, software must
+      keep every access naturally aligned.
       *Closes when:* either a misalignment detect that traps (blocked on trap
       policy), or a two-word read + concatenate for spanning accesses.
-
-## Speculation
-
-- [ ] **A squash may still under-kill across a WRAP.** The Mpft is seeded
-      correctly now: `on_rename` reads back the row of the newest open tag
-      (`Mpft.open_tags`), and because row T holds every tag T sits under plus
-      T itself, that row IS the open set — so no block has to publish one and
-      `TagGen` needs no extra state. The chain self-heals on a resolve, since
-      `on_suc_pred` clears the resolved tag from every row.
-      What is NOT covered: `get_last_tag()` names the most recently handed-out
-      tag, so the chain is only as good as that pointer. After the tag pointer
-      wraps and a tag is rebooked, the row it chains from is the REBOOKED
-      tag's, not the older speculation's.
-      *Where:* `uarch/o3/mpft.py` (`open_tags`, `on_rename`),
-      `uarch/o3/tag_gen.py` (`get_last_tag`).
-      *Closes when:* someone works out whether the wrap is reachable at all —
-      `TagGen.over_use` refuses a booking with no tag left, so the pool may
-      already make it impossible, in which case this entry is a note rather
-      than a gap. If it IS reachable, an explicit open-tag register on TagGen
-      (set on `book_rename`, cleared on `on_suc_pred` / `on_mis_pred`) does
-      not depend on a pointer at all.

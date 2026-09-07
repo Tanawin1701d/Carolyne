@@ -60,6 +60,9 @@ class LSExecUnit(ExecUnitBase):
         # two bits pick the byte inside the word rather than the word. Binary
         # masks, because these name address BITS: 0b11 is both, 0b10 the one
         # that picks the halfword. `<< 3` turns a byte offset into a bit one.
+        # TODO: an access that SPANS two words is not handled and does not
+        # trap — a caller must keep LW/SW 4-byte and LH/LHU/SH 2-byte
+        # aligned. See docs/open_items.md.
         eff_addr      = wire(X_LEN, "ls_eff_addr")
         eff_addr     *= base + imm
         word_addr     = eff_addr >> 2
