@@ -36,7 +36,8 @@ STATIONS = (RsvSpec(False, 8, (ISA.unit("alu"),),     RsvType.RSV_EXEC),
 def _cfg(**overrides):
     kwargs = dict(isa=ISA, fe_lanes=2, commit_lanes=2, phy_specs=((X, 64),),
                   rsv_specs=STATIONS,
-                  rob_depth=8, sptag_len=4, st_buf_depth=4)
+                  rob_depth=8, sptag_len=4, st_buf_depth=4,
+                  instr_mem_idx_width=8, data_mem_idx_width=8)
     kwargs.update(overrides)
     return CPUO3_Config(**kwargs)
 
@@ -104,11 +105,11 @@ def test_every_front_end_lane_allocates_and_the_group_goes_together():
     # allocation run is as wide as the front end and asks only whether a lane
     # is carrying something. The group lands whole or not at all, so the
     # return is ONE room bit beside the per-lane indices.
-    cfg  = _cfg(fe_lanes=3, commit_lanes=2)
+    cfg  = _cfg(fe_lanes=4, commit_lanes=2)
     host = _drive(cfg)
     fits, free_idx = host.rob.free_slots(host.disp)
     assert fits is host.rob.dispatch_fits                   # one answer, shared
-    assert len(free_idx) == 3
+    assert len(free_idx) == 4
 
 
 def test_a_group_wider_than_the_buffer_is_refused():
@@ -154,6 +155,7 @@ def test_a_rename_table_elaborates_when_the_widths_differ():
     # Regression: Rt's stage chain is one row per RENAME PORT, and it used to
     # walk sptag_len of them — which indexes past the array whenever the two
     # differ, as they do here (2 rename ports, 4 tag bits).
-    cfg = _cfg(fe_lanes=2, sptag_len=4, st_buf_depth=4)
+    cfg = _cfg(fe_lanes=2, sptag_len=4, st_buf_depth=4,
+    instr_mem_idx_width=8, data_mem_idx_width=8)
     assert cfg.fe_lanes != cfg.sptag_len
     _drive(cfg)                                  # elaborating IS the assertion

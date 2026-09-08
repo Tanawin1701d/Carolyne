@@ -31,7 +31,8 @@ STATIONS = (RsvSpec(False, 4, (ISA.unit("alu"),),     RsvType.RSV_EXEC),
 def _cfg(**overrides):
     kwargs = dict(isa=ISA, fe_lanes=2, commit_lanes=2, phy_specs=((X, 64),),
                   rsv_specs=STATIONS,
-                  rob_depth=32, sptag_len=4, st_buf_depth=4)
+                  rob_depth=32, sptag_len=4, st_buf_depth=4,
+                  instr_mem_idx_width=8, data_mem_idx_width=8)
     kwargs.update(overrides)
     return CPUO3_Config(**kwargs)
 
@@ -110,7 +111,7 @@ def test_a_one_register_class_has_no_architectural_index_to_store():
     opr  = Operand(core, TargetKind.ARCH)          # no index: one register
     uop  = Uop("ADD", 0, dests=(opr,))
     unit = ExecUnit("alu", (uop,), dest_operands=(core,))
-    isa  = IsaBase(name="toy", pc_width=32, pc_align=4, ilen_bytes=4,
+    isa  = IsaBase(name="toy", pc_width=32, pc_align=4, ilen_bytes=4, dlen_bytes=4,
                    reg_files=(flags,), atomic_operands=(core,), operands=(opr,),
                    exec_units=(unit,), uops=(uop,),
                    mops=(Mop(matcher_field=InstrFieldMatch("opcode", ((0, 7),)),
@@ -118,7 +119,8 @@ def test_a_one_register_class_has_no_architectural_index_to_store():
     cfg  = CPUO3_Config(isa=isa, fe_lanes=1, commit_lanes=1,
                         phy_specs=((flags, 4),),
                         rsv_specs=(RsvSpec(True, 4, (unit,), RsvType.RSV_EXEC),), rob_depth=8,
-                        sptag_len=4, st_buf_depth=4)
+                        sptag_len=4, st_buf_depth=4,
+                        instr_mem_idx_width=8, data_mem_idx_width=8)
 
     fields = rob_operand_fields(cfg, core)
     assert sorted(fields) == ["active_flags_out", "pr_idx_flags_out",
@@ -143,7 +145,7 @@ def test_an_unnamed_destination_cannot_name_its_fields():
     opr     = Operand(unnamed, TargetKind.ARCH, FieldRef("rd"))
     uop     = Uop("ADD", 0, dests=(opr,))
     unit    = ExecUnit("alu", (uop,), dest_operands=(unnamed,))
-    isa     = IsaBase(name="toy", pc_width=32, pc_align=4, ilen_bytes=4,
+    isa     = IsaBase(name="toy", pc_width=32, pc_align=4, ilen_bytes=4, dlen_bytes=4,
                       reg_files=(X,), atomic_operands=(unnamed,), operands=(opr,),
                       exec_units=(unit,), uops=(uop,),
                       mops=(Mop(matcher_field=InstrFieldMatch("opcode", ((0, 7),)),

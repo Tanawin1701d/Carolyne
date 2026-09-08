@@ -34,7 +34,8 @@ STATIONS = (RsvSpec(False, 4, (ISA.unit("alu"),),     RsvType.RSV_EXEC),
 def _cfg(**overrides):
     kwargs = dict(isa=ISA, fe_lanes=2, commit_lanes=2, phy_specs=((X, 64),),
                   rsv_specs=STATIONS,
-                  rob_depth=32, sptag_len=4, st_buf_depth=4)
+                  rob_depth=32, sptag_len=4, st_buf_depth=4,
+                  instr_mem_idx_width=8, data_mem_idx_width=8)
     kwargs.update(overrides)
     return CPUO3_Config(**kwargs)
 
@@ -149,7 +150,7 @@ def test_a_one_register_class_has_no_architectural_index_to_store():
     opr   = Operand(core, TargetKind.ARCH)          # no index: one register
     uop   = Uop("ADD", 0, dests=(opr,))
     unit  = ExecUnit("alu", (uop,), dest_operands=(core,))
-    isa   = IsaBase(name="toy", pc_width=32, pc_align=4, ilen_bytes=4,
+    isa   = IsaBase(name="toy", pc_width=32, pc_align=4, ilen_bytes=4, dlen_bytes=4,
                     reg_files=(flags,), atomic_operands=(core,), operands=(opr,),
                     exec_units=(unit,), uops=(uop,),
                     mops=(Mop(matcher_field=InstrFieldMatch("opcode", ((0, 7),)),
@@ -157,7 +158,8 @@ def test_a_one_register_class_has_no_architectural_index_to_store():
     cfg = CPUO3_Config(isa=isa, fe_lanes=1, commit_lanes=1,
                        phy_specs=((flags, 8),),
                        rsv_specs=(RsvSpec(True, 4, (unit,), RsvType.RSV_EXEC),),
-                       rob_depth=8, sptag_len=4, st_buf_depth=4)
+                       rob_depth=8, sptag_len=4, st_buf_depth=4,
+                       instr_mem_idx_width=8, data_mem_idx_width=8)
 
     fields = decode_operand_fields(cfg, core)
     assert "ar_idx_flags_out" not in fields
@@ -174,7 +176,7 @@ def test_an_unnamed_operand_cannot_name_its_fields():
     uop     = Uop("ADD", 0, srcs=(src_opr,), dests=(dst_opr,))
     unit    = ExecUnit("alu", (uop,), src_operands=(unnamed,),
                        dest_operands=(dest,))
-    isa     = IsaBase(name="toy", pc_width=32, pc_align=4, ilen_bytes=4,
+    isa     = IsaBase(name="toy", pc_width=32, pc_align=4, ilen_bytes=4, dlen_bytes=4,
                       reg_files=(X,), atomic_operands=(unnamed, dest),
                       operands=(src_opr, dst_opr), exec_units=(unit,),
                       uops=(uop,),

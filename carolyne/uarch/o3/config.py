@@ -40,12 +40,33 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
-from typing import Tuple
+from typing import NamedTuple, Tuple
 
 from ...isa import ExecUnit, IsaBase, RegFile, Uop
 from ...util import is_power_of_two
 from ..common import ceil_log2
 from .common_field import IS_BRANCH, NPC, PC
+
+
+class MemSpec(NamedTuple):
+    """The three numbers one memory is built from, in EasyMem's own order."""
+    index_width    : int    # bits of varying address: how many words a bank holds
+    bank_cnt       : int
+    data_bus_bytes : int
+
+    @property
+    def size_bytes(self) -> int:
+        """Bytes the whole memory holds: two to the power of every address bit.
+
+        LIMIT: exact only while bank_cnt and data_bus_bytes are powers of two.
+        Both hold for the data memory (one bank, dlen_bytes) and the bank count
+        holds for the instruction memory (fe_lanes), but ilen_bytes has NO
+        power-of-two rule, so a variable-length ISA rounds the size UP.
+        """
+        return 1 << (self.index_width
+                     + ceil_log2(self.bank_cnt)
+                     + ceil_log2(self.data_bus_bytes))
+
 
 # The map from a register class to its physical file size. A dict is impossible
 # (RegFile is unhashable — header), so the pairs ARE the map; read one with
@@ -224,15 +245,18 @@ class RsvSpec:
 
 @dataclass(frozen=True)
 class CPUO3_Config:
-    isa          : IsaBase            # the description the core is generated from
-    fe_lanes     : int                # front-end lanes: how wide fetch/dispatch is
-    commit_lanes : int                # AT MOST this many instructions retire in
-                                      # one cycle; fewer is the normal case
-    phy_specs    : PhySpecs           # register class -> physical file size
-    rsv_specs    : Tuple[RsvSpec, ...]# one per reservation station
-    rob_depth    : int                # in-flight instructions
-    sptag_len    : int                # speculative tag width, in BITS
-    st_buf_depth : int                # store-buffer entries (the LSQ's store half)
+    isa                 : IsaBase            # the description the core is generated from
+    fe_lanes            : int                # front-end lanes: how wide fetch/dispatch is
+    commit_lanes        : int                # AT MOST this many instructions retire in
+                                             # one cycle; fewer is the normal case
+    phy_specs           : PhySpecs           # register class -> physical file size
+    rsv_specs           : Tuple[RsvSpec, ...]# one per reservation station
+    rob_depth           : int                # in-flight instructions
+    sptag_len           : int                # speculative tag width, in BITS
+    st_buf_depth        : int                # store-buffer entries (the LSQ's store half)
+    instr_mem_idx_width : int                # index bits of ONE instruction memory
+                                             # bank: the words that bank holds
+    data_mem_idx_width  : int                # the same, for the data memory's bank
 
 
     def __post_init__(self) -> None:
@@ -240,7 +264,8 @@ class CPUO3_Config:
             raise TypeError(
                 f"CPUO3_Config: isa must be an IsaBase, got {type(self.isa).__name__}")
         for field in ("fe_lanes", "commit_lanes", "rob_depth", "sptag_len",
-                      "st_buf_depth"):
+                      "st_buf_depth", "instr_mem_idx_width",
+                      "data_mem_idx_width"):
             value = getattr(self, field)
             if isinstance(value, bool) or not isinstance(value, int):
                 raise TypeError(
@@ -252,6 +277,13 @@ class CPUO3_Config:
                 f"CPUO3_Config: {self.commit_lanes} commit lanes over a "
                 f"{self.rob_depth}-entry ROB — a cycle cannot retire more "
                 f"instructions than the buffer can hold")
+        # The instruction memory takes ONE BANK PER LANE, and a bank count is an
+        # address field, so it is a power of two (instr_mem_spec / EasyMem).
+        if not is_power_of_two(self.fe_lanes):
+            raise ValueError(
+                f"CPUO3_Config: fe_lanes must be a power of two — the instruction "
+                f"memory takes one bank per lane and a bank count is an address "
+                f"field, got {self.fe_lanes}")
         # The same pointer-wrap rule RsvIOR and the ROB follow: circular
         # pointers step modulo the table, so the size is a power of two, and
         # one entry would leave them 0 bits wide.
@@ -345,6 +377,25 @@ class CPUO3_Config:
     def uop_idx_width(self) -> int:
         """Bits naming ONE µop of the ISA's whole vocabulary."""
         return ceil_log2(len(self.isa.uops))
+
+    # --- memory shape ---------------------------------------------------------
+    def instr_mem_spec(self) -> MemSpec:
+        """The instruction memory: ONE BANK PER FRONT-END LANE.
+
+        Every lane fetches its own word in the same cycle, and a port names one
+        bank at elaboration time, so a lane that shared a bank could not.
+        """
+        return MemSpec(self.instr_mem_idx_width,
+                       self.fe_lanes, self.isa.ilen_bytes)
+
+    def data_mem_spec(self) -> MemSpec:
+        """The data memory: ONE BANK.
+
+        A memory-needing unit issues in order from a station of its own, so the
+        machine holds one load path and one store path — a read port and a
+        write port on the same bank.
+        """
+        return MemSpec(self.data_mem_idx_width, 1, self.isa.dlen_bytes)
 
     # --- derived from the knobs -----------------------------------------------
     @property

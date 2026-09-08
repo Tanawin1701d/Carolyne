@@ -41,6 +41,7 @@ def val(*values: int) -> InstrValueMatch:
 PC_WIDTH   = X_LEN      # program counter is XLEN bits
 PC_ALIGN   = 4          # instruction addresses are 4-byte aligned (2 with the C ext)
 ILEN_BYTES = 4          # RV32I is fixed-length; no length decoder needed
+DLEN_BYTES = 4          # widest data access: LW/SW move a 32-bit word
 
 # --- register / function fields --------------------------------------------
 OPCODE = InstrFieldMatch("opcode", ((0, 7),))

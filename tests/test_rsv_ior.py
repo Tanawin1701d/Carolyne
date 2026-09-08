@@ -31,7 +31,8 @@ def _cfg(fe_lanes=2):
     return CPUO3_Config(isa=ISA, fe_lanes=fe_lanes, commit_lanes=2,
                         phy_specs=((X, 64),),
                         rsv_specs=(O3_SPEC, IOR_SPEC, BR_SPEC, SYS_SPEC),
-                        rob_depth=32, sptag_len=4, st_buf_depth=4)
+                        rob_depth=32, sptag_len=4, st_buf_depth=4,
+                        instr_mem_idx_width=8, data_mem_idx_width=8)
 
 
 def _drive(station_cls, spec, rsv_idx=0, fe_lanes=2):
@@ -114,7 +115,7 @@ def test_more_lanes_than_entries_is_refused():
     # land on alloc — two writes to one row at equal priority, which is not
     # statement order. The bound is <= size, not < size: at exactly size the
     # largest offset difference is size - 1, which cannot be a whole table.
-    cfg = _cfg(fe_lanes=6)
+    cfg = _cfg(fe_lanes=8)
     reset()
     with pytest.raises(ValueError, match="write ports over"):
         RsvIOR(cfg, IOR_SPEC, "too_wide")

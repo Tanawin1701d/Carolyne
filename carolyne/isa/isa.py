@@ -3,8 +3,8 @@
 # else in this layer refers to: the architectural register classes, the operand
 # cores and the slot rules built on them, the µop templates, the execution
 # units, and the mops that bind encodings to µop sequences. It also holds the
-# three addressing scalars (pc_width, pc_align, ilen_bytes) saying where an
-# instruction is and how long it is. The PC is not a register class (§4.3), but
+# four addressing scalars (pc_width, pc_align, ilen_bytes, dlen_bytes) saying
+# where an instruction is, how long it is, and how wide one data access is. The PC is not a register class (§4.3), but
 # its width is still an ISA fact: fetch, the redirect path and the ROB cannot
 # be sized without it.
 #
@@ -80,6 +80,9 @@ class IsaBase:
     ilen_bytes      : int                       # instruction length in bytes (§1.3, §6.3).
                                                 # A constant means fixed-length: the fetch
                                                 # aligner degenerates to the fast path
+    dlen_bytes      : int                       # widest single data access in bytes: what
+                                                # the data bus carries, and what a memory
+                                                # sizes its word from (RV32I 4, for LW/SW)
     reg_files       : Tuple[RegFile, ...]       # architectural register classes
     atomic_operands : Tuple[AtomicOperand, ...] # the value/direction cores
     operands        : Tuple[Operand, ...]       # cores + encoding side: the slot rules
@@ -101,10 +104,11 @@ class IsaBase:
 
     # --- construction checks --------------------------------------------------
     def _check_addressing(self) -> None:
-        """Check the three addressing scalars against each other."""
+        """Check the four addressing scalars against each other."""
         for field, value in (("pc_width",   self.pc_width),
                              ("pc_align",   self.pc_align),
-                             ("ilen_bytes", self.ilen_bytes)):
+                             ("ilen_bytes", self.ilen_bytes),
+                             ("dlen_bytes", self.dlen_bytes)):
             if isinstance(value, bool) or not isinstance(value, int):
                 raise TypeError(
                     f"IsaBase '{self.name}': {field} must be an int, "
@@ -122,6 +126,11 @@ class IsaBase:
                 f"IsaBase '{self.name}': ilen_bytes {self.ilen_bytes} is not a multiple "
                 f"of pc_align {self.pc_align} — stepping by it would leave an aligned "
                 f"instruction address misaligned")
+        if not is_power_of_two(self.dlen_bytes):
+            raise ValueError(
+                f"IsaBase '{self.name}': dlen_bytes must be a power of two — the low "
+                f"address bits an aligned access holds at zero are log2 of it, got "
+                f"{self.dlen_bytes}")
         if (1 << self.pc_width) <= self.pc_align:
             raise ValueError(
                 f"IsaBase '{self.name}': pc_width {self.pc_width} cannot address past "

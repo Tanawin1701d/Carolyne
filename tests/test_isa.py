@@ -74,7 +74,7 @@ def _once(items):
 def _isa(**overrides):
     mops = overrides.pop("mops", (_mop(ADD, "add"), _mop(LOAD, "lw")))
     uops, operands, cores = _walk(mops)
-    kwargs = dict(name="toy", pc_width=32, pc_align=4, ilen_bytes=4,
+    kwargs = dict(name="toy", pc_width=32, pc_align=4, ilen_bytes=4, dlen_bytes=4,
                   reg_files=(X,), atomic_operands=cores,
                   operands=operands, exec_units=(ALU, MEM),
                   uops=uops, mops=mops)
@@ -291,7 +291,7 @@ def test_a_per_isa_package_may_subclass_it():
 
     mops = (_mop(ADD, "add"), _mop(LOAD, "lw"))
     uops, operands, cores = _walk(mops)
-    addr = dict(pc_width=32, pc_align=4, ilen_bytes=4)
+    addr = dict(pc_width=32, pc_align=4, ilen_bytes=4, dlen_bytes=4)
     isa = ToyIsa(name="toy", **addr, reg_files=(X,), atomic_operands=cores,
                  operands=operands, exec_units=(ALU, MEM),
                  uops=uops, mops=mops, prefixes=("0x66",))

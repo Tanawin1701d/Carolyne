@@ -100,7 +100,7 @@ def test_a_crack_becomes_one_level_per_uop():
     agu, load = Uop("AGU", 0), Uop("LOAD", 1)
     unit      = ExecUnit("agu_mem", (agu, load))
     field     = InstrFieldMatch("op", ((0, 7),))
-    isa       = IsaBase(name="cracker", pc_width=32, pc_align=4, ilen_bytes=4,
+    isa       = IsaBase(name="cracker", pc_width=32, pc_align=4, ilen_bytes=4, dlen_bytes=4,
                         reg_files=(X,), atomic_operands=ISA.atomic_operands,
                         operands=ISA.operands, exec_units=(unit,),
                         uops=(agu, load),
@@ -124,7 +124,7 @@ def test_a_path_with_no_rule_at_all_is_refused():
     unit = ExecUnit("alu", (uop,))
     with pytest.raises(ValueError, match="no \\(field, value\\) rule"):
         group_uops_by_level(
-            IsaBase(name="ruleless", pc_width=32, pc_align=4, ilen_bytes=4,
+            IsaBase(name="ruleless", pc_width=32, pc_align=4, ilen_bytes=4, dlen_bytes=4,
                     reg_files=(X,), atomic_operands=ISA.atomic_operands,
                     operands=ISA.operands, exec_units=(unit,), uops=(uop,),
                     mops=(Mop(matcher_field=InstrFieldMatch("op", ((0, 7),)),

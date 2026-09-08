@@ -40,7 +40,8 @@ def _cfg(fe_lanes=2):
     return CPUO3_Config(isa=ISA, fe_lanes=fe_lanes, commit_lanes=2,
                         phy_specs=((X, 64),),
                         rsv_specs=(O3_SPEC, IOR_SPEC, BR_SPEC, SYS_SPEC),
-                        rob_depth=32, sptag_len=4, st_buf_depth=4)
+                        rob_depth=32, sptag_len=4, st_buf_depth=4,
+                        instr_mem_idx_width=8, data_mem_idx_width=8)
 
 
 def _drive(station_cls, spec, rsv_idx=0, fe_lanes=2):
@@ -86,8 +87,8 @@ def _drive(station_cls, spec, rsv_idx=0, fe_lanes=2):
 def test_a_station_has_one_write_port_per_front_end_lane():
     # Every lane may dispatch in the same cycle and any of them may be aimed
     # here, so the write side is as wide as the front end. Issue stays single.
-    host = _drive(RsvO3, O3_SPEC, fe_lanes=3)
-    assert len(host.station.free_ok) == 3 and len(host.station.free_idx) == 3
+    host = _drive(RsvO3, O3_SPEC, fe_lanes=4)
+    assert len(host.station.free_ok) == 4 and len(host.station.free_idx) == 4
 
 
 def test_each_write_port_searches_the_table_and_skips_what_earlier_lanes_took():
