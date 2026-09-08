@@ -5,7 +5,8 @@
 #   exec_unit_alu.py   AluExecUnit — the integer templates (AUIPC included:
 #                      it reads pc but never redirects)
 #   exec_unit_br.py    BrExecUnit — what AUGMENTS the pc: branches, jal, jalr
-#   exec_unit_ls.py    LSExecUnit — loads/stores, body pending
+#   exec_unit_ls.py    LSExecUnit — loads and stores, over the LSQ api
+#   exec_unit_system.py SystemExecUnit — fence/ecall/ebreak: declare done
 #   exec_unit_util.py  the shared body helpers (uop_hit / drive_by_uop / SIGN)
 #
 # The unit split is a MACHINE choice, not an ISA one: one unit per kind is
@@ -29,6 +30,7 @@ from . import uop as U
 from .exec_unit_alu import AluExecUnit
 from .exec_unit_br import BrExecUnit
 from .exec_unit_ls import LSExecUnit
+from .exec_unit_system import SystemExecUnit
 from .operand import AOPR_DEST_1, AOPR_SRC_1, AOPR_SRC_2, AOPR_SRC_3
 
 
@@ -63,5 +65,6 @@ def exec_units() -> Tuple[ExecUnit, ...]:
                        src_operands=(AOPR_SRC_1, AOPR_SRC_2, AOPR_SRC_3),
                        dest_operands=(AOPR_DEST_1,),
                        needs=("pc", "npc")),
-            # ecall/ebreak/fence name no operand at all.
-            ExecUnit("system", (U.UOP_FENCE, U.UOP_ECALL, U.UOP_EBREAK)))
+            # ecall/ebreak/fence name no operand at all; the body only
+            # declares completion (exec_unit_system.py says why).
+            SystemExecUnit("system", (U.UOP_FENCE, U.UOP_ECALL, U.UOP_EBREAK)))

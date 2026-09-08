@@ -657,7 +657,18 @@ barrel shifter where a hand-written SRA muxes the fill bit into one — the pric
 of a body that means the same thing on ints and on signals, and revisable if the
 FPGA numbers say so. mem/control now declare
 `needs=("mem",)`/`needs=("redirect",)` — requests recorded ahead of the step-5
-facility contracts; system stays plain until trap policy exists. Checked against
+facility contracts; system stayed plain "until trap policy exists" — SUPERSEDED
+2026-09-08 (Tanawin's pick, over keeping a stub in the example): `system` now
+has semantics like every other unit (`riscv/exec_unit_system.py`,
+`SystemExecUnit`). The reason is that a plain unit CANNOT ELABORATE — every
+complex calls its unit's `exec_stage`, so the shipped ISA raised the moment a
+machine built one, and dropping the unit instead strands fence/ecall/ebreak,
+which `MOP_TABLE` uses. The body is thin and honest: `api.declare_fin(src)` and
+nothing else. FENCE is genuinely a no-op here (memory issues from ONE in-order
+station, so there is no reordering to hold back); ECALL/EBREAK should TRAP and
+cannot yet, so they retire like any instruction and a program calling one
+continues — the LIMIT is stated in the module. It imports NO Kathryn, so
+`test_riscv.py`'s data-only guard needed no new exception. Checked against
 Kathryn's DSL: `- ^ & | << >> <` all exist on a signal and take an int operand,
 and `__lt__` maps to `LogicOp::RelationLe`, which emits `<` — "Le" is *less*,
 "Leq" is less-or-equal, so SLT/SLTU are not silently off by the equal case. The FAKE
