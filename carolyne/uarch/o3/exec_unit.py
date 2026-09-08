@@ -13,7 +13,7 @@
 # `exec_meta` — the arb the station's build_issue zyncs against, so a busy
 # complex stalls the station. The body is called INSIDE its stage's pip, so
 # its scwait/cwhile compose with the stage's arbiter; stage k receives the
-# record stage k-1 RETURNED — always a REGISTER Karray the body writes
+# record declare_stage_src built for it at @init — a REGISTER Karray the body writes
 # itself, carrying everything the later stages need (the station holds the
 # first register transition: exec_src) — and the body places its own
 # transfer with `with api.zync_with_next_stage(src, des):`, INSIDE which
@@ -128,6 +128,47 @@ class ExecUnitO3(Module):
                      spec_tag=self.config.sptag_len)
             for stage_idx in range(self.exec_unit.stage_cnt - 1)]
 
+        self._declare_stage_chain()
+
+    def _declare_stage_chain(self):
+        """Every stage's record and its api, before any flow block exists.
+
+        - stage 0's record is the station's issued entry, which the station
+          already declared; each later one comes from the UNIT, since only the
+          body knows what data it carries (ExecUnitBase.declare_stage_src)
+        - a unit is a frozen description object and one instance may back two
+          complexes (two ALUs on a station), so the records are held HERE
+        - one api per stage, built here and reused by transfer: it carries the
+          stage's arbiter, its src and its des, and `next_stage_fields` widens
+          the set zync_with_next_stage transfers — which only holds if the
+          declaring api and the running api are the SAME object
+        """
+        last = self.exec_unit.stage_cnt - 1
+        self.stage_srcs = [self.rsv.exec_src[self.unit_idx]]
+        self.stage_apis = []
+        for stage_idx in range(self.exec_unit.stage_cnt):
+            # the api carries the NEXT stage's arb itself; None on the last
+            next_meta = self.stage_metas[stage_idx + 1] if stage_idx != last else None
+            api       = ExecUnitApiO3(self, stage_idx, next_meta,
+                                      self.stage_srcs[stage_idx])
+            self.stage_apis.append(api)
+            if stage_idx == last:
+                break
+            des = self.exec_unit.declare_stage_src(stage_idx + 1,
+                                                   self.stage_srcs[stage_idx], api)
+            if not isinstance(des, Karray):
+                raise ValueError(
+                    f"ExecUnitO3 '{self.label}': declare_stage_src({stage_idx + 1}) "
+                    f"of unit '{self.exec_unit.name}' returned "
+                    f"{type(des).__name__} — a stage record is a register Karray")
+            if des is self.stage_srcs[stage_idx]:
+                raise ValueError(
+                    f"ExecUnitO3 '{self.label}': declare_stage_src({stage_idx + 1}) "
+                    f"of unit '{self.exec_unit.name}' returned the PREVIOUS stage's "
+                    f"record — each stage holds its own")
+            api.des = des
+            self.stage_srcs.append(des)
+
 
     def connect(self, core):
         """The top core module — where the declare fan-outs land."""
@@ -240,52 +281,26 @@ class ExecUnitO3(Module):
     def transfer(self):
         """The unit's pipeline: one pip per stage, the body called inside it.
 
-        - stage 0's src is the station's issued entry (exec_src) — the
-          station makes that first register transition; stage k's is the
-          NEW register Karray stage k-1 returned, never src passed on
-        - the body places its own transfer (api.zync_with_next_stage);
-          the LAST stage returns None — its results leave through
-          api.wb_reg — and both conventions are ENFORCED here
-        - every stage's record lands in self.stage_srcs for debugging:
-          [k] is what stage k received; [-1] is the last stage's None
+        - the records and the apis already exist (_declare_stage_chain), so
+          this only RUNS the chain: stage k gets stage_srcs[k] and the api
+          built for it
+        - the body places its own transfer (api.zync_with_next_stage), which
+          yields the next record; a stage RETURNS NOTHING, and that is
+          enforced here
         """
-        src = self.rsv.exec_src[self.unit_idx]
-        self.stage_srcs = [src]
-        last = self.exec_unit.stage_cnt - 1
         for stage_idx in range(self.exec_unit.stage_cnt):
-            # the api carries the NEXT stage's arb itself; None on the last
-            next_meta = (self.stage_metas[stage_idx + 1]
-                         if stage_idx != last else None)
             with pip(self.stage_metas[stage_idx], auto_restart=True):
-                api = ExecUnitApiO3(self, stage_idx, next_meta, src)
-                src = self.exec_unit.exec_stage(stage_idx, src, api)
-            if stage_idx == last and src is not None:
-                raise ValueError(
-                    f"ExecUnitO3 '{self.label}': stage {stage_idx} is the LAST "
-                    f"of unit '{self.exec_unit.name}' and must return None — "
-                    f"results leave through api.wb_reg(atm_opr, value)")
-            if stage_idx != last and src is None:
+                returned = self.exec_unit.exec_stage(stage_idx,
+                                                     self.stage_srcs[stage_idx],
+                                                     self.stage_apis[stage_idx])
+            if returned is not None:
                 raise ValueError(
                     f"ExecUnitO3 '{self.label}': stage {stage_idx} of unit "
-                    f"'{self.exec_unit.name}' returned None — a stage before "
-                    f"the last returns a NEW register record to the next stage")
-            self.stage_srcs.append(src)
+                    f"'{self.exec_unit.name}' returned a record — every stage "
+                    f"record is declared up front, so a stage WRITES the next "
+                    f"one (api.zync_with_next_stage) and returns None")
 
     # --- mispredict ---------------------------------------------------------------
-    def _require_stage_record(self, records, stage_idx, where):
-        """Stage `stage_idx` has a record to act on, or refuse.
-
-        Skipping would not merely miss a cycle: the mask / kill hardware
-        for that stage would never be BUILT, so the stage would speculate
-        under a tag nothing can clear. Call these after transfer.
-        """
-        if stage_idx >= len(records):
-            raise ValueError(
-                f"ExecUnitO3 '{self.label}'.{where}: stage {stage_idx} has "
-                f"no record yet ({len(records)} built) - the stage chain is "
-                f"transfer's to build, and acting before it would leave that "
-                f"stage with no hardware to clear its tag")
-
     def on_mis_pred(self, fix_tag):
         """Kill every in-flight µop speculating under a killed tag, per stage.
 
@@ -310,10 +325,7 @@ class ExecUnitO3(Module):
                 src      = self.rsv.exec_src[self.unit_idx][0]
                 squashed = self.rsv.entry_squashed(src, fix_tag)
             else:
-                records  = getattr(self, "stage_srcs", ())
-                self._require_stage_record(records, stage_idx,
-                                           "on_mis_pred")
-                src      = records[stage_idx][0]
+                src      = self.stage_srcs[stage_idx][0]
                 squashed = (to_ref(getattr(src, IS_SPEC))
                             & ((to_ref(getattr(src, SPEC_TAG)) & fix_tag)
                                != 0))
@@ -342,15 +354,13 @@ class ExecUnitO3(Module):
         """
         if self._declared_suc_pred:
             return
-        records = getattr(self, "stage_srcs", ())
         # The pair moving to the next stage this cycle: masked on the
         # overrider, since the record it lands in is written at the edge.
         # The guard reads the STAGE SOURCE, never the overrider itself —
         # overrider k carries stage k's pair, and a guard built from the wire
         # being driven is a combinational loop.
         for stage_idx, spec_ovr in enumerate(self.spec_overriders):
-            self._require_stage_record(records, stage_idx, "on_suc_pred")
-            src_row = records[stage_idx][0]
+            src_row = self.stage_srcs[stage_idx][0]
             with priority(PRI_SUC_PRED):
                 with zif(getattr(src_row, IS_SPEC)
                          & (getattr(src_row, SPEC_TAG) == suc_tag)):
@@ -359,12 +369,7 @@ class ExecUnitO3(Module):
         # iterately modify the src, incase it multicycle execution
 
         for stage_idx in range(self.exec_unit.stage_cnt):
-            if stage_idx == 0:
-                src = self.rsv.exec_src[self.unit_idx][0]
-            else:
-                self._require_stage_record(records, stage_idx,
-                                           "on_suc_pred")
-                src = records[stage_idx][0]
+            src = self.stage_srcs[stage_idx][0]
             with zif(getattr(src, IS_SPEC)
                      & (getattr(src, SPEC_TAG) == suc_tag)):
                 src |= {SPEC_TAG: 0, IS_SPEC: 0}

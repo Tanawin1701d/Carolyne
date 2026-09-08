@@ -191,21 +191,36 @@ class ExecUnitBase:
           per stage 0..stage_cnt-1, so the body's scwait/cwhile compose with
           the stage's arbiter and back-pressure runs up to the station
         - `src` is the record this stage receives: stage 0 the station's
-          issued entry, stage k the record stage k-1 RETURNED. It is the
-          KARRAY, not an element — every api call takes it that way and
-          indexes inside; a body reading a field of its own does the
+          issued entry, stage k the record declare_stage_src(k) built. It
+          is the KARRAY, not an element — every api call takes it that way
+          and indexes inside; a body reading a field of its own does the
           indexing itself (`src[0].loaded_word`)
-        - returns a NEW register record for the next stage — the Karray
-          again, never `src` itself: the body creates it and writes it
-          inside its zync_with_next_stage block. The LAST stage returns
-          None: it has no next stage, and its results leave through
-          api.wb_reg(atm_opr, value)
+        - returns NOTHING. Every stage record already exists before any
+          flow runs, so a stage WRITES the next one rather than making it:
+          the body reaches it through `api.zync_with_next_stage(src)` and
+          writes inside that block
         - the generator transfers is_spec/spec_tag from src to des inside
-          the sync; everything else the body carries in what it returns
+          the sync; everything else the body writes itself
         """
         raise NotImplementedError(
             f"{type(self).__name__}.exec_stage: what unit '{self.name}' computes "
             f"is the ISA's to say — a semantics subclass overrides this")
+
+    def declare_stage_src(self, stage_idx: int, src: Karray,
+                          api: ExecUnitApi) -> Karray:
+        """The register record stage `stage_idx` RECEIVES (1 .. stage_cnt-1).
+
+        - called at DECLARATION time, before any flow block exists, so every
+          stage's record is ready when the squash and resolve fan-outs are
+          built — they no longer wait for the pipeline to be constructed
+        - `src` is the record of the stage BEFORE it, which is what sizes the
+          machine's own fields: `**api.next_stage_fields(src, *dests)`
+        - a single-stage unit is never asked; a multi-stage one must answer
+        """
+        raise NotImplementedError(
+            f"{type(self).__name__}.declare_stage_src: unit '{self.name}' runs "
+            f"{self.stage_cnt} stages, so it must declare the record each one "
+            f"after the first receives")
 
 
 # The name a unit with no semantics of its own is built under. Same class: a

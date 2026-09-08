@@ -40,6 +40,14 @@ class LdStResult(Karray):
 class LSExecUnit(ExecUnitBase):
     """Loads and stores over the store buffer and the data memory."""
 
+    def declare_stage_src(self, stage_idx, src, api):
+        """Stage 1's record: this unit's own data plus the machine's fields.
+
+        rd's promised register is named because stage 1 writes it back.
+        """
+        return LdStResult(HwComponentType.REG, (1,), "ls_res",
+                          **api.next_stage_fields(src, AOPR_DEST_1))
+
     def exec_stage(self, stage_idx, src, api):
         if stage_idx == 0:
             return self._address_stage(src, api)
@@ -87,19 +95,14 @@ class LSExecUnit(ExecUnitBase):
                        | ((st_data & 0xff) << byte_bit_off)),
         ))
 
-        # rd's promised register is named because stage 1 writes it back
-        res = LdStResult(HwComponentType.REG, (1,), "ls_res",
-                         **api.next_stage_fields(src, AOPR_DEST_1))
-
         # a store may not move on while the buffer is full; a load always may
-        with api.zync_with_next_stage(src, res,
-                                      is_ld | ~api.lsq_is_full()): ### it means if it is store it has to have the free entry
+        with api.zync_with_next_stage(src,
+                                      is_ld | ~api.lsq_is_full()) as res:
             res[0] |= {"loaded_word" : loaded_word,
                        "byte_bit_off": byte_bit_off,
                        "half_bit_off": half_bit_off}
             with zif(is_st):
                 api.lsq_push_store(mem_addr_wo_static_bit, merged)
-        return res
 
     # --- stage 1: extract, extend, write back ---------------------------------
     def _writeback_stage(self, src, api):

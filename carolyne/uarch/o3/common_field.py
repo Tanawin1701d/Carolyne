@@ -36,6 +36,15 @@ IS_SPEC     = "is_spec"         # under an open speculation; spec_tag says which
 SPEC_TAG    = "spec_tag"
 ROB_DES_IDX = "rob_des_idx"     # the ROB entry a µop belongs to
 
+# --- what an EXEC UNIT's stage record carries --------------------------------
+# The machine's own fields on an execution unit's stage record, beside
+# whatever data the ISA body puts there. ..._STAGE_FIELDS is what
+# next_stage_fields declares on each one; ..._STAGE_CARRIED_FIELDS is the
+# subset a stage hop MOVES by default — a dest's promised register joins it
+# only when the body names that dest, so the two are not one list.
+EXEC_UNIT_STAGE_CARRIED_FIELDS = (IS_SPEC, SPEC_TAG, ROB_DES_IDX)
+EXEC_UNIT_STAGE_FIELDS         = EXEC_UNIT_STAGE_CARRIED_FIELDS + (UOP_IDX,)
+
 # --- one record each ---------------------------------------------------------
 INSTR          = "instr"            # fetch: the encoded word, the ONE raw-bits field
 WB_FIN         = "wb_fin"           # rob:   the writeback has landed

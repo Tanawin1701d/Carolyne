@@ -20,8 +20,9 @@ from kathryn import PipCon, kaf, priority, zync
 from kathryn.signal import to_ref
 
 from carolyne.isa import AtomicOperand, ExecUnitApi
-from carolyne.uarch.o3.common_field import (IS_SPEC, ROB_DES_IDX, SPEC_TAG,
-                                            UOP_IDX)
+from carolyne.uarch.o3.common_field import (EXEC_UNIT_STAGE_CARRIED_FIELDS,
+                                            EXEC_UNIT_STAGE_FIELDS,
+                                            IS_SPEC, SPEC_TAG)
 from carolyne.uarch.o3.operand_field import PR_IDX, field_name
 from carolyne.uarch.o3.priority import PRI_ISSUE
 
@@ -33,7 +34,7 @@ class ExecUnitApiO3(ExecUnitApi):
     # What zync_with_next_stage moves from src to des. The speculation pair
     # and the ROB entry always; next_stage_fields WIDENS it to everything it
     # declared, so a field the engine adds is a field the engine carries.
-    _carried = (IS_SPEC, SPEC_TAG, ROB_DES_IDX)
+    _carried = EXEC_UNIT_STAGE_CARRIED_FIELDS
 
     def __init__(self, exu, stage_idx: int, pip_con: PipCon | None = None,
                  src=None):
@@ -42,6 +43,8 @@ class ExecUnitApiO3(ExecUnitApi):
         self.pip_con   = pip_con     # the NEXT stage's arb; None on the last
         self.src       = src         # this stage's own record (the declares
                                      # read its tag / rob_des_idx off it)
+        self.des       = None        # the NEXT stage's record, filled by the
+                                     # complex once declare_stage_src built it
 
     def declare_mis_pred(self, dyn_cond=None):
         self.exu.declare_mis_pred(self.src, self.stage_idx, dyn_cond)
@@ -50,12 +53,12 @@ class ExecUnitApiO3(ExecUnitApi):
         self.exu.declare_suc_pred(self.src, dyn_cond)
 
     @contextmanager
-    def zync_with_next_stage(self, src, des, cond=None):
+    def zync_with_next_stage(self, src, cond=None):
         """The handshake into the next stage, held in a `with` block.
 
-        - `src` is the record this stage received, `des` the register
-          record it passes on; the body's own writes to `des` belong
-          INSIDE this block, so they fire on the grant that moves the µop
+        - `src` is the record this stage received; `des` is YIELDED, the
+          record declare_stage_src built at @init. The body's own writes to
+          it belong INSIDE this block, so they fire on the grant
         - the engine transfers its OWN fields from src to des in here —
           `_carried`, which next_stage_fields widens to everything it
           declared, so `des` must carry each of them
@@ -69,6 +72,7 @@ class ExecUnitApiO3(ExecUnitApi):
                 f"ExecUnitApiO3: stage {self.stage_idx} is the LAST of its "
                 f"unit — there is no next stage to sync with; completion is "
                 f"declare_fin/wb_reg's business")
+        des  = self.des
         bind = self.pip_con if cond is None else (self.pip_con, cond)
         with zync(bind):
             # At PRI_ISSUE, and the body's writes with it: a record LANDING in
@@ -89,7 +93,7 @@ class ExecUnitApiO3(ExecUnitApi):
                         self.exu.spec_overriders[self.stage_idx][0]
                         if name in (IS_SPEC, SPEC_TAG) else src[0], name))
                     for name in self._carried}
-                yield
+                yield des
 
     def next_stage_fields(self, src, *dest_oprs: AtomicOperand) -> dict:
         """The machine's fields for the body's next-stage record — the
@@ -106,7 +110,7 @@ class ExecUnitApiO3(ExecUnitApi):
           set declared here
         """
         fields = {name: kaf(self.field_width(src, name))
-                  for name in (IS_SPEC, SPEC_TAG, ROB_DES_IDX, UOP_IDX)}
+                  for name in EXEC_UNIT_STAGE_FIELDS}
         for atm_opr in dest_oprs:
             if not atm_opr.is_dest:
                 raise ValueError(

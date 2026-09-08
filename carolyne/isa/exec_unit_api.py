@@ -85,20 +85,21 @@ class ExecUnitApi:
         raise NotImplementedError(
             f"{type(self).__name__}.declare_suc_pred: the generator supplies this")
 
-    def zync_with_next_stage(self, src, des, cond=None):
+    def zync_with_next_stage(self, src, cond=None):
         """The handshake with the next stage's arbiter — the mirror of the
         station-issue zync, used as a WITH block:
 
-            with api.zync_with_next_stage(src, des):
+            with api.zync_with_next_stage(src) as des:
                 ...   # the body's writes to `des` — fire on the grant
 
-        `src` is the record this stage received, `des` the register record
-        it passes on; the generator copies the speculation state AND the
-        rob_des_idx from src to des inside the block, so `des` must carry
-        all three. The body places the block where its own Kathryn
-        structure completes a transfer; work outside it does not move the
-        µop on. `cond` gates the handshake itself: while it is low the µop
-        STALLS in this stage (a store waiting on a full store buffer)."""
+        `src` is the record this stage received; `des` is YIELDED — the
+        record declare_stage_src already built for the next stage, so a
+        body never makes one here. The generator copies the speculation
+        state AND the rob_des_idx from src to des inside the block. The
+        body places the block where its own Kathryn structure completes a
+        transfer; work outside it does not move the µop on. `cond` gates
+        the handshake itself: while it is low the µop STALLS in this stage
+        (a store waiting on a full store buffer)."""
         raise NotImplementedError(
             f"{type(self).__name__}.zync_with_next_stage: the generator supplies this")
 
