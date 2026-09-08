@@ -324,16 +324,22 @@ class ExecUnitO3(Module):
         """
         if self._declared_suc_pred:
             return
-        # the pair moving to the next stage this cycle: masked on the
-        # spec_overrider, since the record it lands in is written at the edge
-        for spec_ovr in self.spec_overriders:
-            spec_ovr_row = spec_ovr[0]
+        records = getattr(self, "stage_srcs", ())
+        # The pair moving to the next stage this cycle: masked on the
+        # overrider, since the record it lands in is written at the edge.
+        # The guard reads the STAGE SOURCE, never the overrider itself —
+        # overrider k carries stage k's pair, and a guard built from the wire
+        # being driven is a combinational loop.
+        for stage_idx, spec_ovr in enumerate(self.spec_overriders):
+            self._require_stage_record(records, stage_idx, "on_suc_pred")
+            src_row = records[stage_idx][0]
             with priority(PRI_SUC_PRED):
-                with zif(spec_ovr_row.is_spec
-                         & (spec_ovr_row.spec_tag == suc_tag)):
+                with zif(getattr(src_row, IS_SPEC)
+                         & (getattr(src_row, SPEC_TAG) == suc_tag)):
                     spec_ovr[0] *= {IS_SPEC: 0, SPEC_TAG: 0}
 
-        records = getattr(self, "stage_srcs", ())
+        # iterately modify the src, incase it multicycle execution
+
         for stage_idx in range(self.exec_unit.stage_cnt):
             if stage_idx == 0:
                 src = self.rsv.exec_src[self.unit_idx][0]

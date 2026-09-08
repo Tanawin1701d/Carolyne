@@ -68,28 +68,6 @@ class CoreO3(Module):
                                        rename_ports=self.config.fe_lanes,
                                        commit_ports=self.config.commit_lanes)
 
-    # --- the back end -----------------------------------------------------------
-    def _build_back_end(self):
-        """The ROB and the store buffer, then one IssueLane per RsvSpec —
-        its station and the complexes it issues into (issue_lane.py). Commit
-        is the ROB's own flow; the core drives nothing."""
-        self.store_buf = StoreBuf(self.config, self.data_mem)
-        self.rob       = Rob     (self.config, self.reg_arch_mng,
-                                  self.store_buf)
-
-        self.issue_lanes = build_issue_lanes(self.config)
-
-    # --- the back end, read flat ------------------------------------------------
-    @property
-    def rsvs(self):
-        """Every reservation station, in spec order."""
-        return tuple(lane.rsv for lane in self.issue_lanes)
-
-    @property
-    def exus(self):
-        """Every execution complex: each lane's, in unit order."""
-        return tuple(exu for lane in self.issue_lanes for exu in lane.execs)
-
     # --- the front end ----------------------------------------------------------
     def _build_front_end(self):
         """Fetch -> Decode -> Dispatch. `backend_meta` is the arb dispatch's
@@ -101,6 +79,17 @@ class CoreO3(Module):
         self.dispatch     = Dispatch(self.config)
         self.backend_meta = PipCon(name="backend")
         self.backend_meta.no_pip_master()
+
+    # --- the back end -----------------------------------------------------------
+    def _build_back_end(self):
+        """The ROB and the store buffer, then one IssueLane per RsvSpec —
+        its station and the complexes it issues into (issue_lane.py). Commit
+        is the ROB's own flow; the core drives nothing."""
+        self.store_buf = StoreBuf(self.config, self.data_mem)
+        self.rob       = Rob     (self.config, self.reg_arch_mng,
+                                  self.store_buf)
+
+        self.issue_lanes = build_issue_lanes(self.config)
 
     # --- the wiring, all of it in one place -------------------------------------
     def _wire_stages(self):
@@ -114,6 +103,17 @@ class CoreO3(Module):
                               self.rsvs)
         for lane in self.issue_lanes:
             lane.connect(self)          # its station <-> its complexes
+
+    # --- the back end, read flat ------------------------------------------------
+    @property
+    def rsvs(self):
+        """Every reservation station, in spec order."""
+        return tuple(lane.rsv for lane in self.issue_lanes)
+
+    @property
+    def exus(self):
+        """Every execution complex: each lane's, in unit order."""
+        return tuple(exu for lane in self.issue_lanes for exu in lane.execs)
 
     # --- mispredict -------------------------------------------------------------
     def on_mis_pred(self, last_valid_spec_tag_dyn, rob_des_idx_dyn,
