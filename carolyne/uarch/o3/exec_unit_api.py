@@ -128,11 +128,11 @@ class ExecUnitApiO3(ExecUnitApi):
     def lsq_is_full(self):
         return self.exu.lsq_is_full()
 
-    def lsq_push_store(self, mem_addr, data):
-        self.exu.lsq_push_store(self.src, mem_addr, data)
+    def lsq_push_store(self, mem_addr_wo_static_bit, data):
+        self.exu.lsq_push_store(self.src, mem_addr_wo_static_bit, data)
 
-    def lsq_search(self, mem_addr):
-        return self.exu.lsq_search(mem_addr)
+    def lsq_search(self, mem_addr_wo_static_bit):
+        return self.exu.lsq_search(mem_addr_wo_static_bit)
 
-    def mem_read(self, mem_addr):
-        return self.exu.mem_read(mem_addr)
+    def mem_read(self, mem_addr_wo_static_bit):
+        return self.exu.mem_read(mem_addr_wo_static_bit)

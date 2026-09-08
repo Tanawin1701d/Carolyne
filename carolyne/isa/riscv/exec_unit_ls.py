@@ -63,16 +63,16 @@ class LSExecUnit(ExecUnitBase):
         # TODO: an access that SPANS two words is not handled and does not
         # trap — a caller must keep LW/SW 4-byte and LH/LHU/SH 2-byte
         # aligned. See docs/open_items.md.
-        eff_addr      = wire(X_LEN, "ls_eff_addr")
-        eff_addr     *= base + imm
-        word_addr     = eff_addr >> 2
-        byte_bit_off  = (eff_addr & 0b11) << 3             # 0, 8, 16, 24
-        half_bit_off  = (eff_addr & 0b10) << 3             # 0 or 16
+        eff_addr                = wire(X_LEN, "ls_eff_addr")
+        eff_addr               *= base + imm
+        mem_addr_wo_static_bit  = eff_addr >> 2
+        byte_bit_off            = (eff_addr & 0b11) << 3   # 0, 8, 16, 24
+        half_bit_off            = (eff_addr & 0b10) << 3   # 0 or 16
 
         # the newest value of the word: a buffered store beats memory
-        fwd_hit, fwd_data = api.lsq_search(word_addr)
+        fwd_hit, fwd_data = api.lsq_search(mem_addr_wo_static_bit)
         loaded_word  = wire(X_LEN, "ls_loaded_word")
-        loaded_word *= mux(fwd_hit, fwd_data, api.mem_read(word_addr))
+        loaded_word *= mux(fwd_hit, fwd_data, api.mem_read(mem_addr_wo_static_bit))
 
         # a sub-word store merges its bytes into the current word, so the
         # buffer holds full words and forwarding never needs a byte mask
@@ -98,7 +98,7 @@ class LSExecUnit(ExecUnitBase):
                        "byte_bit_off": byte_bit_off,
                        "half_bit_off": half_bit_off}
             with zif(is_st):
-                api.lsq_push_store(word_addr, merged)
+                api.lsq_push_store(mem_addr_wo_static_bit, merged)
         return res
 
     # --- stage 1: extract, extend, write back ---------------------------------

@@ -129,20 +129,20 @@ class ExecUnitApi:
         raise NotImplementedError(
             f"{type(self).__name__}.lsq_is_full: the generator supplies this")
 
-    def lsq_push_store(self, mem_addr, data):
+    def lsq_push_store(self, mem_addr_wo_static_bit, data):
         """An executed store enters the buffer; it is written to memory only
         after the ROB retires it. The engine reads the speculation pair
         off the stage's record itself. Respects the enclosing scope."""
         raise NotImplementedError(
             f"{type(self).__name__}.lsq_push_store: the generator supplies this")
 
-    def lsq_search(self, mem_addr):
+    def lsq_search(self, mem_addr_wo_static_bit):
         """Store-to-load forwarding: (hit, data) of the NEWEST buffered
         store at that word address — newer than memory whenever hit."""
         raise NotImplementedError(
             f"{type(self).__name__}.lsq_search: the generator supplies this")
 
-    def mem_read(self, mem_addr):
+    def mem_read(self, mem_addr_wo_static_bit):
         """The data memory word at that address (combinational read)."""
         raise NotImplementedError(
             f"{type(self).__name__}.mem_read: the generator supplies this")
