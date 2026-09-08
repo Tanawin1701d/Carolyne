@@ -17,15 +17,20 @@
 # complex declares its exec-stage chain's; the core adds only the one nothing
 # else declares: `backend_meta`, which dispatch's granted transfer runs against.
 #
-# The instruction memory is ENVIRONMENT, not the core's: a machine passes it
-# in, the way the eventual SoC will (the reconfigurable-component story).
+# MEMORY IS ENVIRONMENT, and the core takes PORTS rather than memories: one
+# instruction read port per front-end lane, one data read port and one data
+# write port. A machine builds the memories outside and hands the ports in, the
+# way the eventual SoC will (the reconfigurable-component story), so the core
+# names no memory class at all.
+
+from typing import Sequence
 
 from kathryn import *
 
+from carolyne.uarch.mem.common.mem_port import MemPortRead, MemPortWrite
 from carolyne.uarch.o3.config import CPUO3_Config
 from carolyne.uarch.o3.decode import Decode
 from carolyne.uarch.o3.dispatch import Dispatch
-from carolyne.uarch.o3.easy_mem import EasyMem
 from carolyne.uarch.o3.fetch import Fetch
 from carolyne.uarch.o3.issue_lane import build_issue_lanes
 from carolyne.uarch.o3.mpft import Mpft
@@ -39,12 +44,15 @@ class CoreO3(Module):
     """The whole core: every block, built from one config, wired once."""
 
     def __init__(self,
-                 config    : CPUO3_Config,
-                 instr_mem : EasyMem,
-                 data_mem  : EasyMem):
-        self.config          = config
-        self.instr_mem       = instr_mem     # both memories are ENVIRONMENT:
-        self.data_mem        = data_mem      # a machine passes them in
+                 config           : CPUO3_Config,
+                 instr_read_ports : Sequence[MemPortRead],
+                 data_read_port   : MemPortRead,
+                 data_write_port  : MemPortWrite):
+        self.config           = config
+        self.instr_read_ports = tuple(instr_read_ports)   # one per fetch lane
+        self.data_read_port   = data_read_port            # the one load path
+        self.data_write_port  = data_write_port           # the one store path
+        self._check_ports()
         self._mis_pred_built = False         # on_mis_pred is build-once (arb resets)
         self._suc_pred_built = False         # on_suc_pred too (the hold is set-once)
         super().__init__()
@@ -74,7 +82,7 @@ class CoreO3(Module):
         granted transfer runs against; no pip masters it (`no_pip_master`),
         so dispatch's zync is granted the moment it wins arbitration —
         acceptance is `ready_to_go`'s AND, already bound on the zync."""
-        self.fetch        = Fetch(self.config, self.instr_mem)
+        self.fetch        = Fetch(self.config, self.instr_read_ports)
         self.decode       = Decode(self.config)
         self.dispatch     = Dispatch(self.config)
         self.backend_meta = PipCon(name="backend")
@@ -85,7 +93,7 @@ class CoreO3(Module):
         """The ROB and the store buffer, then one IssueLane per RsvSpec —
         its station and the complexes it issues into (issue_lane.py). Commit
         is the ROB's own flow; the core drives nothing."""
-        self.store_buf = StoreBuf(self.config, self.data_mem)
+        self.store_buf = StoreBuf(self.config, self.data_write_port)
         self.rob       = Rob     (self.config, self.reg_arch_mng,
                                   self.store_buf)
 
@@ -208,3 +216,39 @@ class CoreO3(Module):
         # the bookkeepers: the tag goes back to the pool and off the table
         self.tag_gen.on_suc_pred(val(1, 1))
         self.mpft   .on_suc_pred(last_valid_spec_tag_dyn)
+
+    # --- the ports this core was handed ------------------------------------------
+    def _check_ports(self) -> None:
+        """Every port is the kind and the SHAPE this config states.
+
+        A port whose memory was built from other numbers would read a different
+        word than the core thinks it asked for, and nothing downstream could
+        tell.
+        """
+        isa = self.config.isa
+        if len(self.instr_read_ports) != self.config.fe_lanes:
+            raise ValueError(
+                f"CoreO3: needs one instruction read port per front-end lane, "
+                f"got {len(self.instr_read_ports)} for {self.config.fe_lanes}")
+        for lane, port in enumerate(self.instr_read_ports):
+            self._check_port(port, MemPortRead, f"instr_read_ports[{lane}]",
+                             self.config.instr_mem_idx_width, isa.ilen_bytes * 8)
+        self._check_port(self.data_read_port, MemPortRead, "data_read_port",
+                         self.config.data_mem_idx_width, isa.dlen_bytes * 8)
+        self._check_port(self.data_write_port, MemPortWrite, "data_write_port",
+                         self.config.data_mem_idx_width, isa.dlen_bytes * 8)
+
+    @staticmethod
+    def _check_port(port, kind, where: str, idx_width: int, data_bits: int) -> None:
+        if not isinstance(port, kind):
+            raise TypeError(
+                f"CoreO3: {where} must be a {kind.__name__}, "
+                f"got {type(port).__name__}")
+        if port.addr_meta.var_widths != (idx_width,):
+            raise ValueError(
+                f"CoreO3: {where} addresses {port.addr_meta.var_widths}, the "
+                f"config states one region of {idx_width} bits")
+        if port.addr_meta.data_bus_bits != data_bits:
+            raise ValueError(
+                f"CoreO3: {where} moves {port.addr_meta.data_bus_bits} bits, "
+                f"the ISA states {data_bits}")

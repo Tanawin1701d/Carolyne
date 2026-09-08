@@ -38,10 +38,10 @@ class AddrMeta:
             raise ValueError(f"AddrMeta: total_width must be >= 1, got {self.total_width}")
 
     @property
-    def var_width      (self) -> int: return sum(self.var_widths)
+    def total_var_width (self) -> int: return sum(self.var_widths)
     @property
-    def total_width    (self) -> int: return self.var_width + self.zero_width
+    def total_width     (self) -> int: return self.total_var_width + self.zero_width
     @property
-    def data_bus_bytes (self) -> int: return 1 << self.zero_width
+    def data_bus_bytes  (self) -> int: return 1 << self.zero_width
     @property
-    def data_bus_bits  (self) -> int: return self.data_bus_bytes * BYTE_WIDTH
+    def data_bus_bits   (self) -> int: return self.data_bus_bytes * BYTE_WIDTH

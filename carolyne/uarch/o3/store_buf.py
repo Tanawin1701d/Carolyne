@@ -37,16 +37,16 @@
 # then program-older than any load executing after them, which is what makes
 # search_newest's answer THE newest older store.
 
-from kathryn        import *
-from kathryn.signal import to_ref
+from kathryn                            import *
+from kathryn.signal                     import to_ref
 
-from carolyne.uarch.common          import ceil_log2
-from carolyne.uarch.o3.common_field import (BUSY, COMPLETE, DATA, IS_SPEC, MEM_ADDR,
-                                            SEARCH_HIT, SEARCH_PRE_WRAP, SPEC_TAG,
-                                            SpecLane)
-from carolyne.uarch.o3.config       import CPUO3_Config
-from carolyne.uarch.o3.easy_mem     import EasyMem
-from carolyne.uarch.o3.priority     import PRI_MIS_PRED, PRI_SUC_PRED
+from carolyne.uarch.common              import ceil_log2
+from carolyne.uarch.o3.common_field     import (BUSY, COMPLETE, DATA, IS_SPEC, MEM_ADDR,
+                                                SEARCH_HIT, SEARCH_PRE_WRAP, SPEC_TAG,
+                                                SpecLane)
+from carolyne.uarch.o3.config           import CPUO3_Config
+from carolyne.uarch.mem.common.mem_port import MemPortWrite
+from carolyne.uarch.o3.priority         import PRI_MIS_PRED, PRI_SUC_PRED
 
 
 class StBufEntry(Karray):
@@ -61,18 +61,24 @@ class StBufEntry(Karray):
 class StoreBuf(Module):
     """The committed-store queue between the execution unit and memory."""
 
-    def __init__(self, config: CPUO3_Config, data_mem: EasyMem,
+    def __init__(self, config: CPUO3_Config, write_port: MemPortWrite,
                  name: str = "st_buf"):
-        self.config   = config
-        self.data_mem = data_mem
-        self.label    = name
+        if not isinstance(write_port, MemPortWrite):
+            raise TypeError(
+                f"StoreBuf: write_port must be a MemPortWrite, "
+                f"got {type(write_port).__name__}")
+        self.config     = config
+        self.write_port = write_port      # the data memory's one store path
+        self.label      = name
         super().__init__()
 
     @init
     def com_declare(self):
-        depth          = self.config.st_buf_depth
-        self.depth     = depth
-        self.ptr_width = ceil_log2(depth)
+        depth           = self.config.st_buf_depth
+        self.depth      = depth
+        self.ptr_width  = ceil_log2(depth)
+        # Every varying address bit the port carries: what a stored address is.
+        self.addr_width = self.write_port.addr_meta.total_var_width
 
         # One row per entry; the three call-site widths come from the machine
         # and the memory, so one buffer class serves any config:
@@ -84,8 +90,8 @@ class StoreBuf(Module):
         # and its address/data are don't-care until something claims it.
         self.table = StBufEntry(HwComponentType.REG, (depth,), self.label,
                                 spec_tag = self.config.sptag_len,
-                                mem_addr = self.data_mem.index_width,
-                                data     = self.data_mem.data_width)
+                                mem_addr = self.addr_width,
+                                data     = self.write_port.addr_meta.data_bus_bits)
         self.table.reset(busy=0, complete=0, is_spec=0)
 
         # The speculation pair of the store landing THIS cycle, and the place
@@ -95,6 +101,10 @@ class StoreBuf(Module):
         self.spec_overrider = SpecLane(HwComponentType.WIRE, (1,),
                                        f"{self.label}_spec_ovr",
                                        spec_tag=self.config.sptag_len)
+
+        # Retire's own arbiter: always requesting, so the pip keeps offering
+        # the head to memory and the port's handshake decides when it moves.
+        self.retire_meta = PipCon(name=f"{self.label}_retire")
 
         self.alloc_ptr = reg(self.ptr_width, f"{self.label}_alloc_ptr")
         self.alloc_ptr.reset(0)
@@ -150,7 +160,7 @@ class StoreBuf(Module):
         """
         # The caller's address may be wider than the memory's index; the
         # compare runs at the stored width (a write truncates the same way).
-        addr  = wire(self.data_mem.index_width, f"{self.label}_search_addr")
+        addr  = wire(self.addr_width, f"{self.label}_search_addr")
         addr *= mem_addr
 
         def pick_newest(lhs, rhs, level):
@@ -248,11 +258,22 @@ class StoreBuf(Module):
     def run_retire(self):
         """The head's committed store is written to memory, one per cycle.
 
-        StoreBuf's own flow, unconditional: the zif is the gate, so an
-        empty or not-yet-complete head writes nothing and moves nothing.
+        StoreBuf's own flow: an always-requesting pip whose body ZYNCS on the
+        memory's own write port, so the store moves on the port's handshake
+        rather than on a bare condition. A busy memory stalls the head instead
+        of dropping it.
+
+        - the bind is `(PipCon, cond)`: the head's busy & complete gates the
+          REQUEST as well as the grant, so an empty or not-yet-committed head
+          asks for nothing
+        - the address is driven OUTSIDE, taking no gate: it follows the head
+          pointer and commits nothing on its own
         """
         head = self.table[self.ret_ptr]
-        with zif(to_ref(head.busy) & to_ref(head.complete)):
-            self.data_mem.write(0, to_ref(head.mem_addr), to_ref(head.data))
-            self.table[self.ret_ptr] |= {BUSY: 0, COMPLETE  : 0}
-            self.ret_ptr |= self.ret_ptr + 1
+        self.write_port.bind_addr(to_ref(head.mem_addr))
+        ready = to_ref(head.busy) & to_ref(head.complete)
+        with pip(self.retire_meta, auto_req = True, auto_restart = True):
+            with zync((self.write_port.pip_meta, ready)):
+                self.write_port.write(to_ref(head.data))
+                self.table[self.ret_ptr] |= {BUSY: 0, COMPLETE  : 0}
+                self.ret_ptr             |= self.ret_ptr + 1

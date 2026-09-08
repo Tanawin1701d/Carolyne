@@ -11,7 +11,7 @@ from kathryn import (Module, PipCon, build_flow, flow, gen_flow, init, reset,
 
 from carolyne.isa.riscv import Rv32i
 from carolyne.uarch.o3.config import CPUO3_Config, RsvSpec, RsvType
-from carolyne.uarch.o3.easy_mem import EasyMem
+from carolyne.uarch.mem.easy_mem import EasyMem
 from carolyne.uarch.o3.reg_arch_mng import RegArchMng
 from carolyne.uarch.o3.rob import Rob
 from carolyne.uarch.o3.rob_helper import build_rob_dispatch
@@ -22,8 +22,11 @@ X   = ISA.reg_file("x")
 
 
 def _store_buf(cfg):
-    """A ROB needs one: a store is written to memory only when commit says so."""
-    return StoreBuf(cfg, EasyMem(blk_request=1))
+    """A ROB needs one: a store is written to memory only when commit says so.
+
+    The buffer takes the data memory's WRITE PORT, not the memory itself.
+    """
+    return StoreBuf(cfg, EasyMem(*cfg.data_mem_spec()).add_write_port(0, "store"))
 
 
 # One unit per station: an in-order station may feed only one (config.RsvSpec).

@@ -204,18 +204,36 @@ class ExecUnitO3(Module):
     def lsq_is_full(self):
         return self._core.store_buf.is_full()
 
-    def lsq_push_store(self, src, mem_addr, data):
+    def mem_index(self, mem_addr_wo_static_bit):
+        """A body's address, cut to the index the data memory has.
+
+        `_wo_static_bit`: the body has already dropped the low bits an aligned
+        access holds at zero (AddrMeta's zero part), so what arrives counts
+        WORDS. A body computes in the ISA's own width and cannot know how big
+        the machine's memory is, so the engine takes the low bits from there —
+        a slice, not a mask: a part-select costs nothing.
+        """
+        width = self._core.data_read_port.addr_meta.total_var_width
+        return to_ref(mem_addr_wo_static_bit)[width - 1, 0]
+
+    def lsq_push_store(self, src, mem_addr_wo_static_bit, data):
         # The speculation pair is in the stage record; the engine reads it,
         # so a body cannot push a store that forgets its tags.
         self._core.store_buf.on_new_entry(to_ref(getattr(src[0], IS_SPEC)),
                                           to_ref(getattr(src[0], SPEC_TAG)),
-                                          mem_addr, data)
+                                          self.mem_index(mem_addr_wo_static_bit),
+                                          data)
 
-    def lsq_search(self, mem_addr):
-        return self._core.store_buf.search_newest(mem_addr)
+    def lsq_search(self, mem_addr_wo_static_bit):
+        return self._core.store_buf.search_newest(
+            self.mem_index(mem_addr_wo_static_bit))
 
-    def mem_read(self, mem_addr):
-        return self._core.data_mem.read(0, mem_addr)
+    def mem_read(self, mem_addr_wo_static_bit):
+        # The core's one load path: drive its index here, in the body's own
+        # scope, and read the word back in the same cycle (PortTiming.LEVEL).
+        port = self._core.data_read_port
+        port.bind_addr(self.mem_index(mem_addr_wo_static_bit))
+        return port.read()
 
     # --- the stage chain ----------------------------------------------------------
     @flow
