@@ -62,6 +62,28 @@ class MemPortBase:
             raise ValueError(
                 f"{where}: timing must be a PortTiming, got {type(self.timing).__name__}")
 
+    def bind_addr(self, *values) -> None:
+        """Drive every address region, one value per region, high region first.
+
+        - each value is held to ITS region's width: a signal exactly that wide,
+          an int that fits
+        - always a combinational drive: `timing` says when the DATA moves, and
+          an address is presented in the cycle it is asked
+        - fires in the CALLER's scope, so a bind inside a zync takes its grant
+        """
+        where  = type(self).__name__
+        widths = self.addr_meta.var_widths
+        if len(values) != len(widths):
+            raise ValueError(
+                f"{where}: bind_addr needs one value per var region, got "
+                f"{len(values)} for {len(widths)}")
+        for region, (value, width) in enumerate(zip(values, widths)):
+            check_source_width(value, width, f"{where}: bind_addr[{region}]")
+            # `*=` REBINDS the name it is written on, so the source is taken
+            # into a local: a port is frozen and its sources are a tuple.
+            src  = self.addr_srcs[region]
+            src *= value
+
 
 @dataclass(frozen=True, eq=False)
 class MemPortRead(MemPortBase):
@@ -74,6 +96,13 @@ class MemPortRead(MemPortBase):
         if self.data is not None:
             check_data_width(self.data, self.addr_meta, f"{type(self).__name__}: data")
 
+    def read(self) -> SignalRef:
+        """The value this port returns, for a caller that must have one."""
+        if self.data is None:
+            raise ValueError(
+                "MemPortRead: this port returns no data — another port returns the value")
+        return self.data
+
 
 @dataclass(frozen=True, eq=False)
 class MemPortWrite(MemPortBase):
@@ -82,3 +111,18 @@ class MemPortWrite(MemPortBase):
     def __post_init__(self) -> None:
         super().__post_init__()
         check_data_width(self.data, self.addr_meta, f"{type(self).__name__}: data")
+
+    def write(self, value) -> None:
+        """Drive the value with the assign this port's timing calls for.
+
+        - NEXT_EDGE: a clocked assign, the only kind a memory element takes
+        - LEVEL: a combinational assign, for a port whose data is a wire
+        - fires in the CALLER's scope, so a write inside a zync takes its grant
+        """
+        # `|=` and `*=` REBIND the name they are written on, and a port is
+        # frozen, so the handle is read into a local first.
+        data = self.data
+        if self.timing is PortTiming.NEXT_EDGE:
+            data |= value
+        else:
+            data *= value

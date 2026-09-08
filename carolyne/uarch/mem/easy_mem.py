@@ -79,7 +79,7 @@ class EasyMem(MemBase):
         return MemPortRead(self.addr_meta, (index,), meta, PortTiming.LEVEL, data)
 
     def gen_write_port(self, bank: int, name: Optional[str] = None) -> MemPortWrite:
-        """One write port on one bank: the requestor drives the element itself."""
+        """One write port on one bank: taken this cycle, landing on the edge."""
         label = name or f"wr{len(self.write_ports)}"
         self._claim_write_bank(bank, label)
         index, meta = self._gen_port_parts(label)
@@ -88,7 +88,9 @@ class EasyMem(MemBase):
         # memory needs no enable of its own.
         data = mem_ele(self._bank(bank, label), index,
                        self.addr_meta.data_bus_bits, False, f"{label}_data")
-        return MemPortWrite(self.addr_meta, (index,), meta, PortTiming.LEVEL, data)
+        # NEXT_EDGE: a memory element takes the clocked assign and no other, so
+        # the request is taken this cycle and the value lands at the edge.
+        return MemPortWrite(self.addr_meta, (index,), meta, PortTiming.NEXT_EDGE, data)
 
     # --- the parts a port gathers --------------------------------------------
 
