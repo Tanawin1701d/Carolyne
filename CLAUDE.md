@@ -1985,6 +1985,76 @@ than the commit row. `Rt.on_rename` had the same confusion between
 `temp_commit` and `temp_dispatch`; repaired 2026-08-26 when `update_rts`
 became its first caller — see the tag_gen/dispatch entry above.
 
+**`examples/o3_riscv32/compile_tool/`** (2026-09-09) — C sources to two memory
+images, with no operating system: the RIDECORE memgen flow studied on
+2026-09-08 (`research/ridecore-baremetal-flow.html`), rebuilt on Carolyne's own
+descriptions. Phase 1 of three; nothing runs yet.
+
+Decision: **`MemoryLayout` is DERIVED from the `CPUO3_Config`**, never stated
+beside it — `from_config` reads `instr_mem_spec()`/`data_mem_spec()`, the same
+calls the hardware sizes itself from, so the bank count and the memory sizes
+cannot drift from the RTL. FIVE consumers read that one object (the linker
+script, the C header, the image writer, the reference model, the simulation
+harness), which is what keeps an address from being written down twice. The
+user states memory sizes in BYTES; `machine.idx_width_for` is the one place
+that becomes an index width, so no caller computes `log2` by hand.
+
+Decision: **the two regions have DISTINCT bases** — code at `0x00000000`, data
+at `0x10000000` — where RIDECORE loads ONE image into BOTH memories at address
+0. Carolyne's memories are separate hardware, so one image each was the ask,
+and distinct bases make the ELF and the disassembly readable. The base costs
+nothing: `ExecUnitApiO3.mem_index` part-selects the word index down to
+`data_mem_idx_width` bits, so a base that is a multiple of the memory size is
+truncated away before the memory sees it. `0x10000000` and NOT `0x80000000`: a
+pc-relative pair (`auipc`+`addi`, what `la` and `call` assemble to) reaches
+±2GB, and `0x80000000` is exactly that far from the code region at 0 — the edge
+of the range.
+
+Decision: **`.rodata` goes to the DATA memory**, not beside the code. It is
+read-only, so a single-memory linker script puts it in the text segment — and
+here a load reads the DATA memory, so every string literal would come back as
+an instruction word. The linker script's split is by WHO READS IT, not by
+writability.
+
+Decision: **the build holds every instruction to the ISA description**
+(`verify.py`): each executable word is decoded with `group_uops_by_level(isa)`
+and `match_field_bits` — the REAL functions the hardware decoder uses, on their
+int path — so the build asks exactly the question the silicon will. Zero
+matches or two both fail, naming the address and the encoding. That is what
+makes `-march=rv32im` safe to OFFER before the description has multiply µops.
+MEASURED: a program with a volatile multiply fails at `0x000000ac 02e787b3`
+(`mul a5,a5,a4`) under rv32im, and the same source builds under rv32i through
+libgcc's `__mulsi3`. A `decode_py.py` copy of `group_uops_by_level` was planned
+and NOT written — the real one imports and runs with no arena, so reusing it
+keeps ONE definition; don't add the copy.
+
+Decision: **the I/O words are the top 16 bytes of the data region, watched by
+the harness**, with no decode logic in the machine — RIDECORE's arrangement, and
+the only exit that works while `ECALL`/`EBREAK` retire like any instruction.
+The generated header spells each door as a volatile pointer CONSTANT
+(`*(volatile unsigned int *)0x10000ff0u`) where RIDECORE uses a
+`volatile const unsigned int` variable HOLDING the address — that costs an extra
+`lw` before every store. MEASURED: the linker then relaxes the stores to
+gp-relative single instructions, since `__global_pointer$` lands within ±2048 of
+the doors. `crt0.S` states no address of its own: `__mmio_exit` and
+`__stack_top` reach assembly as linker symbols from the same generated script.
+
+Decision: **`-mstrict-align` is not a preference** — a misaligned access is
+silently wrong (`docs/open_items.md`), so the compiler must never emit one.
+`-ffreestanding` for the same reason in the other direction; LIMIT: GCC may
+still call `memcpy` for a large struct copy, which surfaces as an undefined
+reference at link time rather than as bad hardware.
+
+FOUND ON THE WAY, and worth recording because CLAUDE.md had never claimed it:
+**the whole machine emits AND compiles.** `emit_verilog` on `Rv32iO3Machine`
+takes 4.7 s and writes 23 modules (~10 MB, `MODULE_CoreO30_34.v` alone 1.5 MB),
+and `iverilog -g2012` accepts the result with no warnings. Only individual
+blocks had ever been emitted before.
+
+Also 2026-09-09: a root **`conftest.py`** puts the repo root on `sys.path`, so a
+test can import `examples.*` — pyproject discovers `carolyne*` only, so
+`examples/` is deliberately not installed and cannot be reached otherwise.
+
 NEXT UP — the function unit, designed 2026-08-19. Step 1 (the declared port
 shape above) and step 2 (`ExecContext` + `AluUnit` + the fake-context test,
 2026-08-22 — see the `exec_context.py` entry above) are done:
