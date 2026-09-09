@@ -1985,6 +1985,66 @@ than the commit row. `Rt.on_rename` had the same confusion between
 `temp_commit` and `temp_dispatch`; repaired 2026-08-26 when `update_rts`
 became its first caller — see the tag_gen/dispatch entry above.
 
+**FETCH ROTATES, AND A LANE IS NO LONGER A BANK** (2026-09-09, Tanawin) — the
+front end's alignment LIMIT is CLOSED, not worked around.
+
+The old shape bound lane k to bank k at elaboration and drove ONE index for
+every lane, so the index named the fetch GROUP while the recorded pcs counted
+on from the pc itself: a pc part-way into a group put the group's first words
+on lanes that claimed later addresses. Compiled C branches to 4-byte targets
+constantly, so this was not a corner case.
+
+Decision: **a port belongs to a BANK, and the stage rotates.** With `start` the
+bank holding the pc's own word and `group` its index, lane L reads bank
+`(start + L) % banks` — one mux per lane — and bank b reads
+`group + (b < start)` — one compare per bank. A bank BELOW the start bank was
+wrapped to, so it serves the NEXT group, which is the whole reason every bank
+now drives its own index instead of sharing one. Lane L's stamp is then plainly
+`pc + L * ilen` for ANY aligned pc. Rejected: the earlier plan's align-down plus
+leading-lane invalidation, which kept the wrong-word bug's cure (drop the early
+lanes) rather than its cause, and threw away fetch bandwidth on every redirect.
+`start_bank()` answers **None** at one bank rather than a constant zero — a
+zero-width slice is what a naive rotation builds there — and every caller then
+skips its logic instead of comparing against a constant. MEASURED: the whole
+machine emits and `iverilog` accepts it at fe_lanes 1, 2 and 4.
+
+Decision: **`FetchEntryBase` gains a per-lane `valid`**, REVERSING the
+`fetch_helper.py` header's "NO valid bit: a lane's occupancy is the fetch
+stage's pip grant". That reasoning holds for whole-stage occupancy and cannot
+express a PARTIAL group — a grant says the stage moved, not that three banks
+answered and the fourth did not. `tests/test_fetch.py`'s
+`test_the_record_carries_no_valid_bit` was inverted with it; the table now
+`reset(valid=0)` because decode reads the bit before fetch has written one.
+Decision: the bit is a **LEADING RUN** — lane L counts only if it and every
+lower lane answered — and **the pc advances by `sum_cnt(taken)`**, so a bank
+that cannot serve costs bandwidth and can never SKIP an instruction. Carrying
+the bit without the pc honouring it was rejected as silent wrong hardware the
+day a conflict happens. `Decode.mop_decode` wraps its parallel zifs in
+`zif(fetch[lane].valid)`, so an unanswered lane matches nothing and
+`write_lane_default`'s valid=0 stands. Bank count is held EQUAL to lane count
+(`Fetch._reject_bad_ports`): fewer banks means two lanes want one bank, which is
+the conflict case no memory here can report yet.
+
+Decision: **`MemPortReadValid`** (`mem/common/mem_port.py`) is how a memory
+reports it — a subclass of `MemPortRead` carrying a `valid` beside `data`,
+required at construction. Separate from the PipCon on purpose: the arbiter says
+whether the memory may be ASKED, this says whether ONE answer among several came
+back. EasyMem drives one shared always-1 wire, and `Fetch.lane_pick` builds no
+mux at all when every bank offers the same handle, so today's rotation costs
+nothing for validity.
+
+**THE READ LOCK** (2026-09-09, Tanawin) — `EasyMem.read_ready`, a 1-bit reg
+reset to **0**, masters every READ port's arb through `set_master_ack` where the
+ports used to call `no_pip_master()`. Locked at power-up, so no read is ever
+granted and a core whose fetch zyncs on those ports simply does not start.
+WRITE ports keep `no_pip_master()` — filling the memory is exactly what the lock
+waits for, so a write must never be held. That is the mechanism for loading a
+program: write the image in, then release. Decision: released **two ways** — a
+simulation deposits 1 into `read_ready` (a public reg, so it reaches the sim
+manifest), and hardware calls `release_read_on(cond)`, set-once, which drives it
+from a condition. `no_pip_master()` and `set_master_ack()` write the same
+set-once slot in the arb, so this is a replacement rather than an addition.
+
 **`examples/o3_riscv32/compile_tool/`** (2026-09-09) — C sources to two memory
 images, with no operating system: the RIDECORE memgen flow studied on
 2026-09-08 (`research/ridecore-baremetal-flow.html`), rebuilt on Carolyne's own

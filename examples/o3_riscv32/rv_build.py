@@ -37,12 +37,13 @@ class Rv32iO3Machine(Module):
         self.instr_mem = EasyMem(*self.config.instr_mem_spec())
         self.data_mem  = EasyMem(*self.config.data_mem_spec())
 
-        # One instruction read port per lane, bound to the lane's own bank.
-        instr_ports = [self.instr_mem.add_read_port(lane, f"fetch{lane}")
+        # ONE PORT PER LANE. A port names its bank as part of the address, so
+        # the memory routes the access and fetch states only a byte address.
+        instr_ports = [self.instr_mem.add_read_port(f"lane{lane}")
                        for lane in range(self.config.fe_lanes)]
         # The data memory's two paths: the LS unit loads, the store buffer stores.
-        data_read  = self.data_mem.add_read_port (0, "load")
-        data_write = self.data_mem.add_write_port(0, "store")
+        data_read  = self.data_mem.add_read_port ("load")
+        data_write = self.data_mem.add_write_port("store")
 
         self.core = CoreO3(self.config, instr_ports, data_read, data_write)
 

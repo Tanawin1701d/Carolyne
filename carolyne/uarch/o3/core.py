@@ -230,24 +230,35 @@ class CoreO3(Module):
             raise ValueError(
                 f"CoreO3: needs one instruction read port per front-end lane, "
                 f"got {len(self.instr_read_ports)} for {self.config.fe_lanes}")
+        # A banked memory states its bank as a SECOND address region, so the
+        # shape a port must have follows the bank count the config asked for.
+        instr_regions = self._regions(self.config.instr_mem_idx_width,
+                                      self.config.instr_bank_bits)
+        data_regions  = self._regions(self.config.data_mem_idx_width, 0)
+
         for lane, port in enumerate(self.instr_read_ports):
             self._check_port(port, MemPortRead, f"instr_read_ports[{lane}]",
-                             self.config.instr_mem_idx_width, isa.ilen_bytes * 8)
+                             instr_regions, isa.ilen_bytes * 8)
         self._check_port(self.data_read_port, MemPortRead, "data_read_port",
-                         self.config.data_mem_idx_width, isa.dlen_bytes * 8)
+                         data_regions, isa.dlen_bytes * 8)
         self._check_port(self.data_write_port, MemPortWrite, "data_write_port",
-                         self.config.data_mem_idx_width, isa.dlen_bytes * 8)
+                         data_regions, isa.dlen_bytes * 8)
 
     @staticmethod
-    def _check_port(port, kind, where: str, idx_width: int, data_bits: int) -> None:
+    def _regions(idx_width: int, bank_bits: int) -> tuple:
+        """The address regions a memory of this shape states, high first."""
+        return (idx_width,) if not bank_bits else (idx_width, bank_bits)
+
+    @staticmethod
+    def _check_port(port, kind, where: str, regions: tuple, data_bits: int) -> None:
         if not isinstance(port, kind):
             raise TypeError(
                 f"CoreO3: {where} must be a {kind.__name__}, "
                 f"got {type(port).__name__}")
-        if port.addr_meta.var_widths != (idx_width,):
+        if port.addr_meta.var_widths != regions:
             raise ValueError(
                 f"CoreO3: {where} addresses {port.addr_meta.var_widths}, the "
-                f"config states one region of {idx_width} bits")
+                f"config states {regions}")
         if port.addr_meta.data_bus_bits != data_bits:
             raise ValueError(
                 f"CoreO3: {where} moves {port.addr_meta.data_bus_bits} bits, "

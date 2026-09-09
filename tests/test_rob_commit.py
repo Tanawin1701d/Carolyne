@@ -26,7 +26,7 @@ def _store_buf(cfg):
 
     The buffer takes the data memory's WRITE PORT, not the memory itself.
     """
-    return StoreBuf(cfg, EasyMem(*cfg.data_mem_spec()).add_write_port(0, "store"))
+    return StoreBuf(cfg, EasyMem(*cfg.data_mem_spec()).add_write_port("store"))
 
 
 # One unit per station: an in-order station may feed only one (config.RsvSpec).

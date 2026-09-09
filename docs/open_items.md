@@ -29,3 +29,24 @@ here; a decision already made and recorded goes in CLAUDE.md §4, not here.
       keep every access naturally aligned.
       *Closes when:* either a misalignment detect that traps (blocked on trap
       policy), or a two-word read + concatenate for spanning accesses.
+
+---
+
+## Memory
+
+- [ ] **EasyMem's bank routing is unreviewed and never simulated.** The bank
+      became part of the address on 2026-09-09, so the memory now routes: each
+      bank takes its index from the port that named it, each port reads back
+      the bank it named, and a port that loses a contested bank reports
+      `valid = 0`. Writes gained an `enable`, because a memory that routes a
+      write cannot tell from the data wire alone that one happened.
+      The whole machine ELABORATES and `iverilog` compiles it at 1, 2 and 4
+      lanes, and 257 tests pass — but every one of those is an elaboration
+      test. **No cycle of this has ever run.** Nothing has shown that a port
+      reads the bank it named, that the conflict priority is the one intended,
+      or that a routed write lands in the right bank.
+      *Where:* `uarch/mem/easy_mem.py` (`route_access` and its helpers), with
+      `uarch/mem/common/mem_port.py` (`bind_byte_addr`, the write `enable`).
+      *Status:* TODO — the design was agreed, the code is not reviewed.
+      *Closes when:* someone reads it, and a simulation drives two ports at one
+      bank and checks the winner's data and the loser's `valid`.

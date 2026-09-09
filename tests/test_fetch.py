@@ -92,10 +92,13 @@ def test_neither_width_has_a_default():
     Host()
 
 
-def test_the_record_carries_no_valid_bit():
-    # A lane's occupancy is the fetch stage's pip grant; a field beside it
-    # would be a second answer to one question.
+def test_the_record_carries_a_valid_bit_per_lane():
+    # The stage's pip grant cannot say this: a grant means the whole stage
+    # moved, not that three banks answered and the fourth did not. Fetch
+    # rotates lanes across banks, so a memory that arbitrates them leaves one
+    # lane without a word while its neighbours have theirs — which only a bit
+    # per lane can carry.
     cfg  = _cfg()
     host = _build(cfg)
 
-    assert not _has_field(host.table, "valid")
+    assert _has_field(host.table, "valid")

@@ -62,6 +62,18 @@ class MemPortBase:
             raise ValueError(
                 f"{where}: timing must be a PortTiming, got {type(self.timing).__name__}")
 
+    def bind_byte_addr(self, byte_addr) -> None:
+        """Drive every region from ONE byte address, split by the shape.
+
+        The regions stack straight onto the zero part, so each is a plain
+        part-select: a caller states an address once instead of cutting it up.
+        """
+        low, parts = self.addr_meta.zero_width, []
+        for width in reversed(self.addr_meta.var_widths):
+            parts.append(byte_addr[low + width - 1, low])
+            low += width
+        self.bind_addr(*reversed(parts))
+
     def bind_addr(self, *values) -> None:
         """Drive every address region, one value per region, high region first.
 
@@ -105,24 +117,52 @@ class MemPortRead(MemPortBase):
 
 
 @dataclass(frozen=True, eq=False)
+class MemPortReadValid(MemPortRead):
+    """A read port that also reports whether this cycle's answer is real.
+
+    - a memory that always serves drives 1; one that arbitrates banks drives 0
+      for the port it could not serve, and the requestor drops that answer
+    - not the arbiter's job: the PipCon says whether the memory may be ASKED,
+      this says whether one answer among several came back
+    """
+    valid : Optional[SignalRef] = None
+
+    def __post_init__(self) -> None:
+        super().__post_init__()
+        if self.valid is None:
+            raise ValueError(
+                f"{type(self).__name__}: valid is required — a port of this "
+                f"kind exists to report it")
+
+    def read_valid(self) -> SignalRef:
+        """The bit saying this cycle's `data` is a real answer."""
+        return self.valid
+
+
+@dataclass(frozen=True, eq=False)
 class MemPortWrite(MemPortBase):
-    data : SignalRef            # where the value COMES FROM: the memory reads it
+    data   : SignalRef                      # where the value COMES FROM
+    enable : Optional[SignalRef] = None     # set when the memory routes the write
 
     def __post_init__(self) -> None:
         super().__post_init__()
         check_data_width(self.data, self.addr_meta, f"{type(self).__name__}: data")
 
     def write(self, value) -> None:
-        """Drive the value with the assign this port's timing calls for.
+        """Drive the value, and say a write happened.
 
-        - NEXT_EDGE: a clocked assign, the only kind a memory element takes
-        - LEVEL: a combinational assign, for a port whose data is a wire
+        - `enable` is what tells a memory that must ROUTE the write that this
+          cycle is one: the data wire alone cannot, since it holds a value
+          either way
         - fires in the CALLER's scope, so a write inside a zync takes its grant
         """
         # `|=` and `*=` REBIND the name they are written on, and a port is
         # frozen, so the handle is read into a local first.
         data = self.data
-        if self.timing is PortTiming.NEXT_EDGE:
+        if self.timing is PortTiming.NEXT_EDGE and self.enable is None:
             data |= value
         else:
             data *= value
+        if self.enable is not None:
+            enable  = self.enable
+            enable *= 1

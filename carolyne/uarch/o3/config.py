@@ -379,6 +379,20 @@ class CPUO3_Config:
         return ceil_log2(len(self.isa.uops))
 
     # --- memory shape ---------------------------------------------------------
+    # A pc splits into the instruction memory's address, high bits first:
+    #     | instr_mem_idx_width | instr_bank_bits | instr_byte_bits |
+    # Fetch reads all three — the bank bits name the bank holding the pc's own
+    # word, and the index bits name where in that bank it is.
+    @property
+    def instr_byte_bits(self) -> int:
+        """Bits below one instruction word: the byte offset inside it."""
+        return ceil_log2(self.isa.ilen_bytes)
+
+    @property
+    def instr_bank_bits(self) -> int:
+        """Bits naming one instruction memory bank — one bank per fetch lane."""
+        return ceil_log2(self.fe_lanes)
+
     def instr_mem_spec(self) -> MemSpec:
         """The instruction memory: ONE BANK PER FRONT-END LANE.
 

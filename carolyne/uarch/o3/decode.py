@@ -150,16 +150,19 @@ class Decode(Module):
 
         - one INDEPENDENT zif per (mop, uop_seq) alive at this level — the
           encodings are mutually exclusive, so no chain and no priority
+        - all of it is under the lane's `valid`: a lane whose bank did not
+          answer has no word, so write_lane_default's valid=0 stands
         - call it inside the level's zync, beside write_lane_default
         """
         word = to_ref(fetch_entry.instr)
-        for matchers, uop in self.levels[level]:
-            hit = None
-            for field, value in matchers:
-                compare = match_field_bits(word, field, value)
-                hit     = compare if hit is None else hit & compare
-            with zif(hit):
-                self.uop_decode(uop, lane, fetch_entry, decode_entry)
+        with zif(to_ref(fetch_entry.valid)):
+            for matchers, uop in self.levels[level]:
+                hit = None
+                for field, value in matchers:
+                    compare = match_field_bits(word, field, value)
+                    hit     = compare if hit is None else hit & compare
+                with zif(hit):
+                    self.uop_decode(uop, lane, fetch_entry, decode_entry)
 
     def uop_decode(self,
                    uop         : Uop,
