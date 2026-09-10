@@ -1,20 +1,20 @@
 # EASY MEM — banked storage that answers in the cycle it is asked.
 #
-# TODO: NOT REVIEWED. The bank routing here — the crossbar, the conflict rule
-# that drives `valid`, and the write enable — was written on 2026-09-09 and has
-# only been ELABORATED and compiled. No test has run a single cycle of it, so
-# nothing has yet shown that a port reads the bank it named or that a loser
-# reports 0. Read it before trusting it.
+# TODO: NOT REVIEWED. The bank routing here — the read crossbar, the conflict
+# rule that drives `valid`, and the write enable — was rewritten as dual-port
+# banks on 2026-09-10 and has only been ELABORATED and compiled. No test has
+# run a single cycle of it, so nothing has yet shown that a port reads the bank
+# it named or that a loser reports 0. Read it before trusting it.
 #
 # THE BANK IS PART OF THE ADDRESS, not part of the port. A port names a bank
 # per access, so a requestor states one address and this memory routes it:
 #
 #   | index | bank | zero |      AddrMeta's regions, high first
 #
-# A BANK SERVES ONE ACCESS PER CYCLE — that is what a bank is. So the routing
-# is a real crossbar: each bank takes its index from the port that named it,
-# and each port reads back the bank it named. Two ports naming one bank is a
-# CONFLICT; the lower-numbered one wins and the other's `valid` reads 0.
+# EACH BANK IS DUAL PORT — one read and one write a cycle, each with its own
+# index — so a read and a write never conflict. Two READ ports naming one bank
+# do: the lower-numbered one is served and the other's `valid` reads 0. There
+# is ONE write port, and it reaches every bank, so writes never conflict.
 #
 # A port is built WHEN IT IS ASKED FOR — there is no port count. A requestor
 # calls add_read_port / add_write_port at any time and gets back the wires it
@@ -86,18 +86,21 @@ class EasyMem(MemBase):
         self.banks = [mem_blk(data_bits, self.index_width, f"bank{bank_id}")
                       for bank_id in range(self.bank_cnt)]
 
-        # ONE access per bank. The index is driven by the routing, so it is a
-        # wire here and the element reads whatever the winner asked for.
-        self.vary_index_4_phy_bank = [wire(self.index_width,
-                                           f"vary_index_4_phy_bank{bank_id}")
-                                      for bank_id in range(self.bank_cnt)]
+        # DUAL PORT per bank: the read and the write each get their own index,
+        # driven by the routing, so each is a wire the element follows.
+        self.read_vary_index_4_phy_bank  = [
+            wire(self.index_width, f"read_vary_index_4_phy_bank{bank_id}")
+            for bank_id in range(self.bank_cnt)]
+        self.write_vary_index_4_phy_bank = [
+            wire(self.index_width, f"write_vary_index_4_phy_bank{bank_id}")
+            for bank_id in range(self.bank_cnt)]
 
         self.bank_data  = [mem_ele(self.banks[bank_id],
-                                   self.vary_index_4_phy_bank[bank_id],
+                                   self.read_vary_index_4_phy_bank[bank_id],
                                    data_bits, True, f"bank{bank_id}_out")
                            for bank_id in range(self.bank_cnt)]
         self.bank_write = [mem_ele(self.banks[bank_id],
-                                   self.vary_index_4_phy_bank[bank_id],
+                                   self.write_vary_index_4_phy_bank[bank_id],
                                    data_bits, False, f"bank{bank_id}_in")
                            for bank_id in range(self.bank_cnt)]
 
@@ -137,9 +140,9 @@ class EasyMem(MemBase):
     def gen_write_port(self, name: Optional[str] = None) -> MemPortWrite:
         """One write port: taken this cycle, landing on the edge.
 
-        Only ONE when banked. A single port reaches every bank at runtime, and
-        a second would need an arbiter that could DROP a write — which is lost
-        data, where a dropped read is only a stalled requestor.
+        Only ONE. Each bank has one write port and this one reaches every
+        bank, so a second could name the same bank — and a dropped write is
+        lost data, where a dropped read is only a stalled requestor.
         """
         self._reject_second_writer(name)
         label           = name or f"wr{len(self.write_ports)}"
@@ -159,10 +162,11 @@ class EasyMem(MemBase):
                             parts["enable"])
 
     def _reject_second_writer(self, name) -> None:
-        if self.bank_cnt > 1 and self.write_ports:
+        if self.write_ports:
             raise ValueError(
-                f"EasyMem: a banked memory takes ONE write port — it already "
-                f"reaches every bank — and '{name}' would be the second")
+                f"EasyMem: takes ONE write port — each bank has one, and this "
+                f"port already reaches every bank — and '{name}' would be the "
+                f"second")
 
     def _gen_port_parts(self, label: str) -> dict:
         # What every port gathers: one address wire per region, and a bare
@@ -180,11 +184,7 @@ class EasyMem(MemBase):
 
     @flow
     def route_access(self):
-        """Give every bank its winner's index, and every port its bank's data.
-
-        Reads and writes share the bank index, so a write is routed by naming
-        the same bank a read would.
-        """
+        """Drive each bank's read and write port, then answer every read."""
         if self._read_release is not None:
             with zif(self._read_release):
                 self.read_ready |= 1
@@ -192,7 +192,7 @@ class EasyMem(MemBase):
         # Every wire has ONE driver — two would resolve by priority, not by
         # statement order — so the loops split by wire: banks, then read ports.
         for bank_id in range(self.bank_cnt):     # address: port -> bank
-            self._drive_vary_index_4_phy_bank(bank_id)
+            self._drive_read_vary_index_4_phy_bank(bank_id)
             self._drive_bank_write(bank_id)
         for port in self._reads:                 # data:    bank -> port
             self._drive_read_answer(port)
@@ -203,46 +203,44 @@ class EasyMem(MemBase):
             return val(1, 1)
         return port["bank"] == bank_id
 
-    def _drive_vary_index_4_phy_bank(self, bank_id: int) -> None:
-        # The bank reads what the winning port asked for. Later ports override
-        # nothing: the mux chain keeps the FIRST one that named this bank.
+    def _drive_read_vary_index_4_phy_bank(self, bank_id: int) -> None:
+        # The bank's read port takes the index of the LOWEST-numbered read that
+        # named it: the mux chain is built from the top down, so that read is
+        # the outermost mux.
         chosen = None
         for port in reversed(self._reads):
             chosen = (port["index"] if chosen is None
                       else mux(self._match_bank(port, bank_id),
                                port["index"], chosen))
-        for port in self._writes:                   # a write claims it outright
-            chosen = (port["index"] if chosen is None else
-                      mux(self._match_bank(port, bank_id) & port["enable"],
-                          port["index"], chosen))
         if chosen is not None:
-            self.vary_index_4_phy_bank[bank_id] *= chosen
+            self.read_vary_index_4_phy_bank[bank_id] *= chosen
 
     def _drive_bank_write(self, bank_id: int) -> None:
-        for port in self._writes:
-            with zif(self._match_bank(port, bank_id) & port["enable"]):
-                self.bank_write[bank_id] |= port["data"]
+        """The bank's write port: the writer's index, and its data when it
+        named this bank."""
+        if not self._writes:
+            return
+        writer = self._writes[0]                    # there is only ever one
+        self.write_vary_index_4_phy_bank[bank_id] *= writer["index"]
+        with zif(self._match_bank(writer, bank_id) & writer["enable"]):
+            self.bank_write[bank_id] |= writer["data"]
 
     def _drive_read_answer(self, port: dict) -> None:
-        # The port reads back the bank it named, and is valid unless a
-        # lower-numbered port took that bank first.
+        # The port reads back the bank it named.
         picked = self.bank_data[0]
         for bank_id in range(1, self.bank_cnt):
             picked = mux(self._match_bank(port, bank_id),
                          self.bank_data[bank_id], picked)
         port["data"] *= picked
 
-        # A bank has ONE index, so a read loses it to any lower-numbered read
-        # and to a write — the losers say so instead of returning that other
-        # access's word.
+        # A bank's read port serves ONE read a cycle, so this read is invalid
+        # when a lower-numbered read named the same bank. A write never blocks
+        # it: the write has a port of its own.
         blocked = None
         for other in self._reads:
             if other is port:
                 break
             blocked = self._or(blocked, self._same_bank(port, other))
-        for writer in self._writes:
-            blocked = self._or(blocked,
-                               self._same_bank(port, writer) & writer["enable"])
         port["valid"] *= val(1, 1) if blocked is None else ~blocked
 
     @staticmethod

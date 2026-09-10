@@ -35,13 +35,14 @@ here; a decision already made and recorded goes in CLAUDE.md §4, not here.
 ## Memory
 
 - [ ] **EasyMem's bank routing is unreviewed and never simulated.** The bank
-      became part of the address on 2026-09-09, so the memory now routes: each
-      bank takes its index from the port that named it, each port reads back
-      the bank it named, and a port that loses a contested bank reports
-      `valid = 0`. Writes gained an `enable`, because a memory that routes a
-      write cannot tell from the data wire alone that one happened.
+      became part of the address on 2026-09-09 and every bank became dual
+      port (1R1W) on 2026-09-10, so the memory now routes: each bank's read
+      port takes its index from the lowest-numbered read that named it, its
+      write port from the one writer, and a read that loses a contested bank
+      reports `valid = 0`. Writes gained an `enable`, because a memory that
+      routes a write cannot tell from the data wire alone that one happened.
       The whole machine ELABORATES and `iverilog` compiles it at 1, 2 and 4
-      lanes, and 257 tests pass — but every one of those is an elaboration
+      lanes, and every test passes — but every one of those is an elaboration
       test. **No cycle of this has ever run.** Nothing has shown that a port
       reads the bank it named, that the conflict priority is the one intended,
       or that a routed write lands in the right bank.

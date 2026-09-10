@@ -1985,8 +1985,9 @@ than the commit row. `Rt.on_rename` had the same confusion between
 `temp_commit` and `temp_dispatch`; repaired 2026-08-26 when `update_rts`
 became its first caller — see the tag_gen/dispatch entry above.
 
-**FETCH ROTATES, AND A LANE IS NO LONGER A BANK** (2026-09-09, Tanawin) — the
-front end's alignment LIMIT is CLOSED, not worked around.
+**THE BANK IS PART OF THE ADDRESS, AND A LANE IS NO LONGER A BANK**
+(2026-09-09/10, Tanawin) — the front end's alignment LIMIT is CLOSED, not
+worked around.
 
 The old shape bound lane k to bank k at elaboration and drove ONE index for
 every lane, so the index named the fetch GROUP while the recorded pcs counted
@@ -1994,19 +1995,39 @@ on from the pc itself: a pc part-way into a group put the group's first words
 on lanes that claimed later addresses. Compiled C branches to 4-byte targets
 constantly, so this was not a corner case.
 
-Decision: **a port belongs to a BANK, and the stage rotates.** With `start` the
-bank holding the pc's own word and `group` its index, lane L reads bank
-`(start + L) % banks` — one mux per lane — and bank b reads
-`group + (b < start)` — one compare per bank. A bank BELOW the start bank was
-wrapped to, so it serves the NEXT group, which is the whole reason every bank
-now drives its own index instead of sharing one. Lane L's stamp is then plainly
-`pc + L * ilen` for ANY aligned pc. Rejected: the earlier plan's align-down plus
-leading-lane invalidation, which kept the wrong-word bug's cure (drop the early
-lanes) rather than its cause, and threw away fetch bandwidth on every redirect.
-`start_bank()` answers **None** at one bank rather than a constant zero — a
-zero-width slice is what a naive rotation builds there — and every caller then
-skips its logic instead of comparing against a constant. MEASURED: the whole
-machine emits and `iverilog` accepts it at fe_lanes 1, 2 and 4.
+A first fix ROTATED inside Fetch (a port per bank, lane L reading bank
+`(start + L) % banks` through a mux, bank b reading `group + (b < start)`) and
+was SUPERSEDED the same day (Tanawin: "easy mem also get the bank id … easy
+mem must responsible about this thing"): it made Fetch know how the memory is
+banked, and put 16 muxes of routing in a stage that only wants words. Don't
+restore it from git.
+
+Decision: **the bank is a SECOND ADDRESS REGION** — `AddrMeta((index_width,
+bank_bits), zero)`, `| index | bank | zero |`, which AddrMeta already modelled
+as regions. A port names its bank per access and EasyMem routes it, so Fetch
+binds `pc + lane * ilen` through `MemPortBase.bind_byte_addr` (one byte
+address, split by the shape) and knows nothing about banks. The split IS the
+interleave: `(addr >> 2) & (banks-1)` is `w % banks` and `addr >> (2 +
+bank_bits)` is `w // banks`, so a lane crossing into the next group simply HAS
+the next index and no wrap rule is written anywhere. One bank states no bank
+region at all — a zero-width one would need a zero-width wire. MEASURED:
+fetch.py 183 -> 114 lines, the Fetch module's muxes 16 -> 0. `CoreO3._check_ports`
+derives the expected regions from `instr_bank_bits`; bank count equals lane
+count by construction, since `instr_mem_spec()` builds one bank per lane.
+
+Decision (2026-09-10, Tanawin: "IT IS DUAL PORT FOR EACH BANK (READ1
+WRITE1)"): **every bank is 1R1W**, with its own READ index (the lowest-numbered
+read port that named it) and its own WRITE index (the writer's), so a read and
+a write never meet. The first bank-in-address version (27ed043) gave each bank
+ONE index shared by both, so a write TOOK the index from any read — and the
+data memory's load path (`ExecUnitApiO3.mem_read`) returns `port.read()`
+without looking at `valid`, so a load in the same cycle as a store retiring
+read the word at the STORE's address, silently. `valid` now reports read-vs-
+read conflicts only. ONE write port at any bank count (it was "one when
+banked"): each bank has one write port and a routed writer reaches every bank,
+so a second writer could name the same bank — a dropped write is lost data,
+where a dropped read only stalls. MEASURED: the 4-lane machine emits and
+`iverilog` accepts it. Still NOT REVIEWED or simulated (`docs/open_items.md`).
 
 Decision: **`FetchEntryBase` gains a per-lane `valid`**, REVERSING the
 `fetch_helper.py` header's "NO valid bit: a lane's occupancy is the fetch
@@ -2021,17 +2042,16 @@ that cannot serve costs bandwidth and can never SKIP an instruction. Carrying
 the bit without the pc honouring it was rejected as silent wrong hardware the
 day a conflict happens. `Decode.mop_decode` wraps its parallel zifs in
 `zif(fetch[lane].valid)`, so an unanswered lane matches nothing and
-`write_lane_default`'s valid=0 stands. Bank count is held EQUAL to lane count
-(`Fetch._reject_bad_ports`): fewer banks means two lanes want one bank, which is
-the conflict case no memory here can report yet.
+`write_lane_default`'s valid=0 stands.
 
 Decision: **`MemPortReadValid`** (`mem/common/mem_port.py`) is how a memory
 reports it — a subclass of `MemPortRead` carrying a `valid` beside `data`,
 required at construction. Separate from the PipCon on purpose: the arbiter says
 whether the memory may be ASKED, this says whether ONE answer among several came
-back. EasyMem drives one shared always-1 wire, and `Fetch.lane_pick` builds no
-mux at all when every bank offers the same handle, so today's rotation costs
-nothing for validity.
+back. EasyMem computes it per read port — 0 when a lower-numbered read named
+the same bank. Writes gained an `enable` on `MemPortWrite` for the same
+routing reason: a memory that routes a write cannot tell from the data wire
+alone that one happened.
 
 **THE READ LOCK** (2026-09-09, Tanawin) — `EasyMem.read_ready`, a 1-bit reg
 reset to **0**, masters every READ port's arb through `set_master_ack` where the

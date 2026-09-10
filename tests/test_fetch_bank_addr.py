@@ -113,10 +113,12 @@ def test_the_memory_states_the_bank_as_a_second_address_region():
     assert host.mem.addr_meta.zero_width == ZERO
 
 
-def test_a_banked_memory_takes_only_one_write_port():
-    """A single port reaches every bank, and a second would need an arbiter
-    that could DROP a write — lost data, where a dropped read only stalls."""
-    config = rv32i_config(fe_lanes=4, commit_lanes=4)
+@pytest.mark.parametrize("lanes", [1, 4])
+def test_the_memory_takes_only_one_write_port(lanes):
+    """Each bank has ONE write port and a routed writer reaches every bank, so
+    a second writer could name the same bank — and a dropped write is lost
+    data, where a dropped read only stalls. True at one bank too."""
+    config = rv32i_config(fe_lanes=lanes, commit_lanes=lanes)
 
     class Host(Module):
         @init
@@ -128,6 +130,25 @@ def test_a_banked_memory_takes_only_one_write_port():
 
     reset()
     Host()
+
+
+def test_every_bank_is_dual_port_with_its_own_read_and_write_index():
+    """1R1W per bank: a read and a write each have an index of their own, so a
+    load in the same cycle as a store retiring still reads its own address."""
+    config = rv32i_config(fe_lanes=4, commit_lanes=4)
+
+    class Host(Module):
+        @init
+        def decl(self):
+            self.mem = EasyMem(*config.instr_mem_spec())
+
+    reset()
+    mem   = Host().mem
+    reads = mem.read_vary_index_4_phy_bank
+    write = mem.write_vary_index_4_phy_bank
+
+    assert len(reads) == len(write) == mem.bank_cnt
+    assert all(r is not w for r, w in zip(reads, write))
 
 
 def test_a_port_that_cannot_report_valid_is_refused():
