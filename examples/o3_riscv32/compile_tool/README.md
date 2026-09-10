@@ -79,10 +79,13 @@ are.
 - **`.rodata` goes to the data memory.** The two memories are separate
   hardware and a load reads the data one, so a string literal placed beside
   the code would read back as an instruction word.
-- **The code and data regions have different bases** (`0x00000000` and
-  `0x10000000`). The hardware part-selects the low address bits, so the base
-  is truncated away before the memory sees it; it only makes the ELF and the
-  disassembly readable.
+- **The code starts at the ISA's `reset_pc`** — `0x00000000` for `Rv32i()`,
+  anything else with `Rv32i(reset_pc=...)` — because that is where fetch
+  starts after reset. No code base is written in this tool, and the build
+  refuses an ELF whose entry is anywhere else.
+- **The data region has its own base** (`0x10000000`). The hardware
+  part-selects the low address bits, so the base is truncated away before the
+  memory sees it; it only makes the ELF and the disassembly readable.
 - **`-march=rv32im` is accepted and will fail verification** until the ISA
   description grows multiply µops. That is the point: the build names the
   offending instruction instead of handing the core a word it decodes into
@@ -92,5 +95,5 @@ are.
 
 ## Not here yet
 
-Running the images. That needs a reset vector on the machine, the multi-lane
-fetch alignment fix, and the simulation harness.
+Running the images. The machine resets its pc to the ISA's `reset_pc` and
+fetches from any aligned pc; what is missing is the simulation harness.

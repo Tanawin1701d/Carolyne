@@ -151,6 +151,7 @@ def test_a_one_register_class_has_no_architectural_index_to_store():
     uop   = Uop("ADD", 0, dests=(opr,))
     unit  = ExecUnit("alu", (uop,), dest_operands=(core,))
     isa   = IsaBase(name="toy", pc_width=32, pc_align=4, ilen_bytes=4, dlen_bytes=4,
+                    reset_pc=0,
                     reg_files=(flags,), atomic_operands=(core,), operands=(opr,),
                     exec_units=(unit,), uops=(uop,),
                     mops=(Mop(matcher_field=InstrFieldMatch("opcode", ((0, 7),)),
@@ -177,6 +178,7 @@ def test_an_unnamed_operand_cannot_name_its_fields():
     unit    = ExecUnit("alu", (uop,), src_operands=(unnamed,),
                        dest_operands=(dest,))
     isa     = IsaBase(name="toy", pc_width=32, pc_align=4, ilen_bytes=4, dlen_bytes=4,
+                      reset_pc=0,
                       reg_files=(X,), atomic_operands=(unnamed, dest),
                       operands=(src_opr, dst_opr), exec_units=(unit,),
                       uops=(uop,),

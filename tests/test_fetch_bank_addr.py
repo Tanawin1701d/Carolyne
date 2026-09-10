@@ -10,10 +10,14 @@
 
 from __future__ import annotations
 
+import dataclasses
+import re
+
 import pytest
 
 from kathryn import *
 
+from carolyne.isa.riscv import Rv32i
 from carolyne.uarch.mem.common.mem_port import MemPortRead, MemPortReadValid
 from carolyne.uarch.mem.easy_mem import EasyMem
 from carolyne.uarch.o3.fetch import Fetch
@@ -183,3 +187,35 @@ def test_one_port_per_lane_is_required():
 
     reset()
     Host()
+
+
+def test_the_pc_resets_to_the_isas_reset_vector_in_the_emitted_verilog(tmp_path):
+    """Elaboration cannot show a register's reset value, so this reads the
+    Verilog: under mrst, the pc must take the ISA's reset_pc — and nothing else
+    may, since a second reset branch would fight it."""
+    config = dataclasses.replace(rv32i_config(fe_lanes=2, commit_lanes=2),
+                                 isa=Rv32i(reset_pc=0x80000000))
+
+    class Host(Module):
+        @init
+        def decl(self):
+            self.mem   = EasyMem(*config.instr_mem_spec())
+            self.ports = [self.mem.add_read_port(f"lane{k}") for k in range(2)]
+            self.fetch = Fetch(config, self.ports)
+            self.sink  = PipCon()
+            self.sink.no_pip_master()
+            self.fetch.decode_meta = self.sink
+
+    reset()
+    set_top(Host())
+    gen_flow()
+    build_flow()
+    emit_verilog(str(tmp_path), "top")
+
+    verilog = next(tmp_path.glob("MODULE_Fetch*.v")).read_text()
+    consts  = dict(re.findall(r"wire \[31:0\]\s+(\w+) = 32'h([0-9a-f]+);", verilog))
+    resets  = re.findall(r"if \(\w*mrst\w*\) begin\s*REG_pc_\d+\[31:0\] <= "
+                         r"(\w+)\[31:0\];", verilog)
+
+    assert resets, "the pc register has no reset branch"
+    assert [int(consts[name], 16) for name in resets] == [0x80000000]

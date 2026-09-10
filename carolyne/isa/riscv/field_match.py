@@ -33,7 +33,7 @@ def val(*values: int) -> InstrValueMatch:
     """One match value per segment, in the field's own segment order."""
     return InstrValueMatch(values)
 
-# --- instruction addressing (the three scalars IsaBase takes) ---------------
+# --- instruction addressing (the scalars IsaBase takes) ----------------------
 # Grouped here because they are one subject with the field positions below:
 # where an instruction is and how long it is. PC_WIDTH is XLEN by the RV32I
 # spec — the PC still has a width even though it is not a register class, and
@@ -42,6 +42,8 @@ PC_WIDTH   = X_LEN      # program counter is XLEN bits
 PC_ALIGN   = 4          # instruction addresses are 4-byte aligned (2 with the C ext)
 ILEN_BYTES = 4          # RV32I is fixed-length; no length decoder needed
 DLEN_BYTES = 4          # widest data access: LW/SW move a 32-bit word
+RESET_PC   = 0x00000000 # RISC-V leaves it implementation-defined: this is the
+                        # package's pick, and Rv32i(reset_pc=...) varies it
 
 # --- register / function fields --------------------------------------------
 OPCODE = InstrFieldMatch("opcode", ((0, 7),))

@@ -10,12 +10,14 @@
 #     round-tripping words through the image and back
 #   * every instruction is held to the ISA's own encoding table, so a
 #     program the machine could not decode fails the BUILD
+#   * the code starts at the ISA's reset_pc, the address fetch starts from
 #
 # The tests that run the cross compiler skip when it is absent, so the rest
 # still runs on a machine with no RISC-V toolchain.
 
 from __future__ import annotations
 
+import dataclasses
 import os
 import shutil
 
@@ -23,11 +25,12 @@ import pytest
 
 from carolyne.isa.riscv import Rv32i
 from carolyne.uarch.o3.config import CPUO3_Config
-from examples.o3_riscv32.compile_tool import build_program, config_for_sizes
+from examples.o3_riscv32.compile_tool import (_reject_wrong_entry,
+                                              build_program, config_for_sizes)
 from examples.o3_riscv32.compile_tool.cheader import render_c_header
 from examples.o3_riscv32.compile_tool.image import build_image
-from examples.o3_riscv32.compile_tool.layout import (DMEM_BASE, IMEM_BASE,
-                                                     MMIO_BYTES, MemoryLayout)
+from examples.o3_riscv32.compile_tool.layout import (DMEM_BASE, MMIO_BYTES,
+                                                     MemoryLayout)
 from examples.o3_riscv32.compile_tool.ldscript import render_linker_script
 from examples.o3_riscv32.compile_tool.machine import idx_width_for
 from examples.o3_riscv32.compile_tool.toolchain import TOOL_PREFIX
@@ -45,6 +48,11 @@ needs_gcc = pytest.mark.skipif(
 
 def _layout(imem: int = 8192, dmem: int = 4096) -> MemoryLayout:
     return MemoryLayout.from_config(config_for_sizes(imem, dmem))
+
+
+def _config_at(reset_pc: int) -> CPUO3_Config:
+    """The default machine on an RV32I whose fetch starts at `reset_pc`."""
+    return dataclasses.replace(config_for_sizes(), isa=Rv32i(reset_pc=reset_pc))
 
 
 # --- the whole flow -----------------------------------------------------------
@@ -80,6 +88,32 @@ def test_code_goes_to_the_instruction_memory_and_read_only_data_to_the_data_one(
     assert where[".rodata"] == "dmem"
 
 
+@needs_gcc
+def test_moving_the_reset_vector_moves_the_program_with_it(tmp_path):
+    """_start, the ELF entry and the first code word all follow reset_pc."""
+    program = build_program([HELLO], name="hello", out_dir=str(tmp_path),
+                            config=_config_at(0x80000000))
+    text    = next(s for s in program.elf.sections if s.name == ".text")
+    first   = int.from_bytes(program.elf.bytes_of(text)[:4], "little")
+
+    assert program.report.ok
+    assert program.elf.entry        == 0x80000000
+    assert text.addr_target_mem     == 0x80000000
+    assert program.layout.instr_slot(0x80000000) == (0, 0)
+    assert program.image.instr_banks[0].words[0] == first
+
+
+@needs_gcc
+def test_a_program_linked_for_another_reset_vector_is_refused(tmp_path):
+    """The linker script always agrees today, so the guard is called directly:
+    an ELF built for reset 0 must not load into a core that starts elsewhere."""
+    program = build_program([HELLO], name="hello", out_dir=str(tmp_path))
+
+    with pytest.raises(ValueError, match="reset_pc is 0x80000000"):
+        _reject_wrong_entry(program.elf,
+                            MemoryLayout.from_config(_config_at(0x80000000)))
+
+
 # --- the layout ---------------------------------------------------------------
 def test_the_layout_takes_its_sizes_from_the_config_the_hardware_is_built_from():
     config = config_for_sizes(8192, 4096)
@@ -88,6 +122,18 @@ def test_the_layout_takes_its_sizes_from_the_config_the_hardware_is_built_from()
     assert layout.imem_bytes == config.instr_mem_spec().size_bytes
     assert layout.dmem_bytes == config.data_mem_spec().size_bytes
     assert layout.imem_banks == config.fe_lanes
+
+
+def test_the_code_region_starts_where_the_isa_says_fetch_starts():
+    """No code base is stated anywhere: it is the ISA's reset_pc."""
+    assert _layout().imem_base == ISA.reset_pc
+    assert MemoryLayout.from_config(_config_at(0x80000000)).imem_base == 0x80000000
+
+
+def test_a_reset_vector_inside_the_data_region_is_refused():
+    """The code region moves with reset_pc, so it can land on the data."""
+    with pytest.raises(ValueError, match="overlaps the data region"):
+        MemoryLayout.from_config(_config_at(DMEM_BASE))
 
 
 def test_the_io_words_sit_above_the_allocatable_end_of_the_data_region():
@@ -115,14 +161,14 @@ def test_a_layout_the_hardware_could_not_address_is_refused(imem, dmem, why):
     """The address is a part-select, so a size that is not a power of two
     would not be masked and every access would land somewhere else."""
     with pytest.raises(ValueError, match=why):
-        MemoryLayout(imem_base=IMEM_BASE, imem_bytes=imem, imem_banks=2,
+        MemoryLayout(imem_base=0, imem_bytes=imem, imem_banks=2,
                      imem_idx_width=10, dmem_base=DMEM_BASE, dmem_bytes=dmem,
                      dmem_idx_width=10, word_bytes=4)
 
 
 def test_a_region_base_that_the_hardware_would_not_truncate_away_is_refused():
     with pytest.raises(ValueError, match="not a multiple"):
-        MemoryLayout(imem_base=IMEM_BASE, imem_bytes=8192, imem_banks=2,
+        MemoryLayout(imem_base=0, imem_bytes=8192, imem_banks=2,
                      imem_idx_width=10, dmem_base=DMEM_BASE + 4,
                      dmem_bytes=4096, dmem_idx_width=10, word_bytes=4)
 

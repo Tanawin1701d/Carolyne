@@ -23,13 +23,14 @@ from carolyne.util import is_power_of_two
 
 # --- fixed choices ------------------------------------------------------------
 
-IMEM_BASE = 0x00000000      # the reset vector is the bottom of the code region
 DMEM_BASE = 0x10000000      # any multiple of the data memory size would serve
 
+# The CODE region is not chosen here: it starts at the ISA's reset_pc
+# (from_config), so the linker script and the fetch reset cannot disagree.
+#
 # 0x10000000, not 0x80000000: a pc-relative pair (auipc+addi, what `la` and
-# `call` assemble to) reaches +-2GB, and 0x80000000 is exactly that far from
-# the code region at 0 — the edge of the range. This base keeps every
-# relocation comfortably inside it.
+# `call` assemble to) reaches +-2GB, and 0x80000000 is exactly that far from a
+# code region at 0, Rv32i's default reset vector — the edge of the range.
 
 MMIO_BYTES = 16                                 # reserved at the TOP of the data region
 MMIO_NAMES = ("putchar", "putint", "exit")      # one word each, in this order
@@ -66,7 +67,7 @@ class MemoryLayout:
     #
     #   Addresses are the 8K/4K default; the limits are properties below.
 
-    imem_base      : int      # where .text is linked; also the reset vector
+    imem_base      : int      # the ISA's reset_pc: .text and _start begin here
     imem_bytes     : int      # the WHOLE memory, every bank together
     imem_banks     : int      # one per fetch lane — a lane IS a bank
     imem_idx_width : int      # words in ONE bank, as a power of two
@@ -79,12 +80,15 @@ class MemoryLayout:
     @classmethod
     def from_config(cls,
                     config    : CPUO3_Config,
-                    imem_base : int = IMEM_BASE,
                     dmem_base : int = DMEM_BASE) -> "MemoryLayout":
-        """The layout the given machine can actually hold."""
+        """The layout the given machine can actually hold.
+
+        The code region starts at the ISA's reset_pc and cannot be moved from
+        here: a second statement of it is what could disagree with the fetch.
+        """
         instr = config.instr_mem_spec()
         data  = config.data_mem_spec()
-        return cls(imem_base      = imem_base,
+        return cls(imem_base      = config.reset_pc,
                    imem_bytes     = instr.size_bytes,
                    imem_banks     = instr.bank_cnt,
                    imem_idx_width = instr.index_width,
@@ -101,6 +105,13 @@ class MemoryLayout:
             raise ValueError(
                 f"MemoryLayout: word_bytes must be a power of two, "
                 f"got {self.word_bytes}")
+        if (self.imem_base < self.dmem_limit
+                and self.dmem_base < self.imem_limit):
+            raise ValueError(
+                f"MemoryLayout: the code region 0x{self.imem_base:08x}.."
+                f"0x{self.imem_limit:08x} overlaps the data region "
+                f"0x{self.dmem_base:08x}..0x{self.dmem_limit:08x} — the ISA's "
+                f"reset_pc places the code, so pick a data base clear of it")
         if self.dmem_bytes <= MMIO_BYTES:
             raise ValueError(
                 f"MemoryLayout: the data memory is {self.dmem_bytes} bytes, "

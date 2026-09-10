@@ -28,6 +28,14 @@ def _cfg(**overrides):
     return CPUO3_Config(**kwargs)
 
 
+def test_the_reset_vector_comes_from_the_isa_and_is_never_copied():
+    # One number: the machine that wants another reset vector builds another
+    # ISA, so the config and the description cannot disagree about it.
+    assert _cfg().reset_pc == ISA.reset_pc
+    assert _cfg(isa=Rv32i(reset_pc=0x80000000)).reset_pc == 0x80000000
+    assert "reset_pc" not in CPUO3_Config.__dataclass_fields__
+
+
 def test_a_config_is_an_isa_plus_the_machine_knobs():
     cfg = _cfg()
     assert cfg.isa.name == "rv32i"

@@ -34,7 +34,7 @@ from ..mop import Mop
 from ..operand import Operand
 from ..reg import RegFile                 # the CLASS, for the field annotations
 from ..uop import Uop
-from .field_match import DLEN_BYTES, ILEN_BYTES, PC_ALIGN, PC_WIDTH
+from .field_match import DLEN_BYTES, ILEN_BYTES, PC_ALIGN, PC_WIDTH, RESET_PC
 from .mop import MOP_TABLE
 from .exec_unit import exec_units
 from .operand import (AOPR_DEST_1, AOPR_SRC_1, AOPR_SRC_2, AOPR_SRC_3,
@@ -56,6 +56,7 @@ class Rv32i(IsaBase):
     pc_align        : int                       = PC_ALIGN
     ilen_bytes      : int                       = ILEN_BYTES
     dlen_bytes      : int                       = DLEN_BYTES
+    reset_pc        : int                       = RESET_PC
     reg_files       : Tuple[RegFile, ...]       = (X_FILE,)
     atomic_operands : Tuple[AtomicOperand, ...] = (AOPR_SRC_1, AOPR_SRC_2,
                                                    AOPR_SRC_3, AOPR_DEST_1)

@@ -75,6 +75,7 @@ def _isa(**overrides):
     mops = overrides.pop("mops", (_mop(ADD, "add"), _mop(LOAD, "lw")))
     uops, operands, cores = _walk(mops)
     kwargs = dict(name="toy", pc_width=32, pc_align=4, ilen_bytes=4, dlen_bytes=4,
+                  reset_pc=0,
                   reg_files=(X,), atomic_operands=cores,
                   operands=operands, exec_units=(ALU, MEM),
                   uops=uops, mops=mops)
@@ -130,6 +131,20 @@ def test_the_addressing_scalars_are_held_to_each_other():
         _isa(ilen_bytes="4")                # a string is not a length
     with pytest.raises(TypeError):
         _isa(pc_width=True)                 # nor is a bool a width
+
+
+def test_the_reset_vector_is_a_real_aligned_instruction_address():
+    # The ISA states it: architectural on x86 (0xFFFFFFF0), a package's pick on
+    # RISC-V. Zero is legal, so it is not held to the >= 1 the others are.
+    assert _isa(reset_pc=0).reset_pc == 0
+    assert _isa(reset_pc=0x80000000).reset_pc == 0x80000000
+    with pytest.raises(ValueError, match="not a multiple of pc_align"):
+        _isa(reset_pc=2)                    # fetch would start mid-instruction
+    for bad in (-4, 1 << 32):
+        with pytest.raises(ValueError, match="does not fit"):
+            _isa(reset_pc=bad)
+    with pytest.raises(TypeError):
+        _isa(reset_pc=True)                 # a bool is not an address
 
 
 def test_a_uop_may_be_claimed_by_several_units():
@@ -291,7 +306,8 @@ def test_a_per_isa_package_may_subclass_it():
 
     mops = (_mop(ADD, "add"), _mop(LOAD, "lw"))
     uops, operands, cores = _walk(mops)
-    addr = dict(pc_width=32, pc_align=4, ilen_bytes=4, dlen_bytes=4)
+    addr = dict(pc_width=32, pc_align=4, ilen_bytes=4, dlen_bytes=4,
+                reset_pc=0)
     isa = ToyIsa(name="toy", **addr, reg_files=(X,), atomic_operands=cores,
                  operands=operands, exec_units=(ALU, MEM),
                  uops=uops, mops=mops, prefixes=("0x66",))

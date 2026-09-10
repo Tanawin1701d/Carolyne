@@ -57,6 +57,7 @@ class Fetch(Module):
 
         # hardware component
         self.pc          = reg(pc_width, "pc")
+        self.pc.reset(self.config.reset_pc)         # the ISA's reset vector
         self.fetch       = build_fetch_table(self.config, "fetch")
         self.fetch_meta  = PipCon()
 

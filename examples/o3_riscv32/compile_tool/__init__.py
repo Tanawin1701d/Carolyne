@@ -88,6 +88,7 @@ def build_program(sources    : Sequence[str],
     build  = compile_program(sources, layout, out_dir, march=march,
                              opt=opt, name=name)
     elf    = read_elf32(build.elf_path)
+    _reject_wrong_entry(elf, layout)
     report = verify_program(elf, config.isa)
     if verify:
         report.raise_if_bad()
@@ -98,3 +99,16 @@ def build_program(sources    : Sequence[str],
 
     return Program(name=name, config=config, layout=layout, elf=elf,
                    image=image, build=build, report=report)
+
+
+def _reject_wrong_entry(elf: Elf32, layout: MemoryLayout) -> None:
+    """The program must begin where the core begins: the ISA's reset_pc.
+
+    The linker script puts _start there, so this holds today — it is the check
+    that says so, instead of an agreement nothing looks at.
+    """
+    if elf.entry != layout.reset_pc:
+        raise ValueError(
+            f"{elf.path} starts at 0x{elf.entry:08x}, but the ISA's reset_pc "
+            f"is 0x{layout.reset_pc:08x} — the core would begin fetching "
+            f"somewhere this program is not")

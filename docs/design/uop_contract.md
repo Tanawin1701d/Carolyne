@@ -156,7 +156,8 @@ bypass network) is ISA-blind.
 
 ### 4.3 Control flow
 PC, branch prediction, and redirect are engine-owned. The ISA influences them
-only via `br` fields and `ilen` (for sequential-PC computation).
+only via `br` fields, `ilen` (for sequential-PC computation) and the reset
+vector (where fetch starts after reset).
 
 ### 4.4 Commit
 ROB retires at **instruction** granularity using `bound`: a multi-µop
@@ -171,6 +172,7 @@ which also gives precise traps for free on RISC-V.
 | ------------------ | ------------------------------ | ---------------------------------------- |
 | register classes   | X(32×32, x0 const)             | GPR(8×32), FLAGS(1×6)                    |
 | `ilen`             | constant 4                     | opcode+ModR/M window                     |
+| reset vector       | 0 (spec leaves it open)        | `0xFFFFFFF0` (fixed by the ISA)          |
 | cracking           | 1 µop nearly always            | 1–4 µops (mem operands via µtemps)       |
 | branches           | BR-COND(cmp-kind, rs1, rs2)    | BR-COND(flag-test, flags-src)            |
 | flags              | — (class absent)               | 2nd dest + old-flags 3rd src             |
@@ -190,7 +192,8 @@ An ISA package supplies exactly:
 
 1. register classes (§1.1)
 2. encoding table (§1.3)
-3. `ilen` (§1.3) — constant for fixed-length ISAs
+3. `ilen` (§1.3) — constant for fixed-length ISAs — and the reset vector,
+   the address fetch starts from after reset
 4. crackers: per-instruction µop templates (§1.4)
 5. trap policy sequences (§1.5)
 6. *(optional)* custom FU declarations (§1.2)

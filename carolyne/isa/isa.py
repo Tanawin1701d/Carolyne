@@ -3,10 +3,11 @@
 # else in this layer refers to: the architectural register classes, the operand
 # cores and the slot rules built on them, the µop templates, the execution
 # units, and the mops that bind encodings to µop sequences. It also holds the
-# four addressing scalars (pc_width, pc_align, ilen_bytes, dlen_bytes) saying
-# where an instruction is, how long it is, and how wide one data access is. The PC is not a register class (§4.3), but
-# its width is still an ISA fact: fetch, the redirect path and the ROB cannot
-# be sized without it.
+# five addressing scalars (pc_width, pc_align, ilen_bytes, dlen_bytes,
+# reset_pc) saying where an instruction is, how long it is, how wide one data
+# access is, and where the core starts fetching. The PC is not a register class
+# (§4.3), but its width is still an ISA fact: fetch, the redirect path and the
+# ROB cannot be sized without it.
 #
 # Every vocabulary is DECLARED, never derived from the mops, and the container
 # checks the mops against it one link at a time: a mop's µops must be declared,
@@ -83,6 +84,9 @@ class IsaBase:
     dlen_bytes      : int                       # widest single data access in bytes: what
                                                 # the data bus carries, and what a memory
                                                 # sizes its word from (RV32I 4, for LW/SW)
+    reset_pc        : int                       # where fetch starts after reset: fixed by
+                                                # the ISA on x86 (0xFFFFFFF0), a package
+                                                # choice on RISC-V (implementation-defined)
     reg_files       : Tuple[RegFile, ...]       # architectural register classes
     atomic_operands : Tuple[AtomicOperand, ...] # the value/direction cores
     operands        : Tuple[Operand, ...]       # cores + encoding side: the slot rules
@@ -104,7 +108,7 @@ class IsaBase:
 
     # --- construction checks --------------------------------------------------
     def _check_addressing(self) -> None:
-        """Check the four addressing scalars against each other."""
+        """Check the five addressing scalars against each other."""
         for field, value in (("pc_width",   self.pc_width),
                              ("pc_align",   self.pc_align),
                              ("ilen_bytes", self.ilen_bytes),
@@ -135,6 +139,26 @@ class IsaBase:
             raise ValueError(
                 f"IsaBase '{self.name}': pc_width {self.pc_width} cannot address past "
                 f"one aligned unit (pc_align {self.pc_align})")
+        self._check_reset_pc()
+
+    def _check_reset_pc(self) -> None:
+        """The reset vector is a real, aligned instruction address.
+
+        Zero is legal, so it is checked apart from the scalars that must be >= 1.
+        """
+        value = self.reset_pc
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise TypeError(
+                f"IsaBase '{self.name}': reset_pc must be an int, "
+                f"got {type(value).__name__}")
+        if not 0 <= value < (1 << self.pc_width):
+            raise ValueError(
+                f"IsaBase '{self.name}': reset_pc {value:#x} does not fit the "
+                f"{self.pc_width}-bit pc")
+        if value % self.pc_align:
+            raise ValueError(
+                f"IsaBase '{self.name}': reset_pc {value:#x} is not a multiple "
+                f"of pc_align {self.pc_align} — fetch would start mid-instruction")
 
     def _normalize(self) -> None:
         """Accept any sequence, store a tuple, hold each member to its type."""

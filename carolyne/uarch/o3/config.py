@@ -374,6 +374,11 @@ class CPUO3_Config:
         return self.isa.ilen_bytes * 8
 
     @property
+    def reset_pc(self) -> int:
+        """Where fetch starts after reset — the ISA states it, never the config."""
+        return self.isa.reset_pc
+
+    @property
     def uop_idx_width(self) -> int:
         """Bits naming ONE µop of the ISA's whole vocabulary."""
         return ceil_log2(len(self.isa.uops))

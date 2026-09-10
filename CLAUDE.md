@@ -472,9 +472,11 @@ Immediates are deliberately NOT an `Operand` target — the µop record carries
   (aligned steps from an aligned start stay aligned), `pc_width` wide enough to
   address past one aligned unit. `pc_align_bits` is **derived** (the always-zero
   low bits a stored PC can drop), the same store-the-count/derive-the-log2
-  bargain `RegFile.amount`→`index_width` makes. NOT here: the reset vector —
-  where a core starts fetching is machine configuration, not an ISA fact.
-  Trap policy joins when that type exists.
+  bargain `RegFile.amount`→`index_width` makes. NOT here, SUPERSEDED
+  2026-09-10: "the reset vector — where a core starts fetching is machine
+  configuration, not an ISA fact". It is now `reset_pc`, an addressing scalar
+  beside these (see THE RESET VECTOR IS AN ISA FACT, below the compile_tool
+  entry). Trap policy joins when that type exists.
 
 **`carolyne/isa/riscv/`** is the first per-ISA package, deliberately a
 TEMPLATE skeleton: `reg.py` (`x_file()` → x0..x31, x0 via `const_regs`;
@@ -483,8 +485,8 @@ something the engine renames through a PRF port, so a 1-entry `pc` file was
 drafted and deleted), `exec_unit.py` (`exec_units()` + the semantics classes
 `AluExecUnit`/`BrExecUnit`/`LSExecUnit` — see the 2026-08-28 rebuild entry
 below), `field_match.py` (32-bit field positions, the addressing group
-`PC_WIDTH = X_LEN` / `PC_ALIGN = 4` / `ILEN_BYTES = 4` that `Rv32i` names as its
-three scalar defaults,
+`PC_WIDTH = X_LEN` / `PC_ALIGN = 4` / `ILEN_BYTES = 4` / `DLEN_BYTES = 4` /
+`RESET_PC = 0` that `Rv32i` names as its scalar defaults,
 and `FORMATS` = the six base formats R/I/S/B/U/J as `union`s of those fields,
 each tiling the word exactly once — declared but not yet consumed, since a
 `Mop` has no format slot), `uop.py` (`UOP_*` + `UOPS`, plus the `LOADS` /
@@ -2079,7 +2081,8 @@ harness), which is what keeps an address from being written down twice. The
 user states memory sizes in BYTES; `machine.idx_width_for` is the one place
 that becomes an index width, so no caller computes `log2` by hand.
 
-Decision: **the two regions have DISTINCT bases** — code at `0x00000000`, data
+Decision: **the two regions have DISTINCT bases** — code at `0x00000000` (the
+ISA's `reset_pc` since 2026-09-10, see THE RESET VECTOR IS AN ISA FACT), data
 at `0x10000000` — where RIDECORE loads ONE image into BOTH memories at address
 0. Carolyne's memories are separate hardware, so one image each was the ask,
 and distinct bases make the ELF and the disassembly readable. The base costs
@@ -2134,6 +2137,41 @@ blocks had ever been emitted before.
 Also 2026-09-09: a root **`conftest.py`** puts the repo root on `sys.path`, so a
 test can import `examples.*` — pyproject discovers `carolyne*` only, so
 `examples/` is deliberately not installed and cannot be reached otherwise.
+
+**THE RESET VECTOR IS AN ISA FACT** (2026-09-10, Tanawin: "I should declare in
+the ISA") — **`IsaBase.reset_pc`**, an addressing scalar beside `pc_width` /
+`pc_align` / `ilen_bytes` / `dlen_bytes`. It SUPERSEDES the IsaBase entry's
+"NOT here: the reset vector … machine configuration, not an ISA fact". That
+reading was true for RISC-V, whose spec leaves the vector
+implementation-defined, and false for the second ISA this project targets: x86
+fixes it at `0xFFFFFFF0`, so a description with no place for it could not state
+x86. Where the ISA leaves it open, the PACKAGE picks one — `RESET_PC = 0` in
+`riscv/field_match.py` — and a machine that wants another varies the
+description, `Rv32i(reset_pc=0x80000000)`, the way `Rv32i(name=...)` varies
+any other part. Checked at construction: an int, inside the `pc_width` range,
+and a multiple of `pc_align`, since fetch must not start in the middle of an
+instruction. Zero is legal, so it is checked apart from the scalars that must
+be >= 1.
+
+`CPUO3_Config.reset_pc` is a DERIVED property, never a field — the config
+does not copy a fact out of the description, and a test pins that no dataclass
+field of that name exists. This reverses the phase plan's "add `reset_pc` to
+`CPUO3_Config`". `Fetch` resets its pc to it; before this the pc had no reset
+at all, so the reg got no `if (mrst)` branch and came up X under Icarus.
+MEASURED in the emitted Verilog on `Rv32i(reset_pc=0x80000000)`: under mrst,
+`REG_pc` takes `32'h80000000`, emitted after the normal update, so reset wins
+(`tests/test_fetch_bank_addr.py` reads this back from the file).
+
+compile_tool follows it: `MemoryLayout.from_config` sets `imem_base =
+config.reset_pc`, and `IMEM_BASE` is gone — a second statement of the code
+base is exactly what could disagree with fetch. Two guards come with it. The
+layout REFUSES a code region that overlaps the data region: the code base now
+moves, and `reset_pc = 0x10000000` would land on `DMEM_BASE`. And
+`build_program` refuses an ELF whose entry is not `reset_pc`
+(`_reject_wrong_entry`): the linker script puts `_start` there today, and the
+check is what states it. MEASURED: `hello.c` builds at `0x80000000` with
+`_start`, the ELF entry and bank 0 index 0 all on that address, and `la` still
+reaches the data at `0x10000000` (1.75 GB away, inside auipc's ±2 GB).
 
 NEXT UP — the function unit, designed 2026-08-19. Step 1 (the declared port
 shape above) and step 2 (`ExecContext` + `AluUnit` + the fake-context test,
