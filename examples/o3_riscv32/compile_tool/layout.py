@@ -4,9 +4,10 @@
 # instr_mem_spec()/data_mem_spec() calls the hardware sizes itself from and
 # cannot drift from the RTL.
 #
-# Five consumers read this object: the linker script (ldscript.py), the C
-# header (cheader.py), the image writer (image.py), the reference model
-# (iss.py) and the simulation harness (sim/harness.py).
+# Its consumers: the linker script (ldscript.py), the C header (cheader.py),
+# the image writer (image.py), and the run driver
+# (examples/o3_riscv32/sim/harness.py), which passes the addresses on to the
+# debugger and the renderers.
 #
 # The two memories are SEPARATE, so each region states its own base. The data
 # base costs nothing: the load/store unit part-selects the word index down to

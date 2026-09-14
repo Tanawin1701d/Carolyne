@@ -58,10 +58,28 @@ contract bug — fix the contract, not the engine.
 | `carolyne/isa/`               | description types + the ISA-facing apis + per-ISA pkgs |
 | `carolyne/uarch/`             | generic OoO engine, Kathryn code lives here           |
 | `carolyne/util/`              | helpers BOTH planes reach — no kathryn, no isa/uarch  |
+| `carolyne/debugger/o3/`       | SUPERSEDED 2026-09-14 — deleted; see §4 THE OBSERVE / VIEW DELETION |
+| `carolyne/view/o3/`           | SUPERSEDED 2026-09-14 — deleted; see §4 THE OBSERVE / VIEW DELETION |
+| `examples/o3_riscv32/sim/`    | SUPERSEDED 2026-09-14 — deleted; `rv_build` / `rv_config` / `compile_tool/` stay |
 | `examples/regfile_demo.py`    | smallest end-to-end Kathryn flow (CPU-flavored)       |
 | `generated/`                  | emitted Verilog (gitignored)                          |
 | `tests/`                      | pytest; tests double as usage documentation           |
 | `example_comment.py`          | the comment pattern, shown as code (§7)               |
+
+SUPERSEDED 2026-09-14 (see §4, THE OBSERVE / VIEW DELETION): the paragraph
+below is the record of a layer that no longer exists. `kathryn.observe`,
+`kathryn.view` and `kathryn.sim.verilog_scope` are deleted in Kathryn2;
+`carolyne/debugger`, `carolyne/view` and `examples/o3_riscv32/sim/` are deleted
+here. What remains of `kathryn.sim` — `ksim`, `manifest`, `rtl`, `backend`,
+`runner_cocotb` — is what Carolyne may still use.
+
+The generic recording and rendering tools were Kathryn's own from 2026-09-11:
+`kathryn.sim` (`.manifest` (schema / write / read), `.verilog_scope`,
+`.backend.cocotb`, `.runner_cocotb`, `.ksim`; one package since 2026-09-13, no
+flat `sim_*` modules), `kathryn.observe` (probes, session, recorder, trace,
+rules, the recording cocotb test) and `kathryn.view` (text columns, stepper,
+page plan, the page). `carolyne/debugger` and `carolyne/view` held only what
+was specific to a machine.
 
 Rules: `isa` never imports `uarch`; its description types never import
 `kathryn` (a package's semantics modules — `exec_stage` bodies — may, since
@@ -2070,7 +2088,8 @@ set-once slot in the arb, so this is a replacement rather than an addition.
 **`examples/o3_riscv32/compile_tool/`** (2026-09-09) — C sources to two memory
 images, with no operating system: the RIDECORE memgen flow studied on
 2026-09-08 (`research/ridecore-baremetal-flow.html`), rebuilt on Carolyne's own
-descriptions. Phase 1 of three; nothing runs yet.
+descriptions. Phase 1 of three; the run side is THE DEBUGGER AND THE VIEWER
+entry below (2026-09-10).
 
 Decision: **`MemoryLayout` is DERIVED from the `CPUO3_Config`**, never stated
 beside it — `from_config` reads `instr_mem_spec()`/`data_mem_spec()`, the same
@@ -2173,6 +2192,262 @@ check is what states it. MEASURED: `hello.c` builds at `0x80000000` with
 `_start`, the ELF entry and bank 0 index 0 all on that address, and `la` still
 reaches the data at `0x10000000` (1.75 GB away, inside auipc's ±2 GB).
 
+**THE DEBUGGER AND THE VIEWER** (2026-09-10, Tanawin: "observe the o3 model"
+— SUPERSEDED IN PLACE 2026-09-11: the generic half moved into Kathryn2 and
+the packages were renamed, see THE MOVE INTO KATHRYN2, THE PAGE PLAN and THE
+SQUASH HANG below; the paths in this entry are the day's record) (Tanawin: "observe the o3 model
+without changing anything in uarch model … track the register state … both
+text and gui … click to do next cycle … bind compile tool chain") — the
+first thing that ever RAN this core. Three packages, Tanawin's split:
+`carolyne/debugger/` records a run (probes, session, the simulator build,
+the trace), `carolyne/vis/` renders it (the text slot table, a terminal
+stepper, one self-contained page), `examples/o3_riscv32/sim/` binds the
+toolchain (`python -m examples.o3_riscv32.sim run a.c b.c`: compile_tool →
+rv_build → debugger → vis). Import direction, pinned by
+`tests/test_debugger_layers.py`: vis reads only `debugger.trace`; the
+debugger's core modules are stdlib at import time because the SIMULATOR
+process imports them (kathryn only inside `build_session`, cocotb only in
+`cocotb_run.py`); nothing under `carolyne/` imports `examples/`.
+
+Decision (Tanawin): **record, then replay.** There is no Python-native
+simulator in Kathryn2 — a cycle comes only from cocotb over Verilator or
+Icarus — so the run goes to the MMIO exit, a watchdog or a cycle limit and
+writes one JSON line per cycle; "next cycle" in both renderers moves through
+the file, which also gives previous, jump and find for free. The seam for a
+live simulator later is `trace.TraceSource`; the renderers would not change.
+
+Decision (Tanawin): **Verilator through cocotb 2**, with `cocotb` and the
+PyPI `verilator` wheel as the `sim` extra (`pip install -e ".[dev,sim]"`).
+MEASURED, the first whole-machine Verilator build ever: 222-255 s wall,
+645 MB peak; the Verilator front-end alone 16 s / 363 MB, writing 39 C++
+files, 239 MB; the compiled simulator runs ~5 400 cycles/s raw and ~570
+cycles/s while the recorder reads ~1 000 handles a cycle; `hello.c` end to
+end in 12-14 s once the build is cached. FOUND ON THE WAY: the wheel's
+`verilated.mk` leaves `CFG_CXXFLAGS_PCH_I` empty, so a parallel build passes
+`Vtop__pch.h.fast` to `c++` as a bare file and fails — `sim_backend`
+subclasses cocotb's runner to add `CFG_CXXFLAGS_PCH_I=-include` on make's
+command line. cocotb 2.1's runner already passes `--vpi --public-flat-rw` and
+copies `sys.path`; `test()` on a runner that never ran `build()` needs
+`hdl_toplevel_lang`; the runner lets `os.environ` win over `extra_env`, so
+the session variables are set in both. `--sim icarus` is the one-line
+switch (Icarus elides regs nothing reads; those probes report unresolved).
+
+Decision: **the build cache is keyed by the NORMALISED rtl.** Kathryn2
+numbers cross-module ports from an unordered map, so two emits of one design
+differ only in `IO_WIRE_IO_IN/OUT_*` ids and their order (measured: every
+other line identical); `sim_build.normalize_verilog` strips that id, drops
+the trailing comma and sorts the port lines, and the same design then hits
+the cache from any run. LIMIT, inherent: the base ids (`REG_pc_31`) are a
+process-global counter, deterministic only for the same build order in a
+fresh process — a compiled simulator can only serve an emit with identical
+names, because KSim resolves the manifest's names in it — so the e2e test
+runs the command line in a subprocess (`tests/test_sim_e2e.py`); inside one
+pytest process the ids shift after other machines are built and a run
+rebuilds (measured: 255 s once).
+
+Decision: **the manifest is the schema.** The recorder walks canonical
+manifest paths and records every field the karray node lists; `debugger/o3/`
+states only the paths, each queue's occupancy gate (a `valid`/`busy` field or
+the ROB's head+count window), which modules to alias, which handshakes to
+watch and the labels. A record that grows a field reaches the trace and both
+renderers with no debugger change (`tests/test_debugger_probes.py` builds a
+station with an `extra_fields` entry and reads it back off the schema). The
+tree is aliased — every `connect()` back-reference puts the ROB three times
+in the manifest — so the probe set owns ONE canonical path per block.
+
+Decision: **hidden state is reached two ways, and only two.** Modules the
+manifest cannot see (`Arf`/`Prf`/`Rt` behind the non-Module `RegArchMng`)
+are ALIASED as public attributes on the module that created them, after
+`build_flow()` and before `emit_verilog()` — the manifest is harvested from
+live `vars()` at emit time, verified. Everything else — arb req/ack leaves,
+master requests, the `mis_pred_fix_tag` wire — is LOCATED BY SCANNING THE
+EMITTED .v for the one module that declares the plain name, which
+SUPERSEDES the plan's "alias the wire onto the arb's creator". MEASURED
+facts behind that: hardware built while a `@flow` runs is declared in the
+module whose flow is running — fetch's leaf REQ on the instruction-memory
+port arb is `reg WIRE_arb0_REQ0_*` in `MODULE_Fetch*`, the fix wire the
+core's `on_mis_pred` builds is in the BRANCH COMPLEX, not `Mpft` — and
+every other module sees such a net only as an `IO_WIRE_IO_IN/OUT_<name>_<id>`
+port; Kathryn emits combinational wires as `reg` driven from `always @(*)`.
+A `PipCon` has no manifest node at all, so a pipeline stage is watched
+through its own leaf on its arbiter (`<stage>.pip.req/ack`, the leaf whose
+REQ the stage's module declares), the arbiter's master request
+(`<stage>.mreq`) and Kathryn's `SR_ST_pip_wait4syn_*` state register — the
+ONE internal-name dependency, isolated in `o3/probes.py`. A probe that does
+not resolve is REPORTED in `session.json` and the header, never raised; the
+default machine resolves 20 blocks, 36 scalars and 80 signals with none
+missing.
+
+Decision: **four status words, not the C++'s three.** From
+`pip_schematic.rs`: `wait4syn` is set when a pip was entered with nobody
+requesting it, so it tells "waiting" but cannot tell "running" from "dead".
+The verdict (`status.py`, pinned as a truth table in
+`tests/test_debugger_status.py`): RUNNING when the stage's handshake acks;
+IDLE when the pip waits or holds nothing; **HELD** when its arbiter is
+requested but the pip was not let in — an arbiter hold, or a pipeline a
+flush left dead; else STALL. Verified against the raw signals on the
+`hello.c` trace before being trusted. An always-requesting pip (fetch,
+issue, commit, retire) enters every cycle, so "entered" alone is not work
+— content is required too, else an empty station reads STALL.
+
+Decision: **the trace stores what is occupied and what changed.** Every
+value of every row is ~1 800 values a cycle, too big to embed; so `row`
+blocks (the pipeline registers) are written whole, `queue` blocks (ROB,
+stations, store buffer) as occupied rows only — read gate-first, which is
+also what keeps VPI traffic small — and `state` blocks (ARF, PRF, rename
+table, MPFT) as a keyframe every 256 cycles plus `[row, field, value]`
+deltas between; `keyframe_every = 1` is "full every cycle" through the same
+code. Not "every N cycles": the changed-cell highlighting and every event
+rule read consecutive cycles. MEASURED on `hello.c`: 2 022 cycles → 8.7 MB
+(4.3 KB/cycle), the text 7 MB, the page 8.8 MB; the whole text render 0.7 s,
+a jump to any cycle 7 ms. Events (commit with pc, ROB entry, destination
+and the PRF value; dispatch, issue, mispredict, resolve, MMIO) are computed
+at record time from pure rules and recomputable offline — the shape a later
+ISS diff consumes.
+
+The text view is the C++ `simStatePrintSlot` shape adapted: twelve columns
+(MPFT/TAG, RT/ARF, PRF, FETCH, DECODE, DISPATCH, RSV, ISSUE, EXEC,
+ROB/COMMIT, STBUF, MEM/MMIO), the same gating — an unoccupied row prints
+nothing, register state prints change rows only, pointers and the MPFT
+every cycle — and one departure: a cell longer than its column is cut with
+`…` where the C++ overflowed and broke the columns. The page is one file
+with the trace embedded; its JavaScript names no block — panels, arrows and
+formats come from a layout descriptor `vis/o3/layout.py` builds from the
+header — and it is run under node against a stub DOM in the tests, not
+opened in a browser by the tool.
+
+WHAT THE FIRST RUNS SHOWED. The smoke (three instructions, then nops)
+retired x1=1, x2=2, x3=3 in 40 cycles — the core executes. `hello.c` retires
+its 32-instruction prologue, the `JAL` at `0x88` mispredicts at cycle 22,
+and from cycle 23 every pip the squash flushed reads HELD forever: fetch
+never asks the memory again, station 0 never issues its READY entry, commit
+never retires the finished head. Recorded in `docs/open_items.md` ("Squash
+recovery"); no uarch change was made inside this task, on purpose.
+
+**THE MOVE INTO KATHRYN2** (2026-09-11, Tanawin: "check that if there are
+feature that generalized enough to be put into kathryn, please put it" —
+"Also the generic recorder and renderers"). Everything generic left this
+repo: `kathryn.sim_manifest_tree` (the manifest as a tree, `walk_path`),
+`kathryn.sim_verilog_scope` (where a net is declared), `kathryn.sim_backend`
+and `kathryn.sim_runner` (which simulator, the cached build, the cocotb run —
+Kathryn2's own `test/cocotb_pool` builds through them now, so a tc whose emit
+did not change is not recompiled), `kathryn.observe` (probe types, session,
+recorder, trace, stage status, cycle events, rule loader, consistency, the
+recording cocotb test) and `kathryn.view` (column table, text view, stepper,
+page plan types, page writer, the viewer). Carolyne keeps
+`carolyne/debugger/o3/` (keys, mmio, labels, probe_set, the three rule
+modules) and `carolyne/view/o3/` (text_columns, page_plan); `carolyne/vis`
+is `carolyne/view`. Decision: **the session names its renderers** —
+`facts["view"]` holds "package.module:NAME" specs for the text columns and
+the page plan, beside the rules module name — so the generic stepper and
+page writer have no default machine (`python -m kathryn.view.stepper
+trace.jsonl` reads the spec off the trace; `--columns` overrides).
+Decision: **schema 2** for session and trace: the facts are nested under
+`facts` (the old `header.update(facts)` could collide with a schema key),
+the vocabulary is `trace_key` / `model_path` / `verilog_name`, the page
+descriptor is `page_plan`, the disassembly is `annotations["pc"]` keyed by
+decimal pc, the store buffer's key is `store_buf`; an old trace is refused
+with a re-record hint, no shim, since a run regenerates in 14 s.
+Decision: the O3 key grammar (`rsv<k>.issue<u>`, `rsv<k>.exec_src<u>`,
+`<exu>.s<n>`) is spelled once in `o3/keys.py` (it was in six files), the
+MMIO doors in `o3/mmio.py`; the generic run loop reads the console text off
+events and the exit door off `StopFacts`, so it knows no door name.
+Decision: `normalize_verilog` STAYS in the build cache although the emit is
+deterministic now — a regression there would cost a silent four-minute
+rebuild per run, and `test_sim_runner.py` pins the determinism itself.
+LIMIT: the per-arb flush wires are not probed — every `WIRE_arb_flush_*` is
+declared in the branch complex with nothing that says which arb it resets;
+`fetch.wait` shows the re-arm instead.
+
+**THE PAGE PLAN** (2026-09-11, Tanawin's pick: "Pipeline columns + compact
+boxes, details on click"). The page is a diagram flow: a pipeline band
+(IMEM > Fetch > Decode > Dispatch > Stations > Exec units > ROB / commit >
+Store buffer > DMEM) and a state band (Rename table | PRF | ARF | MPFT /
+tags | Console). A panel is placed at (band, column, row), shows its status
+badges and two to four summary lines, and opens its full tables on a click.
+Arrows join NAMED PORTS (left / right / top / bottom) and are routed
+orthogonally through the column gutters with arrowheads: a flow arrow takes
+its colour from its req/ack pair, a writeback arrow is dashed, the control
+arrow from the branch unit back to fetch is dotted and lit while the fix
+tag is non-zero. `kathryn.view.page_plan` holds the types and
+`validate(header)`, which refuses a plan naming a panel, port, block, key or
+stage the header has not; `carolyne/view/o3/page_plan.py` builds the O3
+plan from the header and leaves out what did not resolve, so a blind probe
+is a blind panel and never a broken page. Decision: the viewer's formats are
+a closed set — `hex bin bit int label:<group> prefix:<text>
+annotate:<kind>` — so the JavaScript spells no ISA word (it said `uop`,
+`phys`, `arch` before); the plan maps field-name regexes onto them.
+`.badge.HELD` is red: the word that showed the hang rendered like IDLE
+before. Panel rectangles are cached and the arrows re-routed on resize, on a
+detail toggle and from a ResizeObserver; `grid-auto-flow: dense`, which
+backfilled the grid and destroyed the order, is gone. Checked under node
+with the headless runner shipped beside the viewer: every cycle renders,
+the arrows and markers exist, the find grammar lands where the Python
+stepper's does, and the JavaScript rebuilds the same state tables the
+reader does across keyframes. NOT opened in a browser by the tool.
+
+**THE SQUASH HANG** (2026-09-11). Root cause, in Kathryn2:
+`pip(auto_restart=True)` fed the arb's flush wire as both Reset and Start;
+the Start was OR-ed into the combinational entrance (which is also the
+master-ack), while the only latches that carry an entrance into the next
+cycle (`wait4syn` and the zync state) took the same wire as reset, and in
+the state register's priority ladder RST outranks SET. So a flushed pip was
+entered for exactly the flush cycle and was dead after it — and an
+`auto_req` pip, whose `master_req` is tied to 1, could never re-arm its
+wait state. The INT rung, "interrupt overrides reset", was dead code: no
+call site asked for it. Fix (Kathryn2 `pip_schematic.rs`, Tanawin: "Both
+fixes"): the block Start SETS `wait4syn` at the INT priority
+(`init_node_trigger(.., true)`) and no longer feeds the entrance, so the
+flush cycle grants nothing and the pipeline re-enters one cycle later.
+Pinned by `test/model/tc42_pip_auto_restart.py` (the restart pip resumes
+after a one-cycle flush; a plain pip stays dead — the control) and
+`py/tests/test_pip_auto_restart_emit.py` (the emitted SET is after the
+UNSET, and the entrance no longer names the flush). MEASURED on `hello.c`:
+the mispredict at cycle 22 now costs one bubble (`fetch.wait` reads 1 at
+23), fetch runs again at 24, 325 commits instead of 32, the console prints.
+The rerun then found the NEXT two hardware gaps, both recorded in
+`docs/open_items.md`: a branch already drained from the ROB still resolves
+(the Mpft under-kill LIMIT) and its rollback rebuilds `used_entry_cnt` from
+a pointer difference, so 0 reads as full and the machine deadlocks at cycle
+4142; and `jal ra,98` redirects to 0xa8, twice its offset. Fixed the same
+day, also in Kathryn2: the IO routing walks its dependency set in ascending
+global id, so two emits of one design are byte-identical (23 modules, checked
+across two processes) — the cache's port normalisation is now a guard, not
+a need.
+
+**THE OBSERVE / VIEW DELETION** (2026-09-14, Tanawin's call: "the design is
+not practical" — "delete verilog_scope too, and the Carolyne debugger and
+view"). Kathryn2 deleted `kathryn.observe`, `kathryn.view` and
+`kathryn.sim.verilog_scope` (with `VerilogScope`, `Declaration`, `LocateError`,
+`find_home_module`); Carolyne deleted everything that imported them:
+`carolyne/debugger/` and `carolyne/view/` (named by Tanawin),
+`examples/o3_riscv32/sim/` (the record-and-render harness: `cli`, `harness`,
+`smoke`, `__main__`), and ten test files —
+`tests/test_debugger_{import_layers,o3_consistency,o3_keys,probes,verilog_scope}.py`,
+`tests/test_view_o3_{page_js,page_plan,text}.py`, `tests/test_sim_e2e.py` and
+their fixture `tests/o3_toy_trace.py`. None of it was ever committed, so the
+only copy is the backup, `/tmp/carolyne_observe_view_backup_2026-09-14.tar.gz`
+(34,431 bytes, 33 members, 28 `.py`, every member verified byte-identical on
+a restore before the rm). MEASURED: 301 passed before, 266 passed after — the
+35 tests those files held, nothing else. What STAYS: `examples/o3_riscv32/`
+minus `sim/` (`rv_build`, `rv_config`, `compile_tool/` — the model, not the
+observe layer) and all of `carolyne/uarch/`, which never imported observe; the
+one comment in `uarch/o3/issue_lane.py` that names
+`kathryn.sim.manifest.write._attr_node` stays, since that module still exists.
+`kathryn.sim` itself survives on the foundation — `ksim`, `manifest`, `rtl`,
+`backend`, `runner_cocotb` — and is what Carolyne may still build on;
+`kathryn.sim.verilog_scope` is gone there too. Left for Tanawin, not imports:
+`docs/open_items.md` (the "Debugger" section, the stepper command at the Mpft
+item, and the `*Where:*` pointers into the deleted debugger files at the
+squash items), `compile_tool/README.md` ("Running the images"), the header
+comment of `compile_tool/layout.py`, which still names `sim/harness.py` as
+its caller, and the `sim` extra in `pyproject.toml`, which stays because
+cocotb and verilator are still what `kathryn.sim` needs. The §3 rows and
+paragraph that described this layer
+carry a SUPERSEDED marker pointing here; the dated entries above (THE DEBUGGER
+AND THE VIEWER, THE MOVE INTO KATHRYN2, THE PAGE PLAN, THE SQUASH HANG) remain
+the record of what it was.
+
 NEXT UP — the function unit, designed 2026-08-19. Step 1 (the declared port
 shape above) and step 2 (`ExecContext` + `AluUnit` + the fake-context test,
 2026-08-22 — see the `exec_context.py` entry above) are done:
@@ -2211,8 +2486,10 @@ elaboration from a `RegFile` in `uarch`.
 
 - Venv at `.venv/` (Python 3.13). `kathryn` is an **editable install from
   `../Kathryn2`** (pip drove maturin). After Rust-side Kathryn changes:
-  re-run `pip install -e ../Kathryn2` (or `maturin develop` there);
-  Python-side DSL changes are picked up automatically.
+  re-run `pip install -e ../Kathryn2` (or `maturin develop` there;
+  with both `VIRTUAL_ENV` and `CONDA_PREFIX` set in the shell maturin
+  refuses — `env -u CONDA_PREFIX VIRTUAL_ENV=$PWD/.venv .venv/bin/maturin
+  develop`); Python-side DSL changes are picked up automatically.
 - `pip install -e ".[dev]"` for carolyne + pytest. Run tests:
   `.venv/bin/pytest tests -q`. Run the demo:
   `.venv/bin/python examples/regfile_demo.py`.
@@ -2282,6 +2559,12 @@ elaboration from a `RegFile` in `uarch`.
   warning is the only signal that something did not copy, so a field the
   destination MUST have written needs a value stated explicitly (an override in
   the same assign, never a second write at equal priority).
+- **A flushed `pip(auto_restart=True)` re-arms through its wait state** (since
+  2026-09-11): the flush cycle grants nothing, `wait4syn` reads 1 for the next
+  cycle, and the pipeline re-enters the cycle after. A pip WITHOUT the flag
+  stays dead after a flush (Kathryn2 tc42's control). `Arb.flush()` still
+  drives its wire in whatever scope it is called from — a `zif` makes the
+  one-cycle pulse a squash is.
 - **A `pip` / `zync` block must be built in an UNCONDITIONAL scope.** Nesting one
   inside a `zif` panics at the block's exit with "zero-cond-if sub blocks must
   have BasicNodeFlow join policy" — a conditional block joins differently from

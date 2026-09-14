@@ -93,7 +93,10 @@ are.
 - **Everything is compiled `-mstrict-align`**, because a misaligned access is
   silently wrong in the load/store unit (`docs/open_items.md`).
 
-## Not here yet
+## Running the images
 
-Running the images. The machine resets its pc to the ISA's `reset_pc` and
-fetches from any aligned pc; what is missing is the simulation harness.
+The sibling package does that: `python -m examples.o3_riscv32.sim run
+hello.c` compiles through this tool, builds the machine, simulates it under
+Verilator, records every cycle, and renders the run as text and as a page.
+See `examples/o3_riscv32/sim/`, `carolyne/debugger/o3/` (what is watched) and
+Kathryn's `kathryn.observe` / `kathryn.view` (the recorder and the renderers).

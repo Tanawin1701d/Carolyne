@@ -51,3 +51,108 @@ here; a decision already made and recorded goes in CLAUDE.md §4, not here.
       *Status:* TODO — the design was agreed, the code is not reviewed.
       *Closes when:* someone reads it, and a simulation drives two ports at one
       bank and checks the winner's data and the loser's `valid`.
+      *Update 2026-09-10:* the debugger has now run it. Two lanes fetching
+      through two banks read the right words for 2 000 cycles of `hello.c`
+      (`generated/debug/hello/trace.sl`), so the read routing works for the
+      no-conflict case. The conflict case and the store routing are still
+      unchecked.
+
+---
+
+## Squash recovery — CLOSED 2026-09-11
+
+The flushed pips stayed dead because Kathryn's `pip(auto_restart=True)` fed
+the flush as Start into the combinational entrance while its latches took the
+same wire as reset, and RST outranks SET. Fixed in Kathryn2
+(`src/model/flow_block/common/pip_schematic.rs`: the Start now SETS the wait
+state at the INT priority), pinned by `test/model/tc42_pip_auto_restart.py`.
+`hello.c` passes the first mispredict with one bubble cycle; what it hit
+next is below.
+
+---
+
+## Speculation (found by the debugger, 2026-09-11)
+
+- [ ] **A branch that the ROB already drained still resolves, and its
+      rollback rebuilds the ROB count from a pointer difference.** In the
+      `hello.c` trace (`generated/debug/hello/trace.jsonl`, 325 commits) the
+      third mispredict of every group fires with `rob.used_entry_cnt = 0`
+      before the flush — a branch squashed earlier that was still in flight
+      (the Mpft under-kill LIMIT in `uarch/o3/core.py`). Its `on_mis_pred`
+      moves `alloc_ptr` behind or onto `com_ptr`, and the count comes back as
+      `(alloc - com) mod depth`: 30 stale entries "return" (cycles 40, 1070,
+      2100, 3130 — bogus commits of `li` with non-zero values) or, at cycle
+      4142, `alloc == com` reads as 32 = FULL. The head entry (`rob[5]`,
+      `wb_fin = 0`) then waits for a writeback no station holds, dispatch
+      waits for a slot that never opens, and the machine is dead from 4143 to
+      the watchdog at 6141.
+      *Where:* `uarch/o3/rob.py` (`on_mis_pred`, the count after a rollback),
+      `uarch/o3/core.py` (`on_mis_pred`, the Mpft booking LIMIT),
+      `uarch/o3/exec_unit.py` (the per-stage kill).
+      *Status:* a HARDWARE gap. The stepper shows it:
+      `python -m kathryn.view.stepper generated/debug/hello/trace.jsonl`,
+      then `g 4141`, `n`, `diff`, `show rob`.
+      *Closes when:* a resolve or mispredict whose `rob_des_idx` is outside
+      the live window `[com_ptr, alloc_ptr)` is ignored (or the Mpft booking
+      kills it first), AND the count after a rollback distinguishes empty
+      from full — kept incrementally (dispatched minus committed) or reloaded
+      only for a branch inside the window.
+- [ ] **`jal ra,98` at `0x88` redirects to `0xa8`, twice its offset.** The
+      link value is right (`ra = 0x8c`); the redirect skips main's prologue
+      (`lui a5 / li a4,104 / mv a5,a5 / lui a3`), so the first `putchar`
+      stores 0 instead of `'h'` and the program prints `"\x00" "0" "\n"
+      "\n"` where it should print `hello from carolyne\n0\n1\n4\n9\n16\n`.
+      `0xa8 - 0x88 = 0x20 = 2 x 0x10`, so the J-immediate reaches the target
+      adder shifted once too many — `isa/riscv/imm.py` (the placement of
+      `imm_j`, checked on ints by `tests/test_imm.py`), or the target sum in
+      `isa/riscv/exec_unit_br.py`, whichever adds the shift.
+      *Where:* `isa/riscv/exec_unit_br.py`, `isa/riscv/imm.py`.
+      *Status:* a HARDWARE gap; the trace is the evidence
+      (`find commit pc=0x88`, then `n`).
+      *Closes when:* the commit after `0x88` is `0x98`.
+
+---
+
+## Debugger
+
+- [ ] **Live stepping.** The tools replay a recorded trace; the page's
+      "next cycle" moves through the file. A simulator that steps on demand
+      would implement `kathryn.observe.trace.TraceSource` and nothing in
+      `kathryn.view` would change.
+      *Where:* `Kathryn2/py/kathryn/observe/trace.py` (the protocol),
+      `observe/record_test.py` (the loop that would take commands).
+- [ ] **A served page for large traces.** The page embeds the whole trace;
+      above ~30 MB the harness says so and `render --cycles a:b` embeds a
+      window. A stdlib `http.server` that hands the page cycles on demand is
+      the planned alternative.
+      *Where:* `Kathryn2/py/kathryn/view/page_view.py`.
+- [ ] **Pip state by Kathryn's internal name.** A stage's wait state is
+      found by the pattern `SR_ST_pip_wait4syn_<n>_ST_<id>`, the one
+      Kathryn-internal name the debugger depends on; a manifest node for pip
+      state would retire it. The per-arb flush wires (`WIRE_arb_flush_*`)
+      are not probed for the same reason: nothing says which arb one resets.
+      *Where:* `carolyne/debugger/o3/probe_set.py` (`PIP_WAIT_PATTERN`).
+- [x] **Kathryn2 numbers cross-module ports from an unordered map** — CLOSED
+      2026-09-11: `src/backends/common/internal_routing.rs` walks the
+      dependency set in ascending global id; two emits of the 23-module
+      machine are byte-identical. The build cache keeps its normalisation as
+      a guard.
+- [ ] **The fetch-handoff check fires in the first granted cycle after every
+      squash.** `python -m examples.o3_riscv32.sim check generated/debug/hello`
+      reports 18 problems, all of one shape and all two cycles after a
+      mispredict (24, 35, 1054, ...): fetch's rows still show the group from
+      before the flush (`0xa0/0xa4`) while decode holds the redirected group
+      (`0x98/0x9c`) next cycle. Either the fetch table lags the memory port by
+      the re-arm cycle, or the rule should read the port, not the table.
+      *Where:* `carolyne/debugger/o3/consistency.py` (`check_fetch_handoff`),
+      `uarch/o3/fetch.py`.
+      *Closes when:* the rule and the hardware agree on what decode takes in
+      that cycle.
+- [ ] **The ISS diff.** Commit events carry pc, ROB entry, destination
+      register and value for exactly that consumer; the reference model
+      (`iss.py`) is not written.
+      *Where:* `carolyne/debugger/o3/event_rules.py` (`commit_events`).
+- [ ] **The page was run under node with a headless DOM, not opened in a
+      browser by the tool.** `tests/test_view_o3_page_js.py` and Kathryn2's
+      `test_view_viewer_js.py` prove the data path; the look is checked by
+      opening `trace.html`.

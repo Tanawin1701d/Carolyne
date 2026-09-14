@@ -12,9 +12,10 @@
 #
 # A NamedTuple, not a dataclass, and that is load-bearing for the SIM: the
 # manifest descends into a Module, a list and a TUPLE, and answers None for
-# anything else (`sim_manifest._attr_node`), so a dataclass would hide every
-# station and complex from KSim. As a tuple the lane is walked, and the reader
-# reaches a station at `issue_lanes[k][0]` and a complex at `[k][1][u]`.
+# anything else (`kathryn.sim.manifest.write._attr_node`), so a dataclass would
+# hide every station and complex from KSim. As a tuple the lane is walked, and
+# the reader reaches a station at `issue_lanes[k][0]` and a complex at
+# `[k][1][u]`.
 
 from typing import NamedTuple, Tuple
 
