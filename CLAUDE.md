@@ -58,6 +58,7 @@ contract bug — fix the contract, not the engine.
 | `carolyne/isa/`               | description types + the ISA-facing apis + per-ISA pkgs |
 | `carolyne/uarch/`             | generic OoO engine, Kathryn code lives here           |
 | `carolyne/util/`              | helpers BOTH planes reach — no kathryn, no isa/uarch  |
+| `carolyne/debug/sim/`         | debug probes: `kathryn.DebugProbe` subclasses for pipeline status and Karray tables |
 | `carolyne/debugger/o3/`       | SUPERSEDED 2026-09-14 — deleted; see §4 THE OBSERVE / VIEW DELETION |
 | `carolyne/view/o3/`           | SUPERSEDED 2026-09-14 — deleted; see §4 THE OBSERVE / VIEW DELETION |
 | `examples/o3_riscv32/sim/`    | SUPERSEDED 2026-09-14 — deleted; `rv_build` / `rv_config` / `compile_tool/` stay |
@@ -2447,6 +2448,181 @@ paragraph that described this layer
 carry a SUPERSEDED marker pointing here; the dated entries above (THE DEBUGGER
 AND THE VIEWER, THE MOVE INTO KATHRYN2, THE PAGE PLAN, THE SQUASH HANG) remain
 the record of what it was.
+
+**MODULE DEBUG — THE MODEL OPTS IN** (2026-09-14; SUPERSEDED IN PART
+2026-09-15, see THE PROBE IS KATHRYN'S below — the `DbgBase` mixin, `DbgPipCon`,
+`probe/` and `dbg_elems` are gone; the `@dbg` phase, the Kathryn accessors and
+the status words stay; Tanawin: "last time I ask
+you to build the debugger that no touch the model … some signals is
+dynamically built and cannot be observed by the kathryn's manifest and you try
+to build the structure to observe that. That make the system blow up to
+spaghetti code. so today we will not again. now we will allow the module to be
+modified by inheriting the ModuleDebug … ADD_DBG should build some way to
+expose the signals to kathryn's simulator to see it in manifest … declare like
+@DBG like @init @flow … carolyne/debug/probe/ … focus on pip and zync's status
+… you can modify kathryn a bit to retrieve some internal signal such as
+pipeline wait register"). The replacement for the deleted observe layer: the
+model names what it wants watched, and the manifest carries it.
+
+`carolyne/debug/`: **`DbgBase`**, a MIXIN taken as a second base — `class
+Fetch(Module, DbgBase)` — with `add_dbg(name, target)`,
+storing a **`DbgPipCon`** — a `dict` subclass `{key: SignalRef}` — under the
+public `self.dbg_elems[name]`; **`probe/`** is the READER side (`keys.py`, the
+ONE definition of the keys both halves use; `PipConProbe`, `stage_status`),
+stdlib only because it runs inside the simulator process (pinned by
+`tests/test_debug_probe.py`). Kathryn additions, through the pair skill's
+peer agent (`Kathryn2/CLAUDE.md` §7.5 has its own entry): **`@dbg`**, a third
+module phase run once by `gen_dbg()`, a dedicated call after the host build
+(`build_model(m, debug=True)`; Tanawin moved it OUT of `build_flow` the same
+day — debug is opt-in, never a side effect of every build), with NO module
+scope open — bodies READ built idents into attributes and
+nothing else (creating hardware there panics "module trace stack is empty");
+**`pip()` records its leaf and block on the PipCon** (`pip_leaf`,
+`pip_block_i`, `pip_wait_reg`; a second pip on one PipCon raises before any
+hardware is made — the leaf index is read off `arb_leaf_count` before the
+block is built, since `add_pip_leaf` discarded it); **`Arb.master_ack` /
+`hold` / `reset`** (the bound gate sources, `Option` getters the Rust side
+already had); and **`arena.get_pip_wait_reg(block_i)`** — `PipSchematic`
+keeps `wait4syn_i` as an explicit field (not `sys_nodes[0]`), the arena proxy
+reads the block type off the ident, takes the TYPED pip and calls the inherent
+`FlowBlockPip::get_wait4syn_reg_i(arena)` (Err for a non-pip or an unbuilt pip —
+NOT a `FlowBlock` trait method: Tanawin rejected that, a pip-only getter on the
+generic trait stops it generalising), which itself reads the StateNode's
+`state_reg_i` (set in its ctor; `get_node_state_operating` panics when
+unbuilt) — the proxy holds no logic of its own.
+
+Decision (Tanawin, later the same day: "I don't want ModuleDebug — I want
+every user's component inherit from Module; the debug should be other base"):
+**a component's base is `kathryn.Module`, always** — a capability like debug
+is a SEPARATE base class added beside it, never a replacement base. A first
+version shipped `ModuleDebug(Module)` and was replaced within the hour; don't
+restore it. Kathryn's phase dispatch walks the whole MRO, so the mixin's own
+`@init` (the registry) and `@dbg` (the phase flag) run ancestor-first exactly
+as a base Module's would, and `add_dbg` refuses a class that is not also a
+Module.
+
+Decisions, all Tanawin's picks (AskUserQuestion): **`add_dbg` is legal ONLY
+inside a `@dbg` method** — the signals exist after `build_flow`; `DbgBase`'s
+own `@dbg` runs first (ancestor-first phase order) and raises the flag
+`add_dbg` checks, so a call from `@init` raises naming the phase. **Every leaf
+of the PipCon, not a per-zync wrapper** — a zync adds one leaf per arb it
+binds, so each non-pip leaf IS one zync bind (or a wait) and no bookkeeping is
+needed; LIMIT: a multi-arb zync is not grouped. **The phase lives in Kathryn**
+— as `gen_dbg()` beside `gen_flow()` / `build_flow()`, opted into with
+`build_model(m, debug=True)`; the first cut ran it INSIDE `build_flow`, which
+Tanawin rejected. Decision: **a dict subclass, not a new manifest
+kind** — the writer already walks a dict of SignalRefs and KSim resolves it to
+a dict of handles, so Kathryn's manifest is untouched. Decision: **the
+registry, not a bare attribute** — a local `pb = add_dbg(...)` would vanish
+from the manifest by the writer's own visibility rule; `dbg_elems` is one
+place a reader finds every probe of a module. Decision: **no hardware** —
+MEASURED: `top.v` of the toy is byte-identical with and without the `@dbg`
+method (two subprocesses; in-process ids shift, and a `@dbg` SUBCLASS
+auto-names its module apart, so both variants take `name="dbg_toy"`).
+
+THE STATUS WORDS, and what the first simulation taught. A normal pip's OWN
+leaf request is UNDRIVEN (`add_pip_leaf` only adds it; only the zync
+schematic drives leaf requests), so `pip_ack` is never "entered" unless
+`auto_req` locks it. The entrance is the arb's **`master_ack`** — the pip's
+pseudo node — and the body is entered on `mack & mreq`. So `PipConProbe.pip_status()`
+reads `RUNNING = mack & mreq`, `IDLE = mack & ~mreq`, `HELD = ~mack & mreq`,
+`BUSY` otherwise; `leaf_status(i)` is `GRANTED / WAITING / QUIET`; and
+`stage_status(own, next, leaf)` composes the old four words: RUNNING if the
+next leaf is GRANTED, else own IDLE/HELD, else STALL. A cond-gated zync reads
+QUIET while its condition is false (`req = state_exit & cond`: it does not
+ask). MEASURED on the toy (`tests/dbg_toy_model.py`: A `pip(auto_req)` →
+zync → B `pip` → zync(go) → sink `no_pip_master`, con_b held by `~go`) under
+Verilator and Icarus: go=0 → a STALL, b HELD, A's leaf WAITING, sink QUIET,
+`a` and `b` frozen; go=1 → all RUNNING/GRANTED and `b` takes every `a`.
+
+FOUND ON THE WAY, the first thing this facility caught and NOT fixed here
+(`docs/open_items.md`, "A parked zync does not back-pressure"): a pip's
+entrance expression is `zync_state | wait4syn | start` — it re-arms off its
+own zync's STATE REGISTER (the parked request holder), not off the zync's
+grant. With the toy stalled through the cond-gated zync alone, B was
+re-entered every cycle, con_b granted A every cycle, `a` counted through the
+stall and `b` skipped values (7, then 12). Every O3 stage pip is that same
+top-level shape. The probe reported the hardware faithfully; the toy stalls
+through a `hold` instead, which the entrance does honour.
+
+Verification: `tests/test_debug_probe.py` (truth table, stdlib guard),
+`tests/test_dbg_base.py` (what `add_dbg` stores, the manifest nodes, the
+phase rule, byte-identical Verilog), `tests/sim/tc1_dbg_pip_con.py` run by
+`tests/sim/run_cocotb.py [icarus|verilator]` through Kathryn2's `cocotb_pool`
+(`configure()` repoints it; output under `generated/sim/`). Carolyne's venv
+runs cocotb 2.1.0, which broke three things in Kathryn2's pool — the Icarus
+backend's private `_as_sv_literal` import, `_waves_file` reading a field
+only `build()` sets, discovery not seeing `TestGenerator` — fixed on the
+Kathryn side the same day; Kathryn2's own tcs pass under both cocotb versions.
+
+**THE PROBE IS KATHRYN'S** (2026-09-15, Tanawin: "at kathryn, we have debug
+probe feature, please remove the carolyne/debug/probe/* and
+carolyne/debug/dbg_pip_con.py and dbg_base.py and build the probe that inherit
+the kathryn's probe for pipeline status and karray"). Kathryn2 `6915de7` added
+`kathryn.DebugProbe`, a plain attribute holder the manifest walks like a Module
+(kind `"probe"`, no instance; KSim resolves it on the holding Module's own
+handle, no hop). So everything Carolyne had built only to BE walkable is gone:
+the `DbgBase` mixin, `DbgPipCon` (the `dict` subclass), the stdlib `probe/`
+reader with its key table, and the `dbg_elems` registry. A module now stores
+probes as plain attributes in its `@dbg` body (`self.pipe_b =
+PipStatusProbe(self.con_b)`), Kathryn's own visibility rule — a local vanishes.
+
+What replaced them: each probe is TWO EXPLICIT CLASSES and one conversion
+function, in one file. The MODEL half is a `kathryn.DebugProbe` subclass a
+`@dbg` body stores — **`PipStatusProbe`** (`probe_pip_status.py`: `mreq`,
+`mack`, `hold`/`reset` when bound, `pip_req`/`pip_ack`/`pip_wait` when a pip
+masters the arb, `leaf_req[]`/`leaf_ack[]`) and **`KarrayProbe`**
+(`probe_karray.py`: the table, and `head`/`count` when the block has them). The
+SIM half is a plain class whose fields are named ONE BY ONE in its `__init__` —
+**`PipStatusSimProbe`** with `pip_status()` RUNNING/IDLE/HELD/BUSY off
+`mack & mreq`, `leaf_status(i)` GRANTED/WAITING/QUIET and `stage_status(next, leaf)`, all methods;
+CORRECTED by Tanawin the same day: the wait4syn register high is IDLE before
+any other reading (an entry taken while parked runs only after the edge), and
+GRANTED is `req & ack`, never `ack` alone — an `auto_ack` leaf's ack is a
+constant 1, so ack without a request is QUIET; and `stage_status` is Tanawin's
+own ladder — parked → IDLE, the stage's arbiter `hold` high → STALL, its
+`reset` high → FLUSH (a fifth word), else the hop: next leaf not GRANTED →
+STALL, GRANTED → RUNNING — the stage's own gates are read before its hop,
+and HELD/BUSY belong to `pip_status` only;
+**`KarraySimProbe`** with `rows()`, `row(i)`, `fields()` and
+`live_rows(valid=…)` (the rows a valid FIELD marks, else the head+count WINDOW,
+else every row) — each built by the MODEL probe's own **`convert(node)`**,
+which reads every manifest child by name (`child_or_none` for the optional
+ones). Decision (Tanawin: "the convert function should have virtual class at
+probe_base … I mean normal method at ProbeBase not destination"): `convert` is
+a VIRTUAL instance method on **`ProbeBase`** — the SOURCE, raising
+`NotImplementedError` naming the class — implemented by `PipStatusProbe` and
+`KarrayProbe`, each returning its sim half; the sim classes are plain data
+holders. CONSEQUENCE, stated in the tc: a cocotb test needs the model probe
+INSTANCE, so `tests/sim/tc1_debug_probes.py` rebuilds the model in the
+simulator process (`build_model(DbgToy(), debug=True)`, no emit) and converts
+through `m.pipe_b.convert(k.pipe_b)`. Two earlier cuts died the same hour:
+module-level `convert_*` functions, then a classmethod on a sim-side base. Decision (Tanawin: "I dont like this
+method … we must have explicit converted probe such as PipStatusSimProbe and
+have explicit convert function. do not do magic like you have done"): a first
+cut had ONE class serving both sides through a `ProbeBase.from_sim` that made an
+`__init__`-less instance with `cls.__new__` and copied every child of the node
+onto it with a `dir()`/`setattr` loop. Rejected within the hour — a reader
+could not see which fields a sim probe has, and the model class name did double
+duty. The explicit pair costs each field its name twice (the model `__init__`
+and the sim `__init__`) and that is the point: the field list is written down.
+`probe_sim_util.py` holds the two sim-side helpers (`read_value`,
+`child_or_none`). The package is **`carolyne/debug/sim/`** (Tanawin, 2026-09-15:
+"move debug/* to debug/sim/*"); `carolyne/debug/` itself is the tooling root. Decision (Tanawin, same day: "carolyne should have middle base
+class"): the MODEL halves share **`ProbeBase(kathryn.DebugProbe)`**
+(`probe_base.py`), Carolyne's own base between Kathryn's and the concrete
+probes, holding `set_if_bound(name, sig)` — an optional signal becomes an
+attribute only when it exists. A lift of that helper onto `kathryn.DebugProbe`
+itself (`set_if_present`) was made and reverted the same hour: the helper is
+Carolyne's to keep. LIMIT: one-dimensional tables (the ROB, a station, the store
+buffer); a 2-D rename table is not read. Decision: **an X reads as `None`, never an error**
+(`read_value`, checked on cocotb's `is_resolvable`) — an unwritten row's `data`
+is X under Icarus, since only `valid` is reset, and `int()` raising there
+failed every test that sampled the log; a probe reports what it cannot resolve
+rather than refusing the cycle. MEASURED: the toy (now with a 4-row `log`
+table B writes on every granted hop) passes 4/4 under Icarus — the status words
+as before, and the log holds exactly what B wrote and wraps at four — and the
+emitted Verilog stays byte-identical with and without the `@dbg` body.
 
 NEXT UP — the function unit, designed 2026-08-19. Step 1 (the declared port
 shape above) and step 2 (`ExecContext` + `AluUnit` + the fake-context test,

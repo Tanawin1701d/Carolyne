@@ -113,6 +113,26 @@ next is below.
 
 ---
 
+## Kathryn handshake (found by the debug probes, 2026-09-14)
+
+- [ ] **A parked zync does not back-pressure the stage upstream of it.**
+      A pip's entrance expression is `zync_state | wait4syn | start`: it
+      re-arms off its own zync's STATE REGISTER (the parked request holder),
+      not off the zync's grant. So while a stage's zync waits, the stage is
+      re-entered every cycle, its arbiter keeps granting the stage before it,
+      and that stage's writes land on top of unconsumed data. Seen on the
+      toy (`tests/dbg_toy_model.py` with con_b NOT held): `a` counted through
+      B's stall and `b` skipped values (7, then 12). Every O3 stage pip is
+      the same top-level shape (`fetch` → `decode` → `dispatch` zync on
+      `ready_to_go`). A `hold` on the arbiter does stop the entrance, which
+      is how the toy stalls today.
+      *Where:* `Kathryn2/src/model/flow_block/common/pip_schematic.rs`
+      (`add_depend_node_to_ncp(pseudo_i, sub_wrap.get_exit_node_i(), None)`),
+      the zync's exit node in `zync_schematic.rs`.
+      *Closes when:* the pseudo re-arms on the zync's grant (`state & grant`),
+      or the design says a stage must gate itself with `hold` — decided by
+      Tanawin, then pinned by a Kathryn2 tc with a cond-gated zync.
+
 ## Debugger
 
 - [ ] **Live stepping.** The tools replay a recorded trace; the page's
@@ -126,12 +146,18 @@ next is below.
       window. A stdlib `http.server` that hands the page cycles on demand is
       the planned alternative.
       *Where:* `Kathryn2/py/kathryn/view/page_view.py`.
-- [ ] **Pip state by Kathryn's internal name.** A stage's wait state is
-      found by the pattern `SR_ST_pip_wait4syn_<n>_ST_<id>`, the one
-      Kathryn-internal name the debugger depends on; a manifest node for pip
-      state would retire it. The per-arb flush wires (`WIRE_arb_flush_*`)
-      are not probed for the same reason: nothing says which arb one resets.
-      *Where:* `carolyne/debugger/o3/probe_set.py` (`PIP_WAIT_PATTERN`).
+- [x] **Pip state by Kathryn's internal name** — CLOSED 2026-09-14: a
+      `PipStatusProbe` stores `PipCon.pip_wait_reg` (the wait4syn StateReg,
+      read through `arena.get_pip_wait_reg`) and `Arb.reset` (the bound
+      flush wire, per arb) as manifest nodes; no name pattern is left.
+      *Where:* `carolyne/debug/sim/probe_pip_status.py`, `Kathryn2/py/kathryn/complex_hardware/pip_con.py`.
+- [ ] **A multi-arb zync is not grouped.** The PipCon probe exposes every
+      leaf, and each non-pip leaf is one zync bind; a zync binding several
+      arbiters shows as one leaf on each, with nothing that says they are
+      one block.
+      *Where:* `carolyne/debug/sim/probe_pip_status.py` (`leaf_status`).
+      *Closes when:* `zync()` records its binds the way `pip()` records its
+      leaf, and a zync probe groups them.
 - [x] **Kathryn2 numbers cross-module ports from an unordered map** — CLOSED
       2026-09-11: `src/backends/common/internal_routing.rs` walks the
       dependency set in ascending global id; two emits of the 23-module
