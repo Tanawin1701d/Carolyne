@@ -2624,6 +2624,31 @@ table B writes on every granted hop) passes 4/4 under Icarus — the status word
 as before, and the log holds exactly what B wrote and wraps at four — and the
 emitted Verilog stays byte-identical with and without the `@dbg` body.
 
+**EVERY O3 MODULE CARRIES ITS PROBES** (2026-09-15, Tanawin: "write the dbg
+for every O3 module"). Each block has a `@dbg` body named `dbg_probes` that
+stores, as `dbg_<name>` attributes, a `PipStatusProbe` per PipCon it owns and a
+`KarrayProbe` per table it owns, with the pointers that bound the table where
+the block has them: `Fetch` (`fetch_meta`, the fetch table), `Decode`
+(`decode_meta`, the decode table), `Dispatch` (`dispatch_meta`, the bus),
+`Rob` (`commit_meta`; the table with `head=com_ptr`, `count=used_entry_cnt`),
+`StoreBuf` (`retire_meta`; the table with `head=ret_ptr`, `busy` marks a row),
+`RsvBase` (one probe per `issue_metas` entry, the table, one per `exec_src`
+slot — the head comes from an explicit `table_head()` hook, `None` on the base
+and `head_ptr` on `RsvIOR`, so the base body is written once), `ExecUnitO3`
+(one probe per `stage_metas` entry, `[0]` the issue arb), `Mpft`/`Arf`/`Prf`/
+`Rt` (their tables; `temp_dispatch` is 2-D, where the sim `rows()` is 1-D
+only), and `MemBase` (one probe per read and write port's `pip_meta`, so a
+memory's arbiters read like a stage's). `CoreO3` adds `backend_meta` and, as
+`dbg_reg_arch`, a dict by class name of **`RegClassProbe`** (`arf`, and
+`prf`/`rt` when the class is renamed) — the blocks behind the non-Module
+`RegArchMng`, which is what puts them in the manifest at all, the question the
+deleted debugger answered by aliasing. A probe, not an inner dict: the
+`common_field` guard refuses a string-keyed dict literal anywhere in
+`uarch/o3/`, and a class with named attributes is the explicit form anyway. All of it is opt-in
+(`build_model(machine, debug=True)`): without the flag no `dbg_` attribute
+exists, pinned by `tests/test_o3_dbg.py`, which builds the 2-lane RV32I
+machine both ways and reads the probe nodes back off `sim_manifest.json`.
+
 NEXT UP — the function unit, designed 2026-08-19. Step 1 (the declared port
 shape above) and step 2 (`ExecContext` + `AluUnit` + the fake-context test,
 2026-08-22 — see the `exec_context.py` entry above) are done:

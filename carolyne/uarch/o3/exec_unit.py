@@ -26,6 +26,7 @@
 # per-stage kill, and who calls build_issue with exec_meta.
 
 from kathryn import *
+from carolyne.debug.sim import KarrayProbe, PipStatusProbe
 from kathryn.signal import to_ref
 
 from carolyne.uarch.o3.common_field import (IS_SPEC, NPC, PC, ROB_DES_IDX, SPEC_TAG,
@@ -373,3 +374,7 @@ class ExecUnitO3(Module):
             with zif(getattr(src, IS_SPEC)
                      & (getattr(src, SPEC_TAG) == suc_tag)):
                 src |= {SPEC_TAG: 0, IS_SPEC: 0}
+
+    @dbg
+    def dbg_probes(self):
+        self.dbg_stage_metas = [PipStatusProbe(meta) for meta in self.stage_metas]   # [0] is the issue arb

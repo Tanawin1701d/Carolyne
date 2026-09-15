@@ -14,6 +14,7 @@
 #   commit their content into state
 
 from kathryn import *
+from carolyne.debug.sim import KarrayProbe, PipStatusProbe
 from kathryn.signal import to_ref
 
 from carolyne.uarch.o3.common_field import IS_SPEC, ROB_DES_IDX, SPEC_TAG
@@ -393,4 +394,9 @@ class Dispatch(Module):
                 with zelse():
                     self.dispatch_bus[lane] *= {
                         field_name(PR_IDX, atm_opr): prf_idx}
+
+    @dbg
+    def dbg_probes(self):
+        self.dbg_dispatch_meta = PipStatusProbe(self.dispatch_meta)
+        self.dbg_dispatch_bus  = KarrayProbe   (self.dispatch_bus)   # the cycle's candidate lanes
 

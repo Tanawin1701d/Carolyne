@@ -1,4 +1,5 @@
 from kathryn import *
+from carolyne.debug.sim import KarrayProbe, PipStatusProbe
 from kathryn.signal import to_ref
 
 from carolyne.isa import RegFile
@@ -182,3 +183,10 @@ class Rt(Module):
                     copy_row(self.spec_rt[OH(spectag_dyn)],
                              self.temp_dispatch[port_idx],
                              amount, clocked=True)
+
+    @dbg
+    def dbg_probes(self):
+        self.dbg_master_rt     = KarrayProbe(self.master_rt)
+        self.dbg_spec_rt       = KarrayProbe(self.spec_rt)
+        self.dbg_temp_commit   = KarrayProbe(self.temp_commit)
+        self.dbg_temp_dispatch = KarrayProbe(self.temp_dispatch)     # 2-D: rows() is 1-D only

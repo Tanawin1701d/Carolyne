@@ -27,6 +27,7 @@
 # number.
 
 from kathryn import *
+from carolyne.debug.sim import KarrayProbe
 from kathryn.signal import to_ref
 
 from carolyne.isa import RegFile
@@ -79,3 +80,7 @@ class Arf(Module):
             return
         with zif(guard):
             self.storage[dyn_idx].data |= data
+
+    @dbg
+    def dbg_probes(self):
+        self.dbg_storage = KarrayProbe(self.storage)

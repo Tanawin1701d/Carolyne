@@ -90,6 +90,9 @@ class RsvIOR(RsvBase):
         self._free_built = False
 
     # --- dispatch ---------------------------------------------------------------
+    def table_head(self) -> SignalRef:
+        return self.head_ptr
+
     def free_slots(self, dispatch):
         """A run from the allocation pointer, one entry per write port.
 

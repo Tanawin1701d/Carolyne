@@ -17,6 +17,7 @@
 from typing import Sequence
 
 from kathryn import *
+from carolyne.debug.sim import KarrayProbe, PipStatusProbe
 
 from carolyne.uarch.mem.common.mem_port import MemPortReadValid
 from carolyne.uarch.o3.common_field import INSTR, PC, VALID
@@ -113,3 +114,8 @@ class Fetch(Module):
             so_far = ok if so_far is None else so_far & ok
             run.append(so_far)
         return run
+
+    @dbg
+    def dbg_probes(self):
+        self.dbg_fetch_meta = PipStatusProbe(self.fetch_meta)
+        self.dbg_fetch      = KarrayProbe   (self.fetch)          # rows in use: the `valid` field

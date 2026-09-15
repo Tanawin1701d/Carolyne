@@ -38,6 +38,8 @@
 # search_newest's answer THE newest older store.
 
 from kathryn                            import *
+from kathryn import dbg
+from carolyne.debug.sim import KarrayProbe, PipStatusProbe
 from kathryn.signal                     import to_ref
 
 from carolyne.uarch.common              import ceil_log2
@@ -277,3 +279,8 @@ class StoreBuf(Module):
                 self.write_port.write(to_ref(head.data))
                 self.table[self.ret_ptr] |= {BUSY: 0, COMPLETE  : 0}
                 self.ret_ptr             |= self.ret_ptr + 1
+
+    @dbg
+    def dbg_probes(self):
+        self.dbg_retire_meta = PipStatusProbe(self.retire_meta)
+        self.dbg_table       = KarrayProbe   (self.table, head=self.ret_ptr)   # rows in use: the `busy` field

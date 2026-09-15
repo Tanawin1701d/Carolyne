@@ -21,6 +21,8 @@ from contextlib import contextmanager
 from typing import Iterator, List
 
 from kathryn import Module
+from kathryn import dbg
+from carolyne.debug.sim import PipStatusProbe
 from kathryn import _session
 
 from carolyne.uarch.mem.common.addr_meta import AddrMeta
@@ -111,3 +113,8 @@ class MemBase(Module):
 
     def get_read_port (self, idx: int) -> MemPortRead : return self.read_ports[idx]
     def get_write_port(self, idx: int) -> MemPortWrite: return self.write_ports[idx]
+
+    @dbg
+    def dbg_probes(self):
+        self.dbg_read_ports  = [PipStatusProbe(port.pip_meta) for port in self.read_ports]
+        self.dbg_write_ports = [PipStatusProbe(port.pip_meta) for port in self.write_ports]

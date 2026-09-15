@@ -26,6 +26,7 @@
 from typing import Sequence
 
 from kathryn import *
+from carolyne.debug.sim import PipStatusProbe, RegClassProbe
 
 from carolyne.uarch.mem.common.mem_port import MemPortRead, MemPortWrite
 from carolyne.uarch.o3.config import CPUO3_Config
@@ -263,3 +264,11 @@ class CoreO3(Module):
             raise ValueError(
                 f"CoreO3: {where} moves {port.addr_meta.data_bus_bits} bits, "
                 f"the ISA states {data_bits}")
+
+    @dbg
+    def dbg_probes(self):
+        self.dbg_backend_meta = PipStatusProbe(self.backend_meta)
+        # The register-class blocks are behind RegArchMng, which is not a
+        # Module: named here, so the manifest reaches them and their probes.
+        self.dbg_reg_arch = {entry.reg_file.name: RegClassProbe(entry.arf, entry.prf, entry.rt)
+                             for entry in self.reg_arch_mng.classes}

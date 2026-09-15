@@ -1,4 +1,5 @@
 from kathryn import *
+from carolyne.debug.sim import KarrayProbe, PipStatusProbe
 from kathryn.signal import to_ref
 
 from carolyne.uarch.common.karray_util import OH
@@ -111,3 +112,7 @@ class Mpft(Module):
         sp_tag_len = self.config.sptag_len
         for row_idx in range(sp_tag_len):
             self.storage[row_idx] |= to_ref(self.storage[row_idx].fix_tag) & ~last_valid_spec_tag_dyn
+
+    @dbg
+    def dbg_probes(self):
+        self.dbg_storage = KarrayProbe(self.storage)

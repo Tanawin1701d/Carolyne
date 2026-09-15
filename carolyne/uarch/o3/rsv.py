@@ -26,7 +26,10 @@
 
 from dataclasses import dataclass
 
+from typing import Optional
+
 from kathryn import *
+from carolyne.debug.sim import KarrayProbe, PipStatusProbe
 from kathryn.signal import to_ref
 
 from carolyne.isa import RegFile
@@ -125,6 +128,9 @@ class RsvBase(Module):
         self.exec_metas = [None] * self.unit_cnt
 
     # --- reads -----------------------------------------------------------------
+    def table_head(self) -> Optional[SignalRef]:
+        return None                     # an in-order station names its head pointer
+
     def slot_ready(self, row):
         """This entry is occupied and every source it waits for has landed.
 
@@ -312,3 +318,9 @@ class RsvBase(Module):
                         self.table[row_idx] |= {
                             valid_f                        : 1,
                             field_name(DATA, atm_operand)  : bypass.data}
+
+    @dbg
+    def dbg_probes(self):
+        self.dbg_issue_metas = [PipStatusProbe(meta) for meta in self.issue_metas]
+        self.dbg_table       = KarrayProbe(self.table, head=self.table_head())   # rows in use: the `valid` field
+        self.dbg_exec_src    = [KarrayProbe(slot) for slot in self.exec_src]

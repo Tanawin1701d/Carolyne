@@ -19,6 +19,7 @@
 # - `group_uops_by_level` is the mop table flattened for that walk
 
 from kathryn import *
+from carolyne.debug.sim import KarrayProbe, PipStatusProbe
 from kathryn.signal import to_ref
 
 from carolyne.isa import IsaBase, Mop, Uop, UopSeq
@@ -279,3 +280,8 @@ class Decode(Module):
         """
         ids = self.config.rsv_ids_for(uop)
         return ids[lane % len(ids)]
+
+    @dbg
+    def dbg_probes(self):
+        self.dbg_decode_meta = PipStatusProbe(self.decode_meta)
+        self.dbg_decode      = KarrayProbe   (self.decode)        # rows in use: the `valid` field

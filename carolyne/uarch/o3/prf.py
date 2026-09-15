@@ -39,6 +39,7 @@
 # Backwards, it silently truncates.
 
 from kathryn import *
+from carolyne.debug.sim import KarrayProbe, PipStatusProbe
 from kathryn.signal import to_ref
 
 from carolyne.isa import RegFile
@@ -247,3 +248,8 @@ class Prf(Module):
         with priority(PRI_MIS_PRED):
             self.next_index |= pre_next_index
             self.free_entry |= self.free_entry + reclaimed.extend(self.cnt_width)
+
+    @dbg
+    def dbg_probes(self):
+        self.dbg_storage   = KarrayProbe(self.storage)
+        self.dbg_read_lane = KarrayProbe(self.read_lane)

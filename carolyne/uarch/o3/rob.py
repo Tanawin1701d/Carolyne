@@ -29,6 +29,7 @@
 # mispredict CLEARS the grant and nothing retires that cycle.
 
 from kathryn import *
+from carolyne.debug.sim import KarrayProbe, PipStatusProbe
 from kathryn.signal import to_ref
 
 from carolyne.uarch.common import ceil_log2
@@ -328,3 +329,8 @@ class Rob(Module):
             self.alloc_ptr |= to_ref(rob_idx) + 1
             self.used_entry_cnt |= (to_ref(rob_idx) - self.com_ptr
                                ).extend(self.cnt_width) + 1
+
+    @dbg
+    def dbg_probes(self):
+        self.dbg_commit_meta = PipStatusProbe(self.commit_meta)
+        self.dbg_table       = KarrayProbe   (self.table, head=self.com_ptr, count=self.used_entry_cnt)

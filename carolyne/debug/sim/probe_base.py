@@ -12,9 +12,9 @@ from kathryn import DebugProbe, SignalRef
 class ProbeBase(DebugProbe):
     """The model half of a probe: its signals, and how its sim half is built."""
 
-    def set_if_bound(self, name: str, sig: Optional[SignalRef]) -> None:
-        if sig is not None:                         # None: no manifest child, not a None attribute
-            setattr(self, name, sig)
+    def set_if_bound(self, name: str, value: Optional[Any]) -> None:
+        if value is not None:                       # None: no manifest child, not a None attribute
+            setattr(self, name, value)          # a signal, a table, or a Module the class may not have
 
     def convert(self, sim_reps: Any) -> Any:
         """Build this probe's sim half from `sim_reps`, its manifest node (`k.<attr>`).
