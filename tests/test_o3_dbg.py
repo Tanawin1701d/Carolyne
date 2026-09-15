@@ -10,13 +10,13 @@ from kathryn import build_model, emit_verilog, reset
 from kathryn.sim.manifest.schema import SIM_MANIFEST_FILE
 
 from carolyne.debug.sim import KarrayProbe, PipStatusProbe, RegClassProbe
-from examples.o3_riscv32.rv_build import build_machine
-from examples.o3_riscv32.rv_config import rv32i_config
+from examples.o3.core.build import build_machine
+from examples.o3.rv32im.config import rv32im_config
 
 
 def build_debug_machine():
     reset()
-    return build_model(build_machine(rv32i_config(fe_lanes=2, commit_lanes=2)), debug=True)
+    return build_model(build_machine(rv32im_config(fe_lanes=2, commit_lanes=2)), debug=True)
 
 
 def test_every_stage_exposes_its_arbiter_and_its_table():
@@ -58,7 +58,7 @@ def test_the_core_names_the_register_class_blocks_and_the_memories_their_ports()
 
 def test_without_the_flag_nothing_is_exposed():
     reset()
-    m = build_model(build_machine(rv32i_config(fe_lanes=2, commit_lanes=2)))
+    m = build_model(build_machine(rv32im_config(fe_lanes=2, commit_lanes=2)))
     assert not hasattr(m.core.fetch, "dbg_fetch_meta") and not hasattr(m.core, "dbg_reg_arch")
 
 

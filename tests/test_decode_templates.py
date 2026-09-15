@@ -10,10 +10,10 @@ import pytest
 
 from carolyne.isa import (ExecUnit, InstrFieldMatch, InstrValueMatch, IsaBase,
                           Mop, Uop, UopSeq)
-from carolyne.isa.riscv import Rv32i, uop as U
+from carolyne.isa.riscv import Rv32im, uop as U
 from carolyne.uarch.o3.decode import group_uops_by_level
 
-ISA    = Rv32i()
+ISA    = Rv32im()
 X      = ISA.reg_file("x")
 LEVELS = group_uops_by_level(ISA)
 
@@ -49,8 +49,6 @@ def test_every_encoding_picks_exactly_one_uop():
         "beq x1,x2"    : (_word(0b1100011, funct3=0b000, rs1=1, rs2=2), U.UOP_BEQ),
         "lui x1,0x1000": (_word(0b0110111, rd=1) | 0x1000 << 12, U.UOP_LUI),
         "jal x1"       : (_word(0b1101111, rd=1), U.UOP_JAL),
-        "ecall"        : (_word(0b1110011, funct3=0b000), U.UOP_ECALL),
-        "ebreak"       : (_word(0b1110011, funct3=0b000) | 1 << 20, U.UOP_EBREAK),
     }
     for asm, (word, want) in cases.items():
         picked = _hits(word)
@@ -70,7 +68,7 @@ def test_rv32i_reaches_every_uop_in_one_level():
     # nothing cracks and the walk is a single cycle.
     assert len(LEVELS) == 1
     reached = [uop for _matchers, uop in LEVELS[0]]
-    assert len(reached) == len(ISA.uops) == 40
+    assert len(reached) == len(ISA.uops) == 45
     assert {id(u) for u in reached} == {id(u) for u in ISA.uops}
 
 

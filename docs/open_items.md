@@ -113,6 +113,31 @@ next is below.
 
 ---
 
+## The M extension
+
+- [ ] **The multiply/divide unit is elaborated, not simulated.** `MulDivExecUnit`
+      (`carolyne/isa/riscv/exec_unit_muldiv.py`) emits and compiles, and its
+      µops decode; no program has yet run a `mul` or a `div` through the core.
+      *Closes when:* a C program with a volatile multiply and a signed divide
+      (INT_MIN / -1, a divisor of zero) prints the spec's answers in simulation.
+- [ ] **The divider is combinational.** A 32-bit `/` and `%` in one stage is
+      the longest path in the core; the in-order `muldiv` station keeps it off
+      the ALUs but not off fmax. A sequential (restoring) divider looping in
+      its stage is the replacement.
+      *Where:* `carolyne/isa/riscv/exec_unit_muldiv.py`.
+
+## Compile tool
+
+- [ ] **MIPS32 is built, not verified, and not yet compiled here.** `mips32`
+      is a target (`examples/compile_tool/target.py`) with no
+      `carolyne/isa/mips` description behind it, so `verify` is skipped with
+      a report that says so; the flags, `crt0_mips.S` and the linker script
+      are untested until `gcc-mipsel-linux-gnu` is installed.
+      *Where:* `examples/compile_tool/target.py` (`MIPS32`), `runtime/crt0_mips.S`.
+      *Closes when:* the compiler is installed and `test_a_mips_program_builds_and_is_not_verified`
+      runs; a MIPS description (branch-delay slots against the µop contract)
+      is its own bring-up.
+
 ## Kathryn handshake (found by the debug probes, 2026-09-14)
 
 - [ ] **A parked zync does not back-pressure the stage upstream of it.**

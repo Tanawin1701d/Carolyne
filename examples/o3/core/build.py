@@ -1,5 +1,7 @@
-# The HARDWARE half of the RV32I example: the memories, their ports, and the
-# core wired to them.
+# The HARDWARE half of the O3 example: the memories, their ports, and the
+# core wired to them — for ANY ISA a CPUO3_Config carries. Nothing here names
+# one: the RV32IM config is examples/o3/rv32im/config.py, a MIPS config would
+# sit beside it and build this same machine.
 #
 # Everything is declared inside ONE module's @init. Sibling TOP-LEVEL modules
 # share no ancestor and emit_verilog panics on them, so the machine — not the
@@ -18,16 +20,16 @@ from carolyne.uarch.mem.easy_mem import EasyMem
 from carolyne.uarch.o3.config import CPUO3_Config
 from carolyne.uarch.o3.core import CoreO3
 
-from .rv_config import rv32i_config
 
+class O3Machine(Module):
+    """One out-of-order core with its instruction and data memory."""
 
-class Rv32iO3Machine(Module):
-    """One RV32I out-of-order core with its instruction and data memory."""
-
-    def __init__(self, config: CPUO3_Config = None):
+    def __init__(self, config: CPUO3_Config):
         # Plain-Python configuration BEFORE super().__init__(): that call runs
         # com_declare, which builds everything from it.
-        self.config = config or rv32i_config()
+        if not isinstance(config, CPUO3_Config):
+            raise TypeError(f"O3Machine: config must be a CPUO3_Config, got {type(config).__name__}")
+        self.config = config
         super().__init__()
 
     @init
@@ -48,6 +50,6 @@ class Rv32iO3Machine(Module):
         self.core = CoreO3(self.config, instr_ports, data_read, data_write)
 
 
-def build_machine(config: CPUO3_Config = None) -> Rv32iO3Machine:
+def build_machine(config: CPUO3_Config) -> O3Machine:
     """The machine, ready for set_top(). Call inside a fresh reset()."""
-    return Rv32iO3Machine(config)
+    return O3Machine(config)

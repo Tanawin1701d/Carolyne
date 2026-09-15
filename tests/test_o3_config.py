@@ -4,10 +4,10 @@
 import pytest
 
 from carolyne.isa import ExecUnit, Uop
-from carolyne.isa.riscv import Rv32i, x_file
+from carolyne.isa.riscv import Rv32im, x_file
 from carolyne.uarch.o3.config import CPUO3_Config, RsvSpec, RsvType
 
-ISA   = Rv32i()
+ISA   = Rv32im()
 X     = ISA.reg_file("x")
 UNITS = ISA.exec_units                      # every unit RV32I declares
 ALU   = (ISA.unit("alu"),)                  # one unit: all an in-order station may feed
@@ -16,7 +16,7 @@ ALU   = (ISA.unit("alu"),)                  # one unit: all an in-order station 
 STATIONS = (RsvSpec(False, 16, ALU,                      RsvType.RSV_EXEC),
             RsvSpec(False, 16, (ISA.unit("mem"),),       RsvType.RSV_LD_ST),
             RsvSpec(False, 16, (ISA.unit("control"),),   RsvType.RSV_BRANCH),
-            RsvSpec(False, 16, (ISA.unit("system"),),    RsvType.RSV_EXEC))
+            RsvSpec(False, 16, (ISA.unit("muldiv"),),    RsvType.RSV_EXEC))
 
 
 def _cfg(**overrides):
@@ -32,13 +32,13 @@ def test_the_reset_vector_comes_from_the_isa_and_is_never_copied():
     # One number: the machine that wants another reset vector builds another
     # ISA, so the config and the description cannot disagree about it.
     assert _cfg().reset_pc == ISA.reset_pc
-    assert _cfg(isa=Rv32i(reset_pc=0x80000000)).reset_pc == 0x80000000
+    assert _cfg(isa=Rv32im(reset_pc=0x80000000)).reset_pc == 0x80000000
     assert "reset_pc" not in CPUO3_Config.__dataclass_fields__
 
 
 def test_a_config_is_an_isa_plus_the_machine_knobs():
     cfg = _cfg()
-    assert cfg.isa.name == "rv32i"
+    assert cfg.isa.name == "rv32im"
     # Derived from the ISA — never copied, so it cannot go stale.
     assert cfg.pc_width == 32 and cfg.instr_width == 32
     # Derived from the knobs, the same store-the-count/derive-the-log2 rule
@@ -58,11 +58,11 @@ def test_phy_specs_is_keyed_by_the_reg_file_instance():
     # unhashable, and identity is the rule IsaBase already uses.
     with pytest.raises(TypeError, match="unhashable"):
         {X: 64}
-    # Rv32i() shares one RegFile instance by design, so a real twin comes from
+    # Rv32im() shares one RegFile instance by design, so a real twin comes from
     # x_file(), the builder behind it.
     twin = x_file()
     assert twin == X and twin is not X       # value-equal, different instance
-    with pytest.raises(ValueError, match="which ISA 'rv32i' does not declare"):
+    with pytest.raises(ValueError, match="which ISA 'rv32im' does not declare"):
         _cfg(phy_specs=((twin, 64),))
 
 
@@ -113,8 +113,8 @@ def test_a_station_holds_its_unit_set_to_its_issue_policy():
     with pytest.raises(ValueError, match="IN-ORDER station feeds 4"):
         RsvSpec(False, 16, UNITS, RsvType.RSV_BRANCH)
     # Out of order there is no order to keep, so several units are legal.
-    o3 = RsvSpec(True, 16, (ISA.unit("alu"), ISA.unit("system")), RsvType.RSV_EXEC)
-    assert o3.label == "alu/system"
+    o3 = RsvSpec(True, 16, (ISA.unit("alu"), ISA.unit("muldiv")), RsvType.RSV_EXEC)
+    assert o3.label == "alu/muldiv"
     # Two units need the order for themselves: a branch returns its tag in
     # order, and the store buffer forwards the newest OLDER store.
     with pytest.raises(ValueError, match="branch on an OUT-OF-ORDER station"):

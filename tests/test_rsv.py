@@ -13,24 +13,23 @@ from kathryn import Module, _session, init, reset
 from carolyne.isa import (AtomicOperand, ExecUnit, FieldRef, InstrFieldMatch,
                           Intermediate, IsaBase, Mop, Operand, OperandRole,
                           TargetKind, Uop, UopSeq)
-from carolyne.isa.riscv import Rv32i
+from carolyne.isa.riscv import Rv32im
 from carolyne.uarch.o3.config import CPUO3_Config, RsvSpec, RsvType
 from carolyne.uarch.o3.rsv_helper import (RsvIOREntry, RsvO3Entry, build_rsv_table,
                                           rsv_entry_shape,
                                    operand_fields, station_atm_operands)
 
-ISA     = Rv32i()
+ISA     = Rv32im()
 X       = ISA.reg_file("x")
 ALU     = ISA.unit("alu")
 MEM     = ISA.unit("mem")           # the unit whose µops read the immediate
-SYSTEM  = ISA.unit("system")        # ecall/ebreak: no operands at all
 
 
 # One unit per station: an in-order station may feed only one (config.RsvSpec).
 STATIONS = (RsvSpec(False, 16, (ISA.unit("alu"),),     RsvType.RSV_EXEC),
             RsvSpec(False, 16, (ISA.unit("mem"),),     RsvType.RSV_LD_ST),
             RsvSpec(False, 16, (ISA.unit("control"),), RsvType.RSV_BRANCH),
-            RsvSpec(False, 16, (ISA.unit("system"),),  RsvType.RSV_EXEC))
+            RsvSpec(False, 16, (ISA.unit("muldiv"),),  RsvType.RSV_EXEC))
 
 
 def _cfg(**overrides):
@@ -182,9 +181,11 @@ def test_atomic_operands_are_gathered_once_across_the_stations_units():
 
 
 def test_a_station_whose_unit_reads_nothing_is_just_the_base_shape():
-    # RV32I's system unit runs ecall/ebreak, which name no operand.
+    # A unit whose µop names no operand (a fence would) adds no field group.
+    from carolyne.isa import ExecUnit, Uop
+    nop  = ExecUnit("nop", (Uop("NOP", 0),))
     cfg  = _cfg()
-    spec = RsvSpec(True, 16, (SYSTEM,), RsvType.RSV_EXEC)
+    spec = RsvSpec(True, 16, (nop,), RsvType.RSV_EXEC)
     assert station_atm_operands(ISA, spec) == ()
 
     host = _build(cfg, spec)

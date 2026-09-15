@@ -20,7 +20,7 @@
 # The operand rules are module constants, so the register class they target is
 # one too: `reg.RegFile`, built by `x_file()` and shared by every shape and by
 # the `reg_files=(RegFile,)` the description declares, because IsaBase matches
-# reg files by IDENTITY. Two Rv32i() builds therefore share it; call `x_file()`
+# reg files by IDENTITY. Two Rv32im() builds therefore share it; call `x_file()`
 # and build your own operands for a genuinely independent description.
 # MOP_TABLE is shared on the same terms; `exec_units()` stays a function.
 #
@@ -43,11 +43,11 @@ from .operand import (OPR_IMM_B, OPR_IMM_I, OPR_IMM_J, OPR_IMM_S, OPR_IMM_U,
                       OPR_RS2)
 from .mop import MOP_TABLE
 from .reg import ImmTarget, RegFile, X_LEN, x_file
-from .rv32i import Rv32i
+from .rv32im import Rv32im
 from .uop import BRANCHES, LOADS, STORES, UOPS
 
 __all__ = [
-    "Rv32i", "MOP_TABLE", "exec_units",
+    "Rv32im", "MOP_TABLE", "exec_units",
     "AluExecUnit", "BrExecUnit", "LSExecUnit",
     "PC_WIDTH", "PC_ALIGN", "ILEN_BYTES",
     "RegFile", "ImmTarget", "X_LEN", "x_file",

@@ -5,9 +5,8 @@
 # cannot drift from the RTL.
 #
 # Its consumers: the linker script (ldscript.py), the C header (cheader.py),
-# the image writer (image.py), and the run driver
-# (examples/o3_riscv32/sim/harness.py), which passes the addresses on to the
-# debugger and the renderers.
+# the image writer (image.py), and whatever loads the images into the machine
+# (examples/o3/core/build.py) and watches its store port.
 #
 # The two memories are SEPARATE, so each region states its own base. The data
 # base costs nothing: the load/store unit part-selects the word index down to
@@ -22,6 +21,8 @@ from dataclasses import dataclass
 from carolyne.uarch.o3.config import CPUO3_Config
 from carolyne.util import is_power_of_two
 
+from .machine import idx_width_for
+
 # --- fixed choices ------------------------------------------------------------
 
 DMEM_BASE = 0x10000000      # any multiple of the data memory size would serve
@@ -31,7 +32,7 @@ DMEM_BASE = 0x10000000      # any multiple of the data memory size would serve
 #
 # 0x10000000, not 0x80000000: a pc-relative pair (auipc+addi, what `la` and
 # `call` assemble to) reaches +-2GB, and 0x80000000 is exactly that far from a
-# code region at 0, Rv32i's default reset vector — the edge of the range.
+# code region at 0, Rv32im's default reset vector — the edge of the range.
 
 MMIO_BYTES = 16                                 # reserved at the TOP of the data region
 MMIO_NAMES = ("putchar", "putint", "exit")      # one word each, in this order
@@ -97,6 +98,27 @@ class MemoryLayout:
                    dmem_bytes     = data.size_bytes,
                    dmem_idx_width = data.index_width,
                    word_bytes     = data.data_bus_bytes)
+
+    @classmethod
+    def from_sizes(cls,
+                   imem_bytes : int,
+                   dmem_bytes : int,
+                   banks      : int,
+                   reset_pc   : int,
+                   word_bytes : int = 4,
+                   dmem_base  : int = DMEM_BASE) -> "MemoryLayout":
+        """The layout for a target with no Carolyne machine yet (mips32).
+        - the same shape from_config derives, sized the way machine.py sizes a
+          memory, so the images fit the machine that will exist
+        """
+        return cls(imem_base      = reset_pc,
+                   imem_bytes     = imem_bytes,
+                   imem_banks     = banks,
+                   imem_idx_width = idx_width_for(imem_bytes, banks, word_bytes),
+                   dmem_base      = dmem_base,
+                   dmem_bytes     = dmem_bytes,
+                   dmem_idx_width = idx_width_for(dmem_bytes, 1, word_bytes),
+                   word_bytes     = word_bytes)
 
     def __post_init__(self) -> None:
         self._reject_bad_region("instruction", self.imem_base, self.imem_bytes)

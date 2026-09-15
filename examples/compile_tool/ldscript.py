@@ -19,14 +19,16 @@ from __future__ import annotations
 
 from .layout import MemoryLayout
 from .render import render_file
+from .target import Target
 
 TEMPLATE_NAME = "link.ld.in"
 
 
-def render_linker_script(layout: MemoryLayout) -> str:
-    """The whole script for this layout, ready to write next to the objects."""
+def render_linker_script(layout: MemoryLayout, target: Target) -> str:
+    """The whole script for this layout and target, ready to write next to the objects."""
     symbols = "\n".join(f"__mmio_{name:<8} = 0x{addr:08x};"
                         for name, addr in layout.mmio_addrs.items())
+    discard = "\n".join(f"    *({section})" for section in target.discard)
 
     return render_file(TEMPLATE_NAME,
                        {"IMEM_BASE"   : f"0x{layout.imem_base:08x}",
@@ -34,4 +36,7 @@ def render_linker_script(layout: MemoryLayout) -> str:
                         "DMEM_BASE"   : f"0x{layout.dmem_base:08x}",
                         "DATA_BYTES"  : layout.data_bytes,
                         "MMIO_SYMBOLS": symbols,
-                        "STACK_TOP"   : f"0x{layout.stack_top:08x}"})
+                        "STACK_TOP"   : f"0x{layout.stack_top:08x}",
+                        "OUTPUT_ARCH" : target.output_arch,
+                        "GP_SYMBOL"   : target.gp_symbol,
+                        "DISCARD_ARCH": discard})

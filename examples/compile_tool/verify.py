@@ -60,6 +60,12 @@ class VerifyReport:
     isa_name : str
     checked  : int
     problems : Tuple[Problem, ...]
+    skipped  : bool = False       # no description to hold the program to (target.py says which)
+
+    @classmethod
+    def not_verified(cls, target_name: str) -> "VerifyReport":
+        return cls(isa_name=f"(no ISA description for {target_name})", checked=0,
+                   problems=(), skipped=True)
 
     @property
     def ok(self) -> bool: return not self.problems
@@ -80,6 +86,8 @@ class VerifyReport:
             f"not got, or the encoding table is incomplete.")
 
     def describe(self) -> str:
+        if self.skipped:
+            return f"not verified: {self.isa_name}"
         return (f"verified {self.checked} instructions against "
                 f"{self.isa_name}: {'ok' if self.ok else 'FAILED'}")
 

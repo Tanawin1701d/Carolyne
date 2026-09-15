@@ -10,7 +10,7 @@ from carolyne.isa import (
     OperandRole, TargetKind)
 from carolyne.isa.riscv import (
     ILEN_BYTES, ImmTarget, MOP_TABLE, OPR_IMMS, OPR_RD, OPR_RS1, OPR_RS2,
-    RegFile, Rv32i, UOPS, X_LEN, field_match as FM, uop as U, x_file,
+    RegFile, Rv32im, UOPS, X_LEN, field_match as FM, uop as U, x_file,
 )
 
 
@@ -24,8 +24,8 @@ def _uops(isa, want=None):
 def test_rv32i_builds_and_passes_the_container_checks():
     # Construction IS the test: IsaBase rejects an undeclared µop, an
     # undeclared reg file, or a µop no unit executes.
-    isa = Rv32i()
-    assert isinstance(isa, IsaBase) and isa.name == "rv32i"
+    isa = Rv32im()
+    assert isinstance(isa, IsaBase) and isa.name == "rv32im"
     assert isa.reg_file("x").amount == 32 and isa.reg_file("x").is_const(0)
     assert set(map(id, isa.used_uops())) <= set(map(id, isa.uops))
     assert [r.name for r in isa.used_reg_files()] == ["x"]
@@ -33,29 +33,29 @@ def test_rv32i_builds_and_passes_the_container_checks():
 
 def test_rv32i_is_a_subclass_supplying_defaults_not_a_factory():
     # A per-ISA package may subclass IsaBase (isa.py header), and RV32I does:
-    # every vocabulary is a field DEFAULT, so Rv32i() is the whole description
+    # every vocabulary is a field DEFAULT, so Rv32im() is the whole description
     # and one part can be varied without a builder signature for the rest.
-    isa = Rv32i()
-    assert issubclass(Rv32i, IsaBase)
-    dbg = Rv32i(name="rv32i-dbg")
+    isa = Rv32im()
+    assert issubclass(Rv32im, IsaBase)
+    dbg = Rv32im(name="rv32i-dbg")
     assert dbg.name == "rv32i-dbg" and dbg.mops is isa.mops
 
     # It stays DATA: no behaviour is overridden, so every inherited check runs.
     assert type(isa).__post_init__ is IsaBase.__post_init__
     with pytest.raises(ValueError):
-        Rv32i(name="")
+        Rv32im(name="")
     with pytest.raises(ValueError, match="does not declare in uops"):
-        Rv32i(uops=(U.UOP_ADD,))            # a mop uses the other 39
+        Rv32im(uops=(U.UOP_ADD,))            # a mop uses the other 39
 
     # Defaults are shared instances, which is what the identity checks need.
-    assert Rv32i().operands is isa.operands and Rv32i().uops is isa.uops
+    assert Rv32im().operands is isa.operands and Rv32im().uops is isa.uops
 
 
 def test_every_declared_uop_is_actually_used_by_the_table():
     # The container allows declaring more than the mops use; for a real ISA
     # an unused template means a missing instruction, so pin the stronger
     # property.
-    isa = Rv32i()
+    isa = Rv32im()
     assert set(map(id, isa.uops)) == set(map(id, isa.used_uops()))
 
 
@@ -63,7 +63,7 @@ def test_memory_width_and_branch_condition_are_uops_not_sub_fields():
     # lb/lh/lw/lbu/lhu, sb/sh/sw and the six branches are distinct kinds, so
     # the µop record needs no size/sign field and no cond-kind field
     # (uop.py header). auipc is likewise its own µop, not an ADD.
-    isa = Rv32i()
+    isa = Rv32im()
     assert {u.name for u in U.LOADS}    == {"LB", "LH", "LW", "LBU", "LHU"}
     assert {u.name for u in U.STORES}   == {"SB", "SH", "SW"}
     assert {u.name for u in U.BRANCHES} == {"BEQ", "BNE", "BLT", "BGE", "BLTU", "BGEU"}
@@ -73,7 +73,7 @@ def test_memory_width_and_branch_condition_are_uops_not_sub_fields():
 
 
 def test_unit_routing_covers_every_uop():
-    isa = Rv32i()
+    isa = Rv32im()
     for uop in isa.uops:
         assert isa.units_for(uop), f"no unit executes {uop.name}"
     assert [u.name for u in isa.units_for(U.UOP_LW)]    == ["mem"]
@@ -93,16 +93,16 @@ def test_the_operand_rules_and_the_description_share_one_register_class():
     # IsaBase matches reg files by identity, and the operand rules are module
     # constants — so the class they target must BE the class the description
     # declares. Sharing reg.RegFile is what makes that true by construction.
-    isa = Rv32i()
+    isa = Rv32im()
     assert isa.reg_file("x") is RegFile
     assert all(operand.target in (RegFile, ImmTarget)
                for uop in _uops(isa) for operand in uop.srcs + uop.dests)
     # Accepted cost: two builds share the class. x_file() is the way out.
-    assert Rv32i().reg_file("x") is isa.reg_file("x")
+    assert Rv32im().reg_file("x") is isa.reg_file("x")
     assert x_file() is not RegFile and x_file() == RegFile
     # MOP_TABLE is shared on the same terms — frozen data all the way down, so
     # handing every build the same tuple changes nothing observable.
-    assert isa.mops is MOP_TABLE and Rv32i().mops is MOP_TABLE
+    assert isa.mops is MOP_TABLE and Rv32im().mops is MOP_TABLE
 
 
 def test_operand_rules_agree_with_the_field_match_table():
@@ -135,7 +135,7 @@ def test_immediates_ride_in_srcs_for_now():
     # immediate occupies a source slot — which contract §2 says it should not
     # (uop.py header). RV32I still fits the §2 cap: store and branch are the
     # widest at rs1 + rs2 + imm.
-    isa = Rv32i()
+    isa = Rv32im()
     with_imm = [uop for uop in _uops(isa)
                 if any(o.target is ImmTarget for o in uop.srcs)]
     assert len(with_imm) == 27                  # every instruction but the R-type
@@ -151,7 +151,7 @@ def test_rv32i_needs_no_micro_temps():
     # two are indistinguishable by type today, which is why this test names
     # the instance rather than the class. The µtemp mechanism proper is
     # pinned by the x86 read-modify-write shape in test_uop.py.
-    isa = Rv32i()
+    isa = Rv32im()
     temps = [operand.target
              for uop in _uops(isa) for operand in uop.srcs + uop.dests
              if isinstance(operand.target, Intermediate)]
@@ -161,7 +161,7 @@ def test_rv32i_needs_no_micro_temps():
 def test_load_and_store_are_single_uops():
     # RV32I addressing is base+imm only: the address is not a value a second
     # µop consumes, so no AGU µop and no address µtemp.
-    isa = Rv32i()
+    isa = Rv32im()
     lw, = _uops(isa, U.UOP_LW)
     assert [o.matcher.name for o in lw.srcs] == ["rs1", "imm_i"]
     assert lw.dests[0].index.name == "rd"
@@ -174,7 +174,7 @@ def test_load_and_store_are_single_uops():
 def test_every_rv32i_instruction_is_one_uop():
     # No cracking in this ISA: jal/jalr were the last two-µop shapes and the
     # jump µop now writes its own link register (rv32i.py header).
-    isa = Rv32i()
+    isa = Rv32im()
     assert all(len(seq.uops) == 1 for mop in isa.mops for seq in mop.uop_seq)
 
     j, = _uops(isa, U.UOP_JAL)
@@ -188,7 +188,7 @@ def test_pc_is_not_a_register_class_but_still_has_a_width():
     # The program counter is front-end / ROB state, not something the engine
     # renames through a PRF port (reg.py header). Consequence: the
     # pc-relative shapes are missing an input this layer cannot name.
-    isa = Rv32i()
+    isa = Rv32im()
     assert [r.name for r in isa.reg_files] == ["x"]
     with pytest.raises(ValueError):
         isa.reg_file("pc")
@@ -208,9 +208,9 @@ def test_the_mop_table_wraps_every_uop_template_exactly_once():
     # encodings. A template written but never wrapped in a UopSeq is an
     # instruction no decoder will ever see, and no container check catches it
     # — IsaBase validates what the table USES, not what the package declares.
-    isa = Rv32i()
+    isa = Rv32im()
     table = _uops(isa)
-    assert len(table) == len(UOPS) == 40
+    assert len(table) == len(UOPS) == 45
 
     # Identity, not equality — belt and braces. ecall and ebreak differ only
     # in their match value (both are TRAP on imm_i), so they were literally
@@ -226,7 +226,7 @@ def test_every_matcher_in_the_table_states_a_value():
     # those bits must equal. The rules are on the Mops and UopSeqs: a Uop
     # template carries no matcher. Only LUI/AUIPC/JAL's seqs name no field:
     # their opcode alone identifies them, and that opcode is the Mop's rule.
-    isa = Rv32i()
+    isa = Rv32im()
     for mop in isa.mops:
         assert mop.matcher_field is FM.OPCODE and mop.matcher_value is not None
         for seq in mop.uop_seq:
@@ -239,21 +239,11 @@ def test_every_matcher_in_the_table_states_a_value():
                 if seq.matcher_field is None]
     assert no_funct == ["LUI", "AUIPC", "JAL"]              # opcode alone
 
-    # Every opcode in the table is distinct — 11 groups, 11 patterns.
+    # Every opcode in the table is distinct — 9 groups, 9 patterns. SYSTEM
+    # (1110011) and MISC-MEM (0001111) are out until a trap policy exists.
     opcodes = [m.matcher_value.match_value for m in isa.mops]
-    assert len(set(opcodes)) == len(opcodes) == 11
-    assert (0b0110011,) in opcodes and (0b1110011,) in opcodes
-
-    # ecall vs ebreak: equal templates but for name and id; the imm value on
-    # their UopSeqs is what separates the encodings.
-    system = next(m for m in isa.mops
-                  if m.matcher_value.match_value == (0b1110011,))
-    ecall_seq, ebreak_seq = system.uop_seq
-    assert ecall_seq.uops == (U.UOP_ECALL,)
-    assert ecall_seq.matcher_field is FM.IMM_I is ebreak_seq.matcher_field
-    assert ecall_seq.matcher_value.match_value  == (0b000000000000,)
-    assert ebreak_seq.matcher_value.match_value == (0b000000000001,)
-    assert U.UOP_ECALL != U.UOP_EBREAK          # name and id still differ
+    assert len(set(opcodes)) == len(opcodes) == 9
+    assert (0b0110011,) in opcodes and (0b1110011,) not in opcodes
 
 
 def test_the_six_instruction_formats_tile_the_word():
@@ -296,7 +286,7 @@ def test_the_package_is_description_data_only():
     import ast, pathlib
 
     SEMANTICS = {"exec_unit_alu.py", "exec_unit_br.py", "exec_unit_ls.py",
-                 "exec_unit_util.py"}
+                 "exec_unit_muldiv.py", "exec_unit_util.py"}
 
     pkg = pathlib.Path(__file__).resolve().parents[1] / "carolyne" / "isa" / "riscv"
     for source in sorted(pkg.glob("*.py")):

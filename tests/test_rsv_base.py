@@ -9,12 +9,12 @@ import pytest
 from kathryn import (Module, build_flow, flow, gen_flow, init, reset, set_top,
                      wire, zif)
 
-from carolyne.isa.riscv import Rv32i
+from carolyne.isa.riscv import Rv32im
 from carolyne.uarch.o3.config import CPUO3_Config, RsvSpec, RsvType
 from carolyne.uarch.o3.dispatch_helper import build_dispatch
 from carolyne.uarch.o3.rsv import RsvBase, RsvBypass
 
-ISA  = Rv32i()
+ISA  = Rv32im()
 X    = ISA.reg_file("x")
 ALU  = ISA.unit("alu")
 MEM  = ISA.unit("mem")
@@ -24,7 +24,7 @@ MEM  = ISA.unit("mem")
 STATIONS = (RsvSpec(False, 8, (ISA.unit("alu"),),     RsvType.RSV_EXEC),
             RsvSpec(False, 8, (ISA.unit("mem"),),     RsvType.RSV_LD_ST),
             RsvSpec(False, 8, (ISA.unit("control"),), RsvType.RSV_BRANCH),
-            RsvSpec(False, 8, (ISA.unit("system"),),  RsvType.RSV_EXEC))
+            RsvSpec(False, 8, (ISA.unit("muldiv"),),  RsvType.RSV_EXEC))
 
 
 def _cfg():
@@ -134,7 +134,7 @@ def test_a_slot_the_uop_does_not_fill_never_holds_an_entry_back():
     wake  = [a.name for a in ISA.used_atomic_operands() if a.is_src and a.has_arch]
     stuck = [uop.name for uop in ISA.used_uops()
              if any(name not in {o.atomic.name for o in uop.srcs} for name in wake)]
-    assert stuck == ["LUI", "AUIPC", "JAL", "FENCE", "ECALL", "EBREAK"]
+    assert stuck == ["LUI", "AUIPC", "JAL"]
 
     # slot_ready therefore reads active_<n> beside valid_<n>. _drive
     # elaborates OldestFirst, whose build_issue calls slot_ready in its flow,

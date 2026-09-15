@@ -117,14 +117,24 @@ UOP_SRA  = Uop("SRA",  34, srcs=_REG, dests=_RD)
 UOP_OR   = Uop("OR",   35, srcs=_REG, dests=_RD)
 UOP_AND  = Uop("AND",  36, srcs=_REG, dests=_RD)
 
-# --- outside the base listing above, but part of RV32I -----------------------
-# fence orders earlier memory ops before later ones: no register dataflow and
-# no result. ecall/ebreak raise at commit and redirect to the handler — where
-# to is the §6 trap policy, which has no type yet. What tells ecall from
-# ebreak is their UopSeq's IMM_I value (mop.py).
-UOP_FENCE  = Uop("FENCE",  37)
-UOP_ECALL  = Uop("ECALL",  38)
-UOP_EBREAK = Uop("EBREAK", 39)
+# NOT here: FENCE / ECALL / EBREAK. No program of this project uses them yet,
+# and there is no trap policy to give ecall/ebreak a meaning — they left the
+# description on 2026-09-15 (git has them) and return with that policy.
+
+# --- the M extension: multiply and divide, R-type like the OP group ----------
+# One µop per instruction, the LOADS/BRANCHES rule: the high-word and the
+# signedness variants are distinct kinds, not sub-fields the record would carry.
+UOP_MUL    = Uop("MUL",    37, srcs=_REG, dests=_RD)
+UOP_MULH   = Uop("MULH",   38, srcs=_REG, dests=_RD)
+UOP_MULHSU = Uop("MULHSU", 39, srcs=_REG, dests=_RD)
+UOP_MULHU  = Uop("MULHU",  40, srcs=_REG, dests=_RD)
+UOP_DIV    = Uop("DIV",    41, srcs=_REG, dests=_RD)
+UOP_DIVU   = Uop("DIVU",   42, srcs=_REG, dests=_RD)
+UOP_REM    = Uop("REM",    43, srcs=_REG, dests=_RD)
+UOP_REMU   = Uop("REMU",   44, srcs=_REG, dests=_RD)
+
+MULDIVS = (UOP_MUL, UOP_MULH, UOP_MULHSU, UOP_MULHU,
+           UOP_DIV, UOP_DIVU, UOP_REM, UOP_REMU)
 
 UOPS = (UOP_LUI, UOP_AUIPC, UOP_JAL, UOP_JALR,
         UOP_BEQ, UOP_BNE, UOP_BLT, UOP_BGE, UOP_BLTU, UOP_BGEU,
@@ -134,4 +144,4 @@ UOPS = (UOP_LUI, UOP_AUIPC, UOP_JAL, UOP_JALR,
         UOP_SLLI, UOP_SRLI, UOP_SRAI,
         UOP_ADD, UOP_SUB, UOP_SLL, UOP_SLT, UOP_SLTU, UOP_XOR,
         UOP_SRL, UOP_SRA, UOP_OR, UOP_AND,
-        UOP_FENCE, UOP_ECALL, UOP_EBREAK)
+        *MULDIVS)

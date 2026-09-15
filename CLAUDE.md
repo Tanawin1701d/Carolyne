@@ -61,7 +61,10 @@ contract bug — fix the contract, not the engine.
 | `carolyne/debug/sim/`         | debug probes: `kathryn.DebugProbe` subclasses for pipeline status and Karray tables |
 | `carolyne/debugger/o3/`       | SUPERSEDED 2026-09-14 — deleted; see §4 THE OBSERVE / VIEW DELETION |
 | `carolyne/view/o3/`           | SUPERSEDED 2026-09-14 — deleted; see §4 THE OBSERVE / VIEW DELETION |
-| `examples/o3_riscv32/sim/`    | SUPERSEDED 2026-09-14 — deleted; `rv_build` / `rv_config` / `compile_tool/` stay |
+| `examples/o3/core/build.py`   | `O3Machine(config)`: memories + ports + CoreO3, for ANY CPUO3_Config |
+| `examples/o3/rv32im/config.py`| the RV32IM description + config (`rv32im_isa` / `rv32im_stations` / `rv32im_config`) |
+| `examples/o3_riscv32/`        | SUPERSEDED 2026-09-15 — moved to `examples/o3/`; its `sim/` was deleted 2026-09-14 |
+| `examples/compile_tool/`      | C to memory images for any target (rv32i, rv32im, mips32); was `examples/o3_riscv32/compile_tool/` until 2026-09-15 |
 | `examples/regfile_demo.py`    | smallest end-to-end Kathryn flow (CPU-flavored)       |
 | `generated/`                  | emitted Verilog (gitignored)                          |
 | `tests/`                      | pytest; tests double as usage documentation           |
@@ -2648,6 +2651,89 @@ deleted debugger answered by aliasing. A probe, not an inner dict: the
 (`build_model(machine, debug=True)`): without the flag no `dbg_` attribute
 exists, pinned by `tests/test_o3_dbg.py`, which builds the 2-lane RV32I
 machine both ways and reads the probe nodes back off `sim_manifest.json`.
+
+**COMPILE_TOOL IS TARGET-AGNOSTIC** (2026-09-15, Tanawin: "move compile_tool
+to examples/compile_tool and make it support both mips and riscv32im — I am
+not sure mips has 32im"). Moved by `git mv`, history kept. Everything that
+named an architecture now comes from ONE **`Target`** record (`target.py`):
+the cross prefix and its override variable, the `-march/-mabi` flags, the
+target's own C flags (`-mstrict-align` is RISC-V's; MIPS gets `-mno-abicalls
+-fno-pic -G0`, bare metal without a GOT), the crt0 (`runtime/crt0_riscv.S`,
+`runtime/crt0_mips.S` — `noreorder`, every delay slot written out), the linker
+script's `OUTPUT_ARCH`, small-data anchor and discarded note sections (three
+markers in `link.ld.in`), the ELF `e_machine` the build must carry, the reset
+vector when no machine config decides it, the Carolyne machine builder when
+the target has one, and the description `verify` holds a program to when the
+target has one. Three targets: `rv32i`, `rv32im` (the same description, which carries M
+since the next entry), `mips32`.
+Decisions: **MIPS32, not "mips32im"** — multiply and divide are in the MIPS32
+base ISA, so the pair is `rv32im` ↔ `mips32` (`-march=mips32r2 -mabi=32`);
+**`mipsel`, little-endian** (Tanawin's pick), so the ELF reader, the image
+writer and the LS unit's byte lanes stay as they are; **a target with no
+description is laid out and linked, not verified** — `VerifyReport.not_verified`
+says so in the report, and `MemoryLayout.from_sizes` derives the same shape
+`from_config` does, so the images fit the machine to come; **the reset vector
+of a target with no `IsaBase` is the target's statement** (MIPS: the
+architectural `0xBFC00000`) until a MIPS description owns it the way
+`Rv32i.reset_pc` does. `build_program(sources, target=…)` replaces `march=`;
+the CLI takes `--target` on `build`, `layout` and `verify`; `Program.config` is
+`None` for a machine-less target, and the build refuses an ELF whose
+`e_machine` is not the target's (the wrong toolchain answered). LIMIT: no MIPS
+cross-compiler is installed here (`sudo apt install gcc-mipsel-linux-gnu`), so
+the MIPS flags, crt0 and linker script are written from the manuals and the
+MIPS build test skips until one is; `-lgcc` on Debian's mipsel is abicalls
+code, so a program that needs a libgcc routine may not link non-PIC — MIPS32
+has native mul/div, so `hello.c` needs none.
+
+**THE M EXTENSION** (2026-09-15, Tanawin: "make it support … riscv32im",
+then "Also add the M extension to the ISA"). Eight µops, ids 40–47, one per
+instruction on the LOADS/BRANCHES rule (`MUL MULH MULHSU MULHU DIV DIVU REM
+REMU`, `riscv/uop.py`, the `MULDIVS` group), eight `MOP_OP` rows under
+`funct7 = 0000001` — and a change the base rows needed: every OP row now
+states funct3 AND funct7 (`SLL SLT SLTU XOR OR AND` said funct3 alone), because
+M reuses each funct3 under another funct7 and a funct3-only rule would claim
+the multiply as well; `test_decode_templates`' mutual-exclusivity pin is what
+would have caught it. **`MulDivExecUnit("muldiv")`**
+(`riscv/exec_unit_muldiv.py`), single-stage and combinational (Tanawin's
+pick), on **its own in-order station** (Tanawin's pick — a fourth `RsvSpec`
+in `rv32i_stations`, `muldiv_size`/`muldiv_rsv_size` knobs), so the divider,
+the longest path in the core, stays off the ALUs' out-of-order station and
+issues one at a time. The body leans on three Kathryn facts: `*`, `/` and `%`
+take the LEFT operand's width (so `a * b` IS `MUL`, and the high words come
+from operands widened to 64 bits — a signed one by the mux fill `imm_api`
+uses); `/` and `%` are unsigned, so `DIV`/`REM` run on magnitudes with the
+sign put back (quotient negative when the signs differ, remainder the
+dividend's sign), which yields `INT_MIN / -1 = INT_MIN`, remainder 0, with no
+special case; a divisor of zero is muxed to the spec's answers (all ones, the
+dividend), since Verilog would give X. CONSEQUENCES: 48 µops (`uop_idx` still
+6 bits), `rsv_id` 3 bits for five stations, and every test that built a
+hand-written station list needed a `muldiv` station or the config's
+stranded-µop check refused it (ten files). `verify` now passes an `rv32im`
+program (the compile-tool test that expected `mul` to be refused is inverted).
+MEASURED: the 2-lane machine emits and `iverilog -g2012` accepts it with the
+unit in. RENAMED with it (Tanawin: "Rv32i should be rename to Rv32im right
+now"): the description class is **`Rv32im`** in `riscv/rv32im.py`, its `name`
+`"rv32im"`, the example's factory `rv32im_isa()`; the example's own names
+(`rv32i_config`, `rv32i_stations`, `Rv32iO3Machine`, `examples/o3_riscv32/`)
+and the compile tool's `rv32i` TARGET (the GCC multilib) keep theirs —
+SUPERSEDED later the same day (Tanawin: "o3_riscv32 to o3/ rv32im/config.py,
+core/build.py; the machine be the global machine for both rv and mips"):
+`examples/o3/rv32im/config.py` (`rv32im_isa`, `rv32im_stations`,
+`rv32im_config`) and `examples/o3/core/build.py`, whose **`O3Machine(config)`**
+takes any `CPUO3_Config` and defaults to no ISA — the reconfigurable-component
+story in code: a MIPS config beside `rv32im/` builds this same machine. Only
+the compile tool's `rv32i` target keeps its name.
+REMOVED the same day (Tanawin: "I dont want 'system' right now, we dont use
+system call ecall fence right now"): the `system` unit, `exec_unit_system.py`,
+`FENCE`/`ECALL`/`EBREAK` and the MISC-MEM/SYSTEM mop groups — the config's
+stranded-µop check and the container's every-µop-has-a-unit check make "no
+unit" and "no µop" one decision, so the trio left the description together
+(git has them; they return with the trap policy). The M µops close the id gap
+(37–44, 45 µops), the exec station is `alu_cnt` ALUs alone, four stations, and
+`rsv_id` is 2 bits again; a word of opcode 1110011 or 0001111 now decodes into
+nothing, which `verify` reports. LIMIT: the unit is checked by elaboration only — no simulation of a
+multiply or a divide yet; LIMIT: the combinational divider bounds fmax until
+a sequential divider replaces it (`docs/open_items.md`).
 
 NEXT UP — the function unit, designed 2026-08-19. Step 1 (the declared port
 shape above) and step 2 (`ExecContext` + `AluUnit` + the fake-context test,

@@ -2,8 +2,9 @@
 # (uop_contract.md §6). The instruction table itself is in mop.py; this file
 # only collects the parts.
 #
-# `Rv32i` is a SUBCLASS of IsaBase supplying every vocabulary as a field
-# DEFAULT, so `Rv32i()` is the whole description and `Rv32i(name=...)` varies
+# RV32IM — the base ISA plus the M extension (2026-09-15).
+# `Rv32im` is a SUBCLASS of IsaBase supplying every vocabulary as a field
+# DEFAULT, so `Rv32im()` is the whole description and `Rv32im(name=...)` varies
 # one part of it. It stays DATA — field defaults only, no override of
 # __post_init__ / uop() / units_for() — so every inherited cross-check still
 # runs. All ten fields are redeclared because a dataclass picks up a default
@@ -42,16 +43,16 @@ from .operand import (AOPR_DEST_1, AOPR_SRC_1, AOPR_SRC_2, AOPR_SRC_3,
 from .reg import RegFile as X_FILE        # the INSTANCE operand.py's rules target
 from .uop import UOPS
 
-# Built once, at import: a field default is evaluated once, and every Rv32i()
+# Built once, at import: a field default is evaluated once, and every Rv32im()
 # sharing one unit tuple changes nothing (units are matched by name).
 EXEC_UNITS = exec_units()
 
 
 @dataclass(frozen=True)
-class Rv32i(IsaBase):
+class Rv32im(IsaBase):
     """The RV32I description — the object a generator is handed."""
 
-    name            : str                       = "rv32i"
+    name            : str                       = "rv32im"
     pc_width        : int                       = PC_WIDTH
     pc_align        : int                       = PC_ALIGN
     ilen_bytes      : int                       = ILEN_BYTES

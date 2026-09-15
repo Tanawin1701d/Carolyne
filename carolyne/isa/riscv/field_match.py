@@ -43,7 +43,7 @@ PC_ALIGN   = 4          # instruction addresses are 4-byte aligned (2 with the C
 ILEN_BYTES = 4          # RV32I is fixed-length; no length decoder needed
 DLEN_BYTES = 4          # widest data access: LW/SW move a 32-bit word
 RESET_PC   = 0x00000000 # RISC-V leaves it implementation-defined: this is the
-                        # package's pick, and Rv32i(reset_pc=...) varies it
+                        # package's pick, and Rv32im(reset_pc=...) varies it
 
 # --- register / function fields --------------------------------------------
 OPCODE = InstrFieldMatch("opcode", ((0, 7),))

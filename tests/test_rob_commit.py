@@ -9,7 +9,7 @@ import pytest
 from kathryn import (Module, PipCon, build_flow, flow, gen_flow, init, reset,
                      set_top, wire, zif)
 
-from carolyne.isa.riscv import Rv32i
+from carolyne.isa.riscv import Rv32im
 from carolyne.uarch.o3.config import CPUO3_Config, RsvSpec, RsvType
 from carolyne.uarch.mem.easy_mem import EasyMem
 from carolyne.uarch.o3.reg_arch_mng import RegArchMng
@@ -17,7 +17,7 @@ from carolyne.uarch.o3.rob import Rob
 from carolyne.uarch.o3.rob_helper import build_rob_dispatch
 from carolyne.uarch.o3.store_buf import StoreBuf
 
-ISA = Rv32i()
+ISA = Rv32im()
 X   = ISA.reg_file("x")
 
 
@@ -33,7 +33,7 @@ def _store_buf(cfg):
 STATIONS = (RsvSpec(False, 8, (ISA.unit("alu"),),     RsvType.RSV_EXEC),
             RsvSpec(False, 8, (ISA.unit("mem"),),     RsvType.RSV_LD_ST),
             RsvSpec(False, 8, (ISA.unit("control"),), RsvType.RSV_BRANCH),
-            RsvSpec(False, 8, (ISA.unit("system"),),  RsvType.RSV_EXEC))
+            RsvSpec(False, 8, (ISA.unit("muldiv"),),  RsvType.RSV_EXEC))
 
 
 def _cfg(**overrides):

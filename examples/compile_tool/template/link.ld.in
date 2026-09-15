@@ -2,7 +2,7 @@
  * Do not edit this copy — edit compile_tool/template/link.ld.in and rebuild,
  * or the script and the hardware stop agreeing. */
 
-OUTPUT_ARCH(riscv)
+OUTPUT_ARCH(@OUTPUT_ARCH@)
 ENTRY(_start)
 
 MEMORY
@@ -39,7 +39,7 @@ SECTIONS
   {
     *(.data .data.* .gnu.linkonce.d.*)
     . = ALIGN(4);
-    __global_pointer$ = . + 0x800;            /* small-data addressing anchor */
+    @GP_SYMBOL@                                /* small-data addressing anchor */
     *(.sdata .sdata.* .gnu.linkonce.s.*)
     . = ALIGN(4);
   } > DMEM
@@ -61,7 +61,7 @@ SECTIONS
   {
     *(.comment)
     *(.note .note.*)
-    *(.riscv.attributes)
+@DISCARD_ARCH@
     *(.eh_frame .eh_frame_hdr)
   }
 }

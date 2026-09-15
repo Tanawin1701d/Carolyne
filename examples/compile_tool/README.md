@@ -5,24 +5,38 @@ no syscalls.
 
 ```bash
 # from the repo root
-python -m examples.o3_riscv32.compile_tool build programs/hello.c
-python -m examples.o3_riscv32.compile_tool build a.c b.c --imem 16K --dmem 8K
-python -m examples.o3_riscv32.compile_tool layout --imem 16K
-python -m examples.o3_riscv32.compile_tool verify out/hello.elf
+python -m examples.compile_tool build programs/hello.c
+python -m examples.compile_tool build a.c b.c --target rv32im --imem 16K --dmem 8K
+python -m examples.compile_tool build programs/hello.c --target mips32
+python -m examples.compile_tool layout --target mips32 --imem 16K
+python -m examples.compile_tool verify out/hello.elf --target rv32i
 ```
 
 or from Python:
 
 ```python
-from examples.o3_riscv32.compile_tool import build_program
+from examples.compile_tool import build_program
 
-program = build_program(["hello.c"], imem_bytes=8192, dmem_bytes=4096)
+program = build_program(["hello.c"], target="rv32i", imem_bytes=8192, dmem_bytes=4096)
 print(program.describe())
 program.image.write_files("out/")
 ```
 
 `examples/` is not installed (pyproject discovers `carolyne*` only), so the
 CLI is `python -m ...` from the repo root rather than a console script.
+
+## Targets
+
+| target   | toolchain                | flags                       | verify                                  |
+| -------- | ------------------------ | --------------------------- | --------------------------------------- |
+| `rv32i`  | `riscv64-unknown-elf-`   | `-march=rv32i  -mabi=ilp32` | against `carolyne.isa.riscv.Rv32i`      |
+| `rv32im` | `riscv64-unknown-elf-`   | `-march=rv32im -mabi=ilp32` | against the same description, which carries the M extension since 2026-09-15 |
+| `mips32` | `mipsel-linux-gnu-`      | `-march=mips32r2 -mabi=32`  | not verified: no `carolyne/isa/mips` yet |
+
+MIPS32 carries multiply and divide in its base ISA, so there is no `mips32im`
+to name. The MIPS build is little-endian (`mipsel`), which is what the ELF
+reader, the image writer and the core's load/store unit assume.
+`CAROLYNE_RISCV_PREFIX` / `CAROLYNE_MIPS_PREFIX` override the tool prefix.
 
 ## What a program gets
 
@@ -45,8 +59,8 @@ simulation harness. There is no hardware decode, so they cost nothing.
 
 ## What it does
 
-1. size a machine (`machine.config_for_sizes`)
-2. derive the memory map from it (`layout.MemoryLayout.from_config`)
+1. pick the target (`target.py`) and size a machine (`machine.config_for_sizes`) when it has one
+2. derive the memory map from it (`layout.MemoryLayout.from_config`, or `from_sizes` for a target with no machine yet)
 3. generate the linker script and the C header from that map
 4. compile and link (`toolchain`)
 5. decode every instruction against the ISA description (`verify`)
@@ -95,8 +109,7 @@ are.
 
 ## Running the images
 
-The sibling package does that: `python -m examples.o3_riscv32.sim run
-hello.c` compiles through this tool, builds the machine, simulates it under
-Verilator, records every cycle, and renders the run as text and as a page.
-See `examples/o3_riscv32/sim/`, `carolyne/debugger/o3/` (what is watched) and
+The machine that runs them is `examples/o3/core/build.py` (`O3Machine`, any
+`CPUO3_Config`); a run harness over Kathryn's `kathryn.sim` is not part of
+this tool.
 Kathryn's `kathryn.observe` / `kathryn.view` (the recorder and the renderers).

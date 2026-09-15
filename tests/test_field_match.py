@@ -139,14 +139,16 @@ def test_rv32i_uses_a_union_where_one_field_cannot_select():
     from carolyne.isa.riscv import field_match as FM, mop as M, uop as U
 
     assert FM.FUNCT3_7.match_idx == FM.FUNCT3.match_idx + FM.FUNCT7.match_idx
-    # add vs sub, srl vs sra, and the three shift-immediates need both fields.
-    # The rules are on the UopSeqs: a template carries no matcher.
+    # every OP row (the M extension reuses each funct3 under funct7 0000001)
+    # and the three shift-immediates need both fields. The rules are on the
+    # UopSeqs: a template carries no matcher.
     seqs   = [seq for mop in M.MOP_TABLE for seq in mop.uop_seq]
     both   = [seq for seq in seqs if seq.matcher_field is FM.FUNCT3_7]
     by_uop = {seq.uops[0].name: seq for seq in seqs}
-    assert len(both) == 7
+    assert len(both) == 18 + 3
     assert by_uop["ADD"].matcher_field is FM.FUNCT3_7
-    assert by_uop["SLT"].matcher_field is FM.FUNCT3
+    assert by_uop["MUL"].matcher_field is FM.FUNCT3_7
+    assert by_uop["ADDI"].matcher_field is FM.FUNCT3        # OP-IMM: funct3 alone still selects
     # And the values make them actually distinguishable: same field, same
     # funct3, different funct7 — the pair the union exists for.
     assert by_uop["ADD"].matcher_value.match_value == (0b000, 0b0000000)

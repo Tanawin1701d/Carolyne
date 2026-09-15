@@ -10,7 +10,7 @@ from __future__ import annotations
 from carolyne.uarch.o3.config import CPUO3_Config
 from carolyne.util import is_power_of_two
 
-from ..rv_config import rv32i_config
+from examples.o3.rv32im.config import rv32im_config
 
 DEFAULT_IMEM_BYTES = 8 * 1024
 DEFAULT_DMEM_BYTES = 4 * 1024
@@ -42,15 +42,15 @@ def config_for_sizes(imem_bytes : int = DEFAULT_IMEM_BYTES,
                      **knobs) -> CPUO3_Config:
     """An RV32I machine with memories of the requested size.
 
-    - every other knob passes through to rv_config.rv32i_config
+    - every other knob passes through to examples.o3.rv32im.config.rv32im_config
     - the instruction memory has one bank per front-end lane, so its index
       width falls as fe_lanes rises for the same total size
     """
     lanes = knobs.get("fe_lanes", 2)
-    probe = rv32i_config(**knobs)               # for ilen_bytes / dlen_bytes
+    probe = rv32im_config(**knobs)              # for ilen_bytes / dlen_bytes
     isa   = probe.isa
 
-    return rv32i_config(
+    return rv32im_config(
         instr_mem_idx_width = idx_width_for(imem_bytes, lanes, isa.ilen_bytes),
         data_mem_idx_width  = idx_width_for(dmem_bytes, 1, isa.dlen_bytes),
         **knobs)

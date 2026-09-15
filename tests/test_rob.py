@@ -12,12 +12,12 @@ from kathryn import Module, _session, init, reset
 from carolyne.isa import (AtomicOperand, ExecUnit, FieldRef, InstrFieldMatch,
                           Intermediate, IsaBase, Mop, Operand, OperandRole,
                           RegFile, TargetKind, Uop, UopSeq)
-from carolyne.isa.riscv import Rv32i
+from carolyne.isa.riscv import Rv32im
 from carolyne.uarch.o3.config import CPUO3_Config, RsvSpec, RsvType
 from carolyne.uarch.o3.rob_helper import (build_rob_table, rob_dest_operands,
                                    rob_entry_shape, rob_operand_fields)
 
-ISA = Rv32i()
+ISA = Rv32im()
 X   = ISA.reg_file("x")
 
 
@@ -25,7 +25,7 @@ X   = ISA.reg_file("x")
 STATIONS = (RsvSpec(False, 4, (ISA.unit("alu"),),     RsvType.RSV_EXEC),
             RsvSpec(False, 4, (ISA.unit("mem"),),     RsvType.RSV_LD_ST),
             RsvSpec(False, 4, (ISA.unit("control"),), RsvType.RSV_BRANCH),
-            RsvSpec(False, 4, (ISA.unit("system"),),  RsvType.RSV_EXEC))
+            RsvSpec(False, 4, (ISA.unit("muldiv"),),  RsvType.RSV_EXEC))
 
 
 def _cfg(**overrides):

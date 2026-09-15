@@ -8,12 +8,12 @@
 import pytest
 from kathryn import HwComponentType, Module, _session, init, reset
 
-from carolyne.isa.riscv import Rv32i
+from carolyne.isa.riscv import Rv32im
 from carolyne.uarch.o3.config import CPUO3_Config, RsvSpec, RsvType
 from carolyne.uarch.o3.fetch_helper import (FetchEntryBase, build_fetch_table,
                                             fetch_entry_shape)
 
-ISA = Rv32i()
+ISA = Rv32im()
 X   = ISA.reg_file("x")
 
 
@@ -21,7 +21,7 @@ X   = ISA.reg_file("x")
 STATIONS = (RsvSpec(False, 4, (ISA.unit("alu"),),     RsvType.RSV_EXEC),
             RsvSpec(False, 4, (ISA.unit("mem"),),     RsvType.RSV_LD_ST),
             RsvSpec(False, 4, (ISA.unit("control"),), RsvType.RSV_BRANCH),
-            RsvSpec(False, 4, (ISA.unit("system"),),  RsvType.RSV_EXEC))
+            RsvSpec(False, 4, (ISA.unit("muldiv"),),  RsvType.RSV_EXEC))
 
 
 def _cfg(**overrides):

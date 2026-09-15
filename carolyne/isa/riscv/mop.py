@@ -50,19 +50,30 @@ def _bind(uop: Uop, matcher_field: Optional[InstrFieldMatch] = None,
                   matcher_field=matcher_field,
                   matcher_value=FM.val(*values) if values else None)
 
-# opcode 0110011 — OP, R-type: rd = rs1 op rs2. add/sub and srl/sra share a
-# funct3 and differ only in funct7, so their rule spans both (FM.FUNCT3_7).
+# opcode 0110011 — OP, R-type: rd = rs1 op rs2. Every row states funct3 AND
+# funct7 (FM.FUNCT3_7): add/sub and srl/sra differ only in funct7, and the M
+# extension reuses every funct3 under funct7 = 0000001, so a funct3-only rule
+# would claim a multiply as well.
 MOP_OP = Mop(matcher_field=FM.OPCODE, matcher_value=FM.val(0b0110011), uop_seq=(
-    _bind(U.UOP_ADD,  FM.FUNCT3_7, 0b000, 0b0000000),
-    _bind(U.UOP_SUB,  FM.FUNCT3_7, 0b000, 0b0100000),
-    _bind(U.UOP_SLL,  FM.FUNCT3,   0b001),
-    _bind(U.UOP_SLT,  FM.FUNCT3,   0b010),
-    _bind(U.UOP_SLTU, FM.FUNCT3,   0b011),
-    _bind(U.UOP_XOR,  FM.FUNCT3,   0b100),
-    _bind(U.UOP_SRL,  FM.FUNCT3_7, 0b101, 0b0000000),
-    _bind(U.UOP_SRA,  FM.FUNCT3_7, 0b101, 0b0100000),
-    _bind(U.UOP_OR,   FM.FUNCT3,   0b110),
-    _bind(U.UOP_AND,  FM.FUNCT3,   0b111),
+    _bind(U.UOP_ADD,    FM.FUNCT3_7, 0b000, 0b0000000),
+    _bind(U.UOP_SUB,    FM.FUNCT3_7, 0b000, 0b0100000),
+    _bind(U.UOP_SLL,    FM.FUNCT3_7, 0b001, 0b0000000),
+    _bind(U.UOP_SLT,    FM.FUNCT3_7, 0b010, 0b0000000),
+    _bind(U.UOP_SLTU,   FM.FUNCT3_7, 0b011, 0b0000000),
+    _bind(U.UOP_XOR,    FM.FUNCT3_7, 0b100, 0b0000000),
+    _bind(U.UOP_SRL,    FM.FUNCT3_7, 0b101, 0b0000000),
+    _bind(U.UOP_SRA,    FM.FUNCT3_7, 0b101, 0b0100000),
+    _bind(U.UOP_OR,     FM.FUNCT3_7, 0b110, 0b0000000),
+    _bind(U.UOP_AND,    FM.FUNCT3_7, 0b111, 0b0000000),
+    # the M extension: funct7 = 0000001, funct3 picks the operation
+    _bind(U.UOP_MUL,    FM.FUNCT3_7, 0b000, 0b0000001),
+    _bind(U.UOP_MULH,   FM.FUNCT3_7, 0b001, 0b0000001),
+    _bind(U.UOP_MULHSU, FM.FUNCT3_7, 0b010, 0b0000001),
+    _bind(U.UOP_MULHU,  FM.FUNCT3_7, 0b011, 0b0000001),
+    _bind(U.UOP_DIV,    FM.FUNCT3_7, 0b100, 0b0000001),
+    _bind(U.UOP_DIVU,   FM.FUNCT3_7, 0b101, 0b0000001),
+    _bind(U.UOP_REM,    FM.FUNCT3_7, 0b110, 0b0000001),
+    _bind(U.UOP_REMU,   FM.FUNCT3_7, 0b111, 0b0000001),
 ))
 
 # opcode 0010011 — OP-IMM, I-type: rd = rs1 op imm. The three shifts are
@@ -117,16 +128,10 @@ MOP_JAL  = Mop(matcher_field=FM.OPCODE, matcher_value=FM.val(0b1101111),
 MOP_JALR = Mop(matcher_field=FM.OPCODE, matcher_value=FM.val(0b1100111),
                uop_seq=(_bind(U.UOP_JALR, FM.FUNCT3, 0b000),))
 
-# opcodes 0001111 / 1110011 — MISC-MEM (fence) / SYSTEM (ecall, ebreak),
-# both I-type: fence's operands are in imm[11:0], ecall/ebreak's imm IS the
-# selector, which is why their UopSeqs match on IMM_I and not FUNCT3.
-MOP_MISC_MEM = Mop(matcher_field=FM.OPCODE, matcher_value=FM.val(0b0001111),
-                   uop_seq=(_bind(U.UOP_FENCE, FM.FUNCT3, 0b000),))
-MOP_SYSTEM   = Mop(matcher_field=FM.OPCODE, matcher_value=FM.val(0b1110011), uop_seq=(
-    _bind(U.UOP_ECALL,  FM.IMM_I, 0b000000000000),
-    _bind(U.UOP_EBREAK, FM.IMM_I, 0b000000000001),
-))
+# NOT here: MISC-MEM (fence, opcode 0001111) and SYSTEM (ecall/ebreak,
+# opcode 1110011) — out of the description with their µops (uop.py) until a
+# trap policy exists; a word of either opcode now decodes into nothing.
 
-# Every RV32I instruction group, as Mops over the µop templates of uop.py.
+# Every instruction group, as Mops over the µop templates of uop.py.
 MOP_TABLE = (MOP_OP, MOP_OP_IMM, MOP_LOAD, MOP_STORE, MOP_BRANCH,
-             MOP_LUI, MOP_AUIPC, MOP_JAL, MOP_JALR, MOP_MISC_MEM, MOP_SYSTEM)
+             MOP_LUI, MOP_AUIPC, MOP_JAL, MOP_JALR)

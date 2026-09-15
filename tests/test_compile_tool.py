@@ -1,4 +1,5 @@
-# compile_tool — C sources to two memory images, with no operating system.
+# compile_tool — C sources to two memory images, with no operating system,
+# for any target the tool describes (rv32i, rv32im, mips32).
 #
 # The first test is the usage documentation: size a machine, derive the
 # layout, build, and read the images back.
@@ -11,6 +12,7 @@
 #   * every instruction is held to the ISA's own encoding table, so a
 #     program the machine could not decode fails the BUILD
 #   * the code starts at the ISA's reset_pc, the address fetch starts from
+#   * a target with no description (mips32) is laid out and linked, not verified
 #
 # The tests that run the cross compiler skip when it is absent, so the rest
 # still runs on a machine with no RISC-V toolchain.
@@ -23,27 +25,25 @@ import shutil
 
 import pytest
 
-from carolyne.isa.riscv import Rv32i
+from carolyne.isa.riscv import Rv32im
 from carolyne.uarch.o3.config import CPUO3_Config
-from examples.o3_riscv32.compile_tool import (_reject_wrong_entry,
-                                              build_program, config_for_sizes)
-from examples.o3_riscv32.compile_tool.cheader import render_c_header
-from examples.o3_riscv32.compile_tool.image import build_image
-from examples.o3_riscv32.compile_tool.layout import (DMEM_BASE, MMIO_BYTES,
-                                                     MemoryLayout)
-from examples.o3_riscv32.compile_tool.ldscript import render_linker_script
-from examples.o3_riscv32.compile_tool.machine import idx_width_for
-from examples.o3_riscv32.compile_tool.toolchain import TOOL_PREFIX
-from examples.o3_riscv32.compile_tool.verify import decode_hits, verify_program
+from examples.compile_tool import (MIPS32, RV32I, RV32IM, _reject_wrong_entry, build_program,
+                                   config_for_sizes, layout_for, target_named)
+from examples.compile_tool.cheader import render_c_header
+from examples.compile_tool.image import build_image
+from examples.compile_tool.layout import DMEM_BASE, MMIO_BYTES, MemoryLayout
+from examples.compile_tool.ldscript import render_linker_script
+from examples.compile_tool.machine import idx_width_for
+from examples.compile_tool.verify import decode_hits, verify_program
 
-ISA      = Rv32i()
-PROGRAMS = os.path.join(os.path.dirname(__file__), "..", "examples",
-                        "o3_riscv32", "compile_tool", "programs")
+ISA      = Rv32im()
+PROGRAMS = os.path.join(os.path.dirname(__file__), "..", "examples", "compile_tool", "programs")
 HELLO    = os.path.abspath(os.path.join(PROGRAMS, "hello.c"))
 
-needs_gcc = pytest.mark.skipif(
-    shutil.which(f"{TOOL_PREFIX}gcc") is None,
-    reason=f"no {TOOL_PREFIX}gcc on PATH")
+needs_gcc  = pytest.mark.skipif(shutil.which(RV32I.tool("gcc")) is None,
+                                reason=f"no {RV32I.tool('gcc')} on PATH")
+needs_mips = pytest.mark.skipif(shutil.which(MIPS32.tool("gcc")) is None,
+                                reason=f"no {MIPS32.tool('gcc')} on PATH")
 
 
 def _layout(imem: int = 8192, dmem: int = 4096) -> MemoryLayout:
@@ -52,7 +52,7 @@ def _layout(imem: int = 8192, dmem: int = 4096) -> MemoryLayout:
 
 def _config_at(reset_pc: int) -> CPUO3_Config:
     """The default machine on an RV32I whose fetch starts at `reset_pc`."""
-    return dataclasses.replace(config_for_sizes(), isa=Rv32i(reset_pc=reset_pc))
+    return dataclasses.replace(config_for_sizes(), isa=Rv32im(reset_pc=reset_pc))
 
 
 # --- the whole flow -----------------------------------------------------------
@@ -62,7 +62,7 @@ def test_a_c_program_becomes_one_image_per_memory(tmp_path):
     program = build_program([HELLO], imem_bytes=8192, dmem_bytes=4096,
                             name="hello", out_dir=str(tmp_path))
 
-    assert program.report.ok
+    assert program.report.ok and program.target is RV32I
     assert program.elf.entry == program.layout.reset_pc
 
     # one bank per front-end lane, and the data memory is always one bank
@@ -216,7 +216,7 @@ def test_words_written_into_the_code_image_come_back_out_in_address_order():
 
 def _image_of_code(layout: MemoryLayout, words) -> "object":
     """An image holding these words at the start of the code region."""
-    from examples.o3_riscv32.compile_tool.elf32 import Elf32, Section
+    from examples.compile_tool.elf32 import Elf32, Section
 
     blob = b"".join(w.to_bytes(4, "little") for w in words)
     text = Section(name=".text", type=1, flags=0x2 | 0x4,
@@ -232,7 +232,7 @@ def test_the_linker_script_and_the_c_header_state_the_layouts_own_addresses():
     """Both are generated from one object, which is what keeps a program and
     the thing watching the store port agreeing about where a character goes."""
     layout = _layout()
-    script = render_linker_script(layout)
+    script = render_linker_script(layout, RV32I)
     header = render_c_header(layout)
 
     for name, addr in layout.mmio_addrs.items():
@@ -246,7 +246,7 @@ def test_the_linker_script_and_the_c_header_state_the_layouts_own_addresses():
 
 
 def test_the_linker_script_keeps_read_only_data_out_of_the_instruction_memory():
-    script = render_linker_script(_layout())
+    script = render_linker_script(_layout(), RV32I)
     text   = script.index(".text")
     rodata = script.index(".rodata")
 
@@ -265,23 +265,36 @@ def test_every_rv32i_encoding_the_compiler_emits_picks_exactly_one_uop():
     assert [u.name for u in decode_hits(addi, _levels())] == ["ADDI"]
 
 
-def test_a_multiply_matches_no_uop_because_the_isa_has_no_m_extension():
-    """This is what makes -march=rv32im safe to offer: the build refuses
-    rather than handing the core a word it decodes into nothing."""
-    mul = 0x02E787B3        # mul a5, a5, a4
+def test_a_multiply_picks_exactly_the_m_uop():
+    """The M rows share every funct3 with the base OP rows and differ in
+    funct7, so a base row that stated funct3 alone would claim it too."""
+    mul  = 0x02E787B3        # mul  a5, a5, a4
+    divu = 0x02F757B3        # divu a5, a4, a5
+    sll  = 0x00F717B3        # sll  a5, a4, a5: funct7 0000000
 
-    assert decode_hits(mul, _levels()) == ()
+    assert [u.name for u in decode_hits(mul,  _levels())] == ["MUL"]
+    assert [u.name for u in decode_hits(divu, _levels())] == ["DIVU"]
+    assert [u.name for u in decode_hits(sll,  _levels())] == ["SLL"]
 
 
 @needs_gcc
-def test_building_for_rv32im_fails_and_names_the_instruction(tmp_path):
+def test_building_for_rv32im_verifies_the_multiply(tmp_path):
+    """The multiply compiles to MUL, and the description now decodes it."""
     source = tmp_path / "mul.c"
     source.write_text("volatile int a = 7, b = 6;\n"
                       "int main(void) { return a * b; }\n")
 
-    with pytest.raises(ValueError, match="cannot be decoded"):
-        build_program([str(source)], name="mul", march="rv32im",
-                      out_dir=str(tmp_path / "out"))
+    program = build_program([str(source)], name="mul", target="rv32im",
+                            out_dir=str(tmp_path / "out"))
+    assert program.report.ok and program.build.target == "rv32im"
+    assert any(u.name == "MUL" for word in _text_words(program)
+               for u in decode_hits(word, _levels()))
+
+
+def _text_words(program):
+    text = next(s for s in program.elf.sections if s.name == ".text")
+    blob = program.elf.bytes_of(text)
+    return [int.from_bytes(blob[i:i + 4], "little") for i in range(0, len(blob), 4)]
 
 
 @needs_gcc
@@ -292,7 +305,7 @@ def test_the_same_multiply_builds_for_rv32i_through_a_libgcc_call(tmp_path):
     source.write_text("volatile int a = 7, b = 6;\n"
                       "int main(void) { return a * b; }\n")
 
-    program = build_program([str(source)], name="mul", march="rv32i",
+    program = build_program([str(source)], name="mul", target="rv32i",
                             out_dir=str(tmp_path / "out"))
     assert program.report.ok
 
@@ -300,3 +313,60 @@ def test_the_same_multiply_builds_for_rv32i_through_a_libgcc_call(tmp_path):
 def _levels():
     from carolyne.uarch.o3.decode import group_uops_by_level
     return group_uops_by_level(ISA)
+
+
+# --- targets ------------------------------------------------------------------
+def test_a_target_is_named_and_an_unknown_one_lists_the_choices():
+    assert target_named("rv32im") is RV32IM and target_named("mips32") is MIPS32
+    with pytest.raises(ValueError, match="rv32i, rv32im, mips32"):
+        target_named("arm")
+
+
+def test_rv32im_is_rv32i_with_the_multiply_multilib():
+    assert RV32IM.arch_flags[0] == "-march=rv32im" and RV32IM.isa is RV32I.isa
+    assert RV32IM.crt0 == RV32I.crt0 and RV32IM.can_verify
+
+
+def test_mips32_has_no_description_yet_so_it_cannot_verify():
+    """MIPS32 carries multiply/divide in its base ISA: there is no 'im' to name."""
+    assert not MIPS32.can_verify and MIPS32.machine_config is None
+    assert MIPS32.arch_flags == ("-march=mips32r2", "-mabi=32")
+
+
+def test_the_linker_script_is_the_targets():
+    layout = MemoryLayout.from_sizes(8192, 4096, 2, MIPS32.reset_pc)
+    mips   = render_linker_script(layout, MIPS32)
+    riscv  = render_linker_script(_layout(), RV32I)
+
+    assert "OUTPUT_ARCH(mips)" in mips and "_gp = . + 0x7ff0;" in mips
+    assert "*(.MIPS.abiflags)" in mips and ".riscv.attributes" not in mips
+    assert "OUTPUT_ARCH(riscv)" in riscv and "__global_pointer$" in riscv
+    assert "*(.riscv.attributes)" in riscv and ".MIPS.abiflags" not in riscv
+
+
+def test_a_target_with_no_machine_is_laid_out_from_the_sizes():
+    """The same shape from_config derives, so the images fit the machine to come."""
+    config, layout = layout_for(MIPS32, 8192, 4096, lanes=2)
+    from_rv        = MemoryLayout.from_config(config_for_sizes(8192, 4096, fe_lanes=2))
+
+    assert config is None
+    assert layout.imem_base == MIPS32.reset_pc == 0xBFC00000
+    assert (layout.imem_bytes, layout.imem_banks, layout.imem_idx_width) == \
+           (from_rv.imem_bytes, from_rv.imem_banks, from_rv.imem_idx_width)
+    assert (layout.dmem_bytes, layout.dmem_idx_width, layout.word_bytes) == \
+           (from_rv.dmem_bytes, from_rv.dmem_idx_width, from_rv.word_bytes)
+
+
+def test_a_riscv_target_still_lays_out_from_the_machine_config():
+    config, layout = layout_for(RV32I, 8192, 4096, lanes=2)
+    assert config is not None and layout == MemoryLayout.from_config(config)
+
+
+@needs_mips
+def test_a_mips_program_builds_and_is_not_verified(tmp_path):
+    program = build_program([HELLO], target="mips32", name="hello", out_dir=str(tmp_path))
+
+    assert program.report.skipped and program.report.ok
+    assert program.elf.entry == MIPS32.reset_pc
+    assert program.config is None
+    assert program.image.instr_banks[0].used_words > 0

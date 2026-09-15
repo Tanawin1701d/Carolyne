@@ -17,11 +17,11 @@ import pytest
 
 from kathryn import *
 
-from carolyne.isa.riscv import Rv32i
+from carolyne.isa.riscv import Rv32im
 from carolyne.uarch.mem.common.mem_port import MemPortRead, MemPortReadValid
 from carolyne.uarch.mem.easy_mem import EasyMem
 from carolyne.uarch.o3.fetch import Fetch
-from examples.o3_riscv32.rv_config import rv32i_config
+from examples.o3.rv32im.config import rv32im_config
 
 ILEN = 4
 ZERO = 2        # log2(ILEN): the byte offset the bus width holds at zero
@@ -69,7 +69,7 @@ def test_a_pc_part_way_into_a_group_reaches_the_next_index_by_itself():
 # --- the hardware -------------------------------------------------------------
 def _machine(lanes: int):
     """A fetch stage on a real banked memory. Elaborating IS the assertion."""
-    config = rv32i_config(fe_lanes=lanes, commit_lanes=lanes)
+    config = rv32im_config(fe_lanes=lanes, commit_lanes=lanes)
 
     class Host(Module):
         @init
@@ -103,7 +103,7 @@ def test_the_stage_elaborates_at_every_lane_count(lanes):
 
 
 def test_the_memory_states_the_bank_as_a_second_address_region():
-    config = rv32i_config(fe_lanes=4, commit_lanes=4)
+    config = rv32im_config(fe_lanes=4, commit_lanes=4)
 
     class Host(Module):
         @init
@@ -122,7 +122,7 @@ def test_the_memory_takes_only_one_write_port(lanes):
     """Each bank has ONE write port and a routed writer reaches every bank, so
     a second writer could name the same bank — and a dropped write is lost
     data, where a dropped read only stalls. True at one bank too."""
-    config = rv32i_config(fe_lanes=lanes, commit_lanes=lanes)
+    config = rv32im_config(fe_lanes=lanes, commit_lanes=lanes)
 
     class Host(Module):
         @init
@@ -139,7 +139,7 @@ def test_the_memory_takes_only_one_write_port(lanes):
 def test_every_bank_is_dual_port_with_its_own_read_and_write_index():
     """1R1W per bank: a read and a write each have an index of their own, so a
     load in the same cycle as a store retiring still reads its own address."""
-    config = rv32i_config(fe_lanes=4, commit_lanes=4)
+    config = rv32im_config(fe_lanes=4, commit_lanes=4)
 
     class Host(Module):
         @init
@@ -158,7 +158,7 @@ def test_every_bank_is_dual_port_with_its_own_read_and_write_index():
 def test_a_port_that_cannot_report_valid_is_refused():
     """A lane drops its word when the memory does not answer, so every port
     has to be able to say so."""
-    config = rv32i_config(fe_lanes=1, commit_lanes=1)
+    config = rv32im_config(fe_lanes=1, commit_lanes=1)
 
     class Host(Module):
         @init
@@ -175,7 +175,7 @@ def test_a_port_that_cannot_report_valid_is_refused():
 
 
 def test_one_port_per_lane_is_required():
-    config = rv32i_config(fe_lanes=2, commit_lanes=2)
+    config = rv32im_config(fe_lanes=2, commit_lanes=2)
 
     class Host(Module):
         @init
@@ -193,8 +193,8 @@ def test_the_pc_resets_to_the_isas_reset_vector_in_the_emitted_verilog(tmp_path)
     """Elaboration cannot show a register's reset value, so this reads the
     Verilog: under mrst, the pc must take the ISA's reset_pc — and nothing else
     may, since a second reset branch would fight it."""
-    config = dataclasses.replace(rv32i_config(fe_lanes=2, commit_lanes=2),
-                                 isa=Rv32i(reset_pc=0x80000000))
+    config = dataclasses.replace(rv32im_config(fe_lanes=2, commit_lanes=2),
+                                 isa=Rv32im(reset_pc=0x80000000))
 
     class Host(Module):
         @init

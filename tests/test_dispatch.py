@@ -11,7 +11,7 @@ from kathryn import Module, _session, init, reset
 from carolyne.isa import (AtomicOperand, ExecUnit, FieldRef, InstrFieldMatch,
                           Intermediate, IsaBase, Mop, Operand, OperandRole,
                           RegFile, TargetKind, Uop, UopSeq)
-from carolyne.isa.riscv import Rv32i
+from carolyne.isa.riscv import Rv32im
 from carolyne.uarch.o3.config import CPUO3_Config, RsvSpec, RsvType
 from carolyne.uarch.o3.dispatch_helper import (DEST_KINDS, SRC_KINDS,
                                                build_dispatch,
@@ -20,7 +20,7 @@ from carolyne.uarch.o3.dispatch_helper import (DEST_KINDS, SRC_KINDS,
 from carolyne.uarch.o3.operand_field import named_atomic_operands, operand_fields
 from carolyne.uarch.o3.rsv_helper import rsv_id_width
 
-ISA = Rv32i()
+ISA = Rv32im()
 X   = ISA.reg_file("x")
 
 # operand_field.KIND_ORDER — the order a group's fields land in.
@@ -31,7 +31,7 @@ ALL_KINDS = ("active", "valid", "wb_required", "data", "pr_idx", "ar_idx")
 STATIONS = (RsvSpec(False, 4, (ISA.unit("alu"),),     RsvType.RSV_EXEC),
             RsvSpec(False, 4, (ISA.unit("mem"),),     RsvType.RSV_LD_ST),
             RsvSpec(False, 4, (ISA.unit("control"),), RsvType.RSV_BRANCH),
-            RsvSpec(False, 4, (ISA.unit("system"),),  RsvType.RSV_EXEC))
+            RsvSpec(False, 4, (ISA.unit("muldiv"),),  RsvType.RSV_EXEC))
 
 
 def _cfg(**overrides):
