@@ -6,10 +6,14 @@
 # comparison per entry. `free_tag` is the COUNT of tags left, which is why it is
 # ceil_log2(sptag_len) bits while the tag itself is sptag_len.
 #
-# `book_rename` returns (is_spec, tag). The tag is the pointer BEFORE
-# rotating, so a branch carries the current tag and the pointer moves past
-# it — the relation `on_mis_pred` inverts when it restores
-# `next_tag = rot(last_valid_tag)`. A non-branch takes the same tag and leaves
+# `book_rename` returns (is_spec, tag). The tag is the speculation IN FORCE
+# for that lane: the one the most recent branch opened, and a branch's own is
+# the one IT opens. So a branch and everything it covers carry ONE value, which
+# is what makes a squash a mask — the branch consumes `next_tag` (stepped past
+# the branches before it in the cycle) and the pointer moves past it, the
+# relation `on_mis_pred` inverts when it restores
+# `next_tag = rot(last_valid_tag)`. A lane with no branch at or before it takes
+# the tag already open (`get_last_tag`), which is 0 when nothing is, and leaves
 # both counters alone. `is_spec` says the lane dispatches under an open
 # speculation: a tag is already out (free_tag below full), or an earlier lane
 # of the same cycle books a branch. It reads `free_tag` BEFORE the cycle's
@@ -86,15 +90,16 @@ class TagGen(Module):
 
     # ---- rename ----------------------------------------------------------------
     def book_rename(self, port, is_branch):
-        """Give lane `port` its one-hot tag; a branch also consumes one.
+        """Give lane `port` the tag of the speculation it is under; a branch
+        also consumes one and is under the one it opens.
 
         - is_spec: a tag is already out, or a lane before it books a branch
-        - tag: the pointer rotated once per BRANCH booked before it
+        - tag: the most recent branch's, its OWN when this lane is a branch
         """
         self.branch_port[port] *= is_branch
         earlier = self.branch_port[:port]
         return (self._spec_before(earlier),
-                self._tag_after  (earlier, "tag_p{}".format(port)))
+                self._tag_in_force(port, "tag_p{}".format(port)))
 
     def on_rename(self):
         """Commit the cycle's bookings (call in the granted scope)."""
@@ -106,6 +111,24 @@ class TagGen(Module):
         """
         outstanding = self.free_tag != (self.config.sptag_len - 1)
         return any_of([outstanding, *earlier])
+
+    def _tag_in_force(self, port, label):
+        """The tag lane `port` carries: the speculation it dispatches under.
+
+        A branch and everything it covers must carry ONE value, or a squash
+        cannot mask them together: the branch takes the tag it ALLOCATES, and
+        the lanes after it take that same tag until the next branch. A lane
+        with no branch at or before it carries the tag already open, which is
+        0 when nothing is.
+        """
+        tag = self.get_last_tag()
+        for lane in range(port + 1):
+            allocated = self._tag_after(self.branch_port[:lane],
+                                        "{}_a{}".format(label, lane))
+            tag = mux(self.branch_port[lane], allocated, tag,
+                      width = self.config.sptag_len,
+                      name  = "{}_f{}".format(label, lane))
+        return tag
 
     def _tag_after(self, earlier, label):
         """The pointer stepped past every booking in `earlier`."""

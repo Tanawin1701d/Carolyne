@@ -96,10 +96,20 @@ class StoreBuf(Module):
                                 data     = self.write_port.addr_meta.data_bus_bits)
         self.table.reset(busy=0, complete=0, is_spec=0)
 
-        # The speculation pair of the store landing THIS cycle, and the place
-        # on_suc_pred OVERRIDES it: on_new_entry drives it, the resolve masks
-        # it at PRI_SUC_PRED, and the row write reads it — so a tag resolving
-        # in the same cycle never arrives in the table.
+        # The speculation pair AS THE CALLER STATED IT, before any masking:
+        # what on_new_entry was handed. on_suc_pred guards on THIS and never on
+        # the overrider its write drives — a guard built from the wire being
+        # driven is a combinational loop (the exec complex's on_suc_pred says
+        # the same).
+        self.stated_spec = SpecLane(HwComponentType.WIRE, (1,),
+                                    f"{self.label}_stated_spec",
+                                    spec_tag=self.config.sptag_len)
+
+        # The same pair as the ROW WRITE will take it: a copy of `stated_spec`
+        # (run_spec_overrider) that on_suc_pred masks at PRI_SUC_PRED. The row
+        # is written at the edge, so this wire is the only place the value it
+        # will take can still be changed, and a tag resolving in the same cycle
+        # never arrives in the table.
         self.spec_overrider = SpecLane(HwComponentType.WIRE, (1,),
                                        f"{self.label}_spec_ovr",
                                        spec_tag=self.config.sptag_len)
@@ -120,18 +130,25 @@ class StoreBuf(Module):
         return (self.alloc_ptr == self.ret_ptr) \
              & self.table[self.alloc_ptr].busy
 
+    # --- the speculation a pushed store will carry ----------------------------------
+    @flow
+    def run_spec_overrider(self):
+        """The overrider is the stated speculation, which on_suc_pred masks at PRI_SUC_PRED."""
+        self.spec_overrider[0] *= self.stated_spec[0]   # an undriven stated_spec reads 0
+
     # --- the events ---------------------------------------------------------------
     def on_new_entry(self, is_spec, spec_tag, mem_addr, data):
         """An executed store lands at the tail; call in the granted scope.
 
         - complete stays 0: only the ROB's retirement (on_commit) sets it
-        - the speculation pair is the CALLER's record's — the engine reads
-          it off the stage record (ExecUnitO3.lsq_push_store) — but it goes
-          through `spec_overrider`, so a tag resolving in THIS cycle is masked
-          out of it before the row write reads it. Reading the caller's
-          register directly would store a tag already resolved.
+        - the speculation pair is the CALLER's record's — the engine reads it
+          off the stage record (ExecUnitO3.lsq_push_store) — and it is stated
+          HERE on `stated_spec` only; the row reads `spec_overrider`, the copy a
+          resolve masks, so a tag resolving in THIS cycle never reaches the
+          table. Reading the caller's register directly would store a tag
+          already resolved.
         """
-        self.spec_overrider[0] *= {IS_SPEC: is_spec, SPEC_TAG  : spec_tag}
+        self.stated_spec[0] *= {IS_SPEC: is_spec, SPEC_TAG: spec_tag}
 
         spec_ovr = self.spec_overrider[0]
         self.table[self.alloc_ptr] |= {BUSY    : 1,
@@ -248,11 +265,13 @@ class StoreBuf(Module):
                 self.table[row_idx] |= {SPEC_TAG: left,
                                         IS_SPEC : left != 0}
 
-        # a tag is ONE-HOT, so an entry is under it or is not
-        spec_ovr_row = self.spec_overrider[0]
+        # a tag is ONE-HOT, so an entry is under it or is not. The guard reads
+        # `stated_spec` — what the caller stated — NOT the overrider this write
+        # drives: reading the driven wire is a combinational loop.
+        stated = self.stated_spec[0]
         with priority(PRI_SUC_PRED):
-            with zif(spec_ovr_row.is_spec
-                     & (spec_ovr_row.spec_tag == suc_tag)):
+            with zif(to_ref(stated.is_spec)
+                     & (to_ref(stated.spec_tag) == suc_tag)):
                 self.spec_overrider[0] *= {IS_SPEC: 0, SPEC_TAG  : 0}
 
     # --- retire to memory -----------------------------------------------------------

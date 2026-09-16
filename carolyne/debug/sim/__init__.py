@@ -6,12 +6,19 @@
 
 from __future__ import annotations
 
-from .probe_base       import ProbeBase
+from .probe_base            import ProbeBase
+from .probe_branch_resolve  import BranchResolveProbe, BranchResolveSimProbe
 from .probe_karray     import KarrayProbe, KarraySimProbe
-from .probe_pip_status import (BUSY, FLUSH, GRANTED, HELD, IDLE, QUIET, RUNNING, STALL, WAITING, PipStatusProbe,
-                               PipStatusSimProbe)
+from .probe_mem_port   import MemAccess, MemPortProbe, MemPortSimProbe
+from .probe_pip_status import (BUSY, FLUSH, GRANTED, HELD, IDLE, PIP_STATUS_SIGNALS, QUIET, RUNNING, STALL, UNKNOWN,
+                               WAITING, PipStatusProbe, PipStatusSimProbe)
 from .probe_reg_class  import RegClassProbe, RegClassSimProbe
+from .probe_sim_util   import child_or_none, read_value
 
 __all__ = ["ProbeBase", "PipStatusProbe", "PipStatusSimProbe",
+           "BranchResolveProbe", "BranchResolveSimProbe",
            "KarrayProbe", "KarraySimProbe", "RegClassProbe", "RegClassSimProbe",
-           "RUNNING", "IDLE", "HELD", "BUSY", "STALL", "FLUSH", "GRANTED", "WAITING", "QUIET"]
+           "MemPortProbe", "MemPortSimProbe", "MemAccess",
+           "read_value", "child_or_none", "PIP_STATUS_SIGNALS",
+           "RUNNING", "IDLE", "HELD", "BUSY", "STALL", "FLUSH", "UNKNOWN",
+           "GRANTED", "WAITING", "QUIET"]

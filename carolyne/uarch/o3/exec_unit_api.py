@@ -46,8 +46,8 @@ class ExecUnitApiO3(ExecUnitApi):
         self.des       = None        # the NEXT stage's record, filled by the
                                      # complex once declare_stage_src built it
 
-    def declare_mis_pred(self, dyn_cond=None):
-        self.exu.declare_mis_pred(self.src, self.stage_idx, dyn_cond)
+    def declare_mis_pred(self, dyn_cond=None, next_pc=None):
+        self.exu.declare_mis_pred(self.src, self.stage_idx, dyn_cond, next_pc)
 
     def declare_suc_pred(self, dyn_cond=None):
         self.exu.declare_suc_pred(self.src, dyn_cond)

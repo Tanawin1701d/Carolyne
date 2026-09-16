@@ -72,10 +72,18 @@ class ExecUnitApi:
             f"{type(self).__name__}.next_stage_fields: the generator supplies this")
 
     # --- the engine half (generator-supplied) --------------------------------
-    def declare_mis_pred(self, dyn_cond=None):
+    def declare_mis_pred(self, dyn_cond=None, next_pc=None):
         """This µop resolved a prediction WRONG when `dyn_cond` holds — the
         engine squashes everything under the µop's tag (its threaded
-        is_spec/spec_tag say which). No condition means unconditionally."""
+        is_spec/spec_tag say which) and sends the front end to `next_pc`.
+
+        - `next_pc` is REQUIRED: the engine cannot work out where execution
+          continues, because only this body knows what the µop does. Without
+          it a squash would clear the pipeline and leave the pc wherever fetch
+          had run to.
+        - it is the ACTUAL next pc, not the branch target: a branch predicted
+          taken that falls through redirects to the instruction after it
+        """
         raise NotImplementedError(
             f"{type(self).__name__}.declare_mis_pred: the generator supplies this")
 

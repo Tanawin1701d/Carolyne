@@ -26,7 +26,7 @@
 # per-stage kill, and who calls build_issue with exec_meta.
 
 from kathryn import *
-from carolyne.debug.sim import KarrayProbe, PipStatusProbe
+from carolyne.debug.sim import BranchResolveProbe, KarrayProbe, PipStatusProbe
 from kathryn.signal import to_ref
 
 from carolyne.uarch.o3.common_field import (IS_SPEC, NPC, PC, ROB_DES_IDX, SPEC_TAG,
@@ -87,6 +87,9 @@ class ExecUnitO3(Module):
         # fan-out's caller, so on_mis_pred / on_suc_pred exclude it (the
         # declaring branch itself must finish untouched).
         self._declared_mis_pred = False
+        self._dbg_mis_pred = None        # what dbg_probes publishes, when declared
+        self._dbg_redirect = None
+        self._dbg_suc_pred = None
         self._declared_suc_pred = False
 
         # A unit's `needs` may name record fields its body reads (pc/npc) —
@@ -179,11 +182,16 @@ class ExecUnitO3(Module):
     # Loud stubs: a body reaching one today fails at elaboration rather than
     # silently building no hardware; each lands with its machinery.
 
-    def declare_mis_pred(self, src, stage_idx: int, dyn_cond=None):
+    def declare_mis_pred(self, src, stage_idx: int, dyn_cond=None, next_pc=None):
         """A stage resolved a prediction WRONG under `dyn_cond`: the whole core
-        rolls back, keyed by the record this stage carries.
+        rolls back, keyed by the record this stage carries, and the front end
+        restarts at `next_pc`.
 
         - the zif scopes the squash: every flush takes `dyn_cond` as its gate
+        - `next_pc` is where execution really continues. Only the ISA body
+          knows it, so it is required here: clearing the pipeline without it
+          leaves fetch's pc wherever it had run to and the core executes the
+          wrong instructions
         - this complex EXCLUDES ITSELF from the per-stage kill: the branch is
           older than everything it kills and still has to report
         - every ARCH dest the station carries is named: decode forces a
@@ -194,7 +202,14 @@ class ExecUnitO3(Module):
             raise ValueError(
                 f"ExecUnitO3 '{self.label}'.declare_mis_pred: needs the "
                 f"mispredict condition — an unconditional squash is nonsense")
+        if next_pc is None:
+            raise ValueError(
+                f"ExecUnitO3 '{self.label}'.declare_mis_pred: needs the pc "
+                f"execution continues at — a squash with no redirect leaves "
+                f"fetch wherever it had run to")
         self._declared_mis_pred = True
+        self._dbg_mis_pred = dyn_cond          # published by dbg_probes
+        self._dbg_redirect = next_pc
         dest_renames = []
         for atm_opr in self.arch_dest_atm_oprs:
             phy_idx = to_ref(getattr(src[0], field_name(PR_IDX, atm_opr)))
@@ -202,6 +217,7 @@ class ExecUnitO3(Module):
         with zif(dyn_cond):
             self._core.on_mis_pred(to_ref(getattr(src[0], SPEC_TAG)),
                                    to_ref(getattr(src[0], ROB_DES_IDX)),
+                                   to_ref(next_pc),
                                    dest_renames)
 
     def declare_suc_pred(self, src, dyn_cond=None):
@@ -219,6 +235,7 @@ class ExecUnitO3(Module):
                 f"ExecUnitO3 '{self.label}'.declare_suc_pred: needs the "
                 f"resolve condition — an unconditional resolve is nonsense")
         self._declared_suc_pred = True
+        self._dbg_suc_pred = dyn_cond          # published by dbg_probes
         with zif(dyn_cond):
             self._core.on_suc_pred(to_ref(getattr(src[0], SPEC_TAG)),
                                    to_ref(getattr(src[0], ROB_DES_IDX)))
@@ -378,3 +395,9 @@ class ExecUnitO3(Module):
     @dbg
     def dbg_probes(self):
         self.dbg_stage_metas = [PipStatusProbe(meta) for meta in self.stage_metas]   # [0] is the issue arb
+        # stage 0's record is the station's exec_src, which the station exposes
+        self.dbg_stage_srcs  = [KarrayProbe(src) for src in self.stage_srcs[1:]]
+        # The resolution this complex declared, if it declares one: the branch
+        # complex is where a squash starts, so this is where it can be watched.
+        self.dbg_resolve = BranchResolveProbe(self._dbg_mis_pred, self._dbg_redirect,
+                                              self._dbg_suc_pred)

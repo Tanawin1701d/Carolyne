@@ -6,8 +6,9 @@
 # predicted next pc this unit compares against.
 #
 # One stage, so exec_stage returns None. The body DECLARES its resolution:
-# api.declare_mis_pred(br_mis_pred) / declare_suc_pred(br_suc_pred) — the
-# actual-vs-predicted npc compare — declare_fin, and the link writeback
+# api.declare_mis_pred(br_mis_pred, actual_npc) / declare_suc_pred(br_suc_pred)
+# — the actual-vs-predicted npc compare, and the pc the front end restarts at
+# when they differ — declare_fin, and the link writeback
 # GATED in a zif on the jump µops (a branch booked no physical register).
 # LIMIT: the core that builds hardware from these calls is pending; the
 # gated wb_reg leans on its contract that the call respects the enclosing
@@ -72,7 +73,9 @@ class BrExecUnit(ExecUnitBase):
         with zif(uop_hit(src, (U.UOP_JAL, U.UOP_JALR))):
             api.wb_reg(AOPR_DEST_1, link)
 
-        api.declare_mis_pred(mis_pred)
+        # actual_npc, not `target`: a branch that was predicted taken and
+        # falls through continues at the instruction after it.
+        api.declare_mis_pred(mis_pred, actual_npc)
         api.declare_suc_pred(suc_pred)
         api.declare_fin(src)
         return None                                 # last stage: no next

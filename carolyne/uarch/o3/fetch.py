@@ -23,6 +23,7 @@ from carolyne.uarch.mem.common.mem_port import MemPortReadValid
 from carolyne.uarch.o3.common_field import INSTR, PC, VALID
 from carolyne.uarch.o3.config import CPUO3_Config
 from carolyne.uarch.o3.fetch_helper import build_fetch_table
+from carolyne.uarch.o3.priority import PRI_MIS_PRED
 
 
 class Fetch(Module):
@@ -66,9 +67,14 @@ class Fetch(Module):
     def connect(self, decoder):
         self.decode_meta = decoder.decode_meta
 
-    def on_mis_pred(self):
-        # a squash empties the stage: clear the grant, the pip auto-restarts
+    def on_mis_pred(self, new_pc):
+        """A squash empties the stage AND sends it to the corrected pc.
+
+        - the pc write is at PRI_MIS_PRED, above the transfer's own advance,
+          so the redirect wins in the cycle both fire
+        """
         self.fetch_meta.flush()
+        self.override_pc(new_pc, PRI_MIS_PRED)
 
     def override_pc(self, new_pc, override_priority: int):
         # `|=`, not `=`: a bare assignment rebinds the Python attribute and
@@ -92,10 +98,14 @@ class Fetch(Module):
         step  = sum_cnt(taken, width=self.config.isa.pc_width)
 
         # transfer data
+        # EVERY arbiter must grant, not just one. A new group may be captured
+        # only when the memory answered AND decode took the previous group;
+        # the default `mode="any"` ORs the grants, so the memory alone would
+        # let fetch overwrite a group decode had not read.
         pip_metas = [self.decode_meta,
                      *[port.pip_meta for port in self.read_ports]]
         with pip(self.fetch_meta, auto_req = True, auto_restart = True):
-            with zync(pip_metas):
+            with zync(pip_metas, mode = "all"):
                 for lane, port in enumerate(self.read_ports):
                     self.fetch[lane] |= {PC   : self.pc + (lane * align),
                                          INSTR: port.read(),

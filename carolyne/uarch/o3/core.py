@@ -125,7 +125,7 @@ class CoreO3(Module):
         return tuple(exu for lane in self.issue_lanes for exu in lane.execs)
 
     # --- mispredict -------------------------------------------------------------
-    def on_mis_pred(self, last_valid_spec_tag_dyn, rob_des_idx_dyn,
+    def on_mis_pred(self, last_valid_spec_tag_dyn, rob_des_idx_dyn, redirect_pc,
                     dest_renames=()):
         """CALL ONCE — the squash fan-out: one call rolls the whole core back.
 
@@ -137,6 +137,9 @@ class CoreO3(Module):
           guard as its gate
         - `last_valid_spec_tag_dyn` is the branch's one-hot tag,
           `rob_des_idx_dyn` its ROB entry (carried in the stage record)
+        - `redirect_pc` is where execution really continues: the front end is
+          emptied AND sent there, so the squash replaces the wrong path
+          instead of only deleting it
         - `dest_renames` is (atomic_operand, phy_idx) per dest slot of the
           branch: that class's RT restores the branch's snapshot and its PRF
           rolls back to just past the branch's own allocation
@@ -154,8 +157,10 @@ class CoreO3(Module):
         fix_tag = self.mpft.get_fix_tag(last_valid_spec_tag_dyn)
 
         # nothing moves in a squashed cycle: each stage flushes its own arb
-        # (the commit arb is the ROB's, flushed in rob.on_mis_pred below)
-        self.fetch   .on_mis_pred()
+        # (the commit arb is the ROB's, flushed in rob.on_mis_pred below).
+        # Fetch takes the corrected pc with its flush — emptying it without
+        # one would leave the pc wherever the wrong path had run to.
+        self.fetch   .on_mis_pred(redirect_pc)
         self.decode  .on_mis_pred()
         self.dispatch.on_mis_pred()
 

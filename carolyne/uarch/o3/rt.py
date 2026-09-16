@@ -4,6 +4,7 @@ from kathryn.signal import to_ref
 
 from carolyne.isa import RegFile
 from carolyne.uarch.common.karray_util import OH
+from carolyne.uarch.o3.common_field import RENAMED
 from carolyne.uarch.o3.config import CPUO3_Config
 from carolyne.uarch.o3.priority import PRI_COMMIT, PRI_MIS_PRED, PRI_RENAME
 
@@ -117,7 +118,9 @@ class Rt(Module):
         """(renamed, prf_idx) of one architectural register, as rename port
         `port_idx` sees it: AFTER every earlier lane's rename, BEFORE its own.
 
-        - port 0 reads the commit row; port k reads the row lane k-1 overlaid
+        - port 0 reads the commit row, port k the row lane k-1 overlaid
+        - a retirement in THIS cycle is not in either: it lands at the edge,
+          with the Arf write it belongs to (on_commit)
         """
         row = (self.temp_commit[0] if port_idx == 0
                else self.temp_dispatch[port_idx - 1])
@@ -134,19 +137,34 @@ class Rt(Module):
 
 
     def on_commit(self, arch_dyn_idx, prf_dyn_idx):
+        """A write became architectural: DROP the mapping that named it.
 
+        - leaving `renamed` set points every later reader at a physical
+          register that has been freed; once the pool wraps and reallocates it,
+          that reader waits for a writeback which is not coming
+        - CLOCKED ONLY, never on the commit ROW the read path sees. The Arf
+          takes the value at the edge, so a reader in THIS cycle must still see
+          the rename and read the physical register, which still holds the
+          value; from the next cycle on it reads the Arf
+        - the guard reads what the rename CHAIN is about to write, not master:
+          a lane renaming this register in the same cycle leaves a different
+          physical index there, and that younger mapping must stand — the same
+          reason PRI_RENAME sits above PRI_COMMIT
+        - EVERY speculative plane is repaired too. A snapshot taken while the
+          speculation was open still claims the mapping, so a later squash
+          would restore a rename that has since committed.
+        """
+        last_row = self.temp_dispatch[self.rename_ports - 1][arch_dyn_idx]
         with priority(PRI_COMMIT):
-            with zif(to_ref(self.master_rt[0][arch_dyn_idx].renamed).land(
-                     to_ref(self.master_rt[0][arch_dyn_idx].prf_idx) == prf_dyn_idx
-                     )):
-                write_entry(self.temp_commit[0], arch_dyn_idx,
-                            self.isa_reg_file.amount, prf_idx=prf_dyn_idx)
+            with zif(to_ref(last_row.renamed)
+                     & (to_ref(last_row.prf_idx) == prf_dyn_idx)):
+                self.master_rt[0][arch_dyn_idx] |= {RENAMED: 0}
 
-            for i in range(self.config.sptag_len):
-                with zif(to_ref(self.spec_rt[0][arch_dyn_idx].renamed).land(
-                         to_ref(self.spec_rt[0][arch_dyn_idx].prf_idx) == prf_dyn_idx
-                         )):
-                    self.spec_rt[0][arch_dyn_idx].prf_idx |= prf_dyn_idx
+            for tag_idx in range(self.config.sptag_len):
+                spec_row = self.spec_rt[tag_idx][arch_dyn_idx]
+                with zif(to_ref(spec_row.renamed)
+                         & (to_ref(spec_row.prf_idx) == prf_dyn_idx)):
+                    self.spec_rt[tag_idx][arch_dyn_idx] |= {RENAMED: 0}
 
     def book_rename(self, port_idx: int, req_rename_sig, is_branch_sig, spectag_dyn, arch_idx_to_set, prf_idx_to_set):
         self.rename_metas[port_idx] = (req_rename_sig, is_branch_sig, spectag_dyn, arch_idx_to_set, prf_idx_to_set)

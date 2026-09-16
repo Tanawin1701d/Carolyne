@@ -22,11 +22,12 @@ from typing import Iterator, List
 
 from kathryn import Module
 from kathryn import dbg
-from carolyne.debug.sim import PipStatusProbe
+from carolyne.debug.sim import MemPortProbe, PipStatusProbe
 from kathryn import _session
 
 from carolyne.uarch.mem.common.addr_meta import AddrMeta
-from carolyne.uarch.mem.common.mem_port  import MemPortBase, MemPortRead, MemPortWrite
+from carolyne.uarch.mem.common.mem_port  import (MemPortBase, MemPortRead,
+                                                 MemPortReadValid, MemPortWrite)
 
 
 class MemBase(Module):
@@ -118,3 +119,22 @@ class MemBase(Module):
     def dbg_probes(self):
         self.dbg_read_ports  = [PipStatusProbe(port.pip_meta) for port in self.read_ports]
         self.dbg_write_ports = [PipStatusProbe(port.pip_meta) for port in self.write_ports]
+        self.dbg_read_wires  = [build_port_probe(port) for port in self.read_ports]
+        self.dbg_write_wires = [build_port_probe(port) for port in self.write_ports]
+
+
+def build_port_probe(port: MemPortBase) -> MemPortProbe:
+    """One port's wires as a probe: what it addresses, what it carries, what gates it.
+
+    - the address regions are high first, so `addr_srcs[0]` is the index and a
+      second region is the bank a banked memory routes by
+    - only a write carries `enable`, only a conflict-reporting read carries `valid`
+    """
+    data = port.data if isinstance(port, (MemPortRead, MemPortWrite)) else None
+    return MemPortProbe(
+        index  = port.addr_srcs[0],
+        data   = data,
+        bank   = port.addr_srcs[1] if len(port.addr_srcs) > 1        else None,
+        enable = port.enable       if isinstance(port, MemPortWrite) else None,
+        valid  = port.valid        if isinstance(port, MemPortReadValid) else None,
+    )

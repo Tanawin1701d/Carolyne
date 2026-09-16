@@ -5,8 +5,9 @@
 # `com_ptr` the oldest one, and `used_entry_cnt` how many are between them. The
 # count is what tells a full buffer from an empty one, which two pointers of
 # the same width cannot; it takes ONE clocked write per cycle from
-# `on_update_meta`, the way Prf resolves rename against commit, so allocating
-# and retiring in the same cycle cannot lose each other. The depth must be a
+# `run_update_meta` — the ROB's OWN flow, unconditional, the way Prf resolves
+# rename against commit — so allocating and retiring in the same cycle cannot
+# lose each other, and a cycle that only commits still counts. The depth must be a
 # POWER OF TWO: both pointers step modulo the table, so at that size the modulo
 # is the register width and no wrap compare is built.
 #
@@ -201,7 +202,6 @@ class Rob(Module):
             with priority(PRI_RENAME):
                 self.alloc_ptr |= self.alloc_ptr + self.want_cnt
             self.alloc_cnt *= self.want_cnt
-        self.on_update_meta()
 
     def write_entry(self, idx, src_row):
         """Fill one entry. Nothing has written back yet, whatever the bus says."""
@@ -311,10 +311,22 @@ class Rob(Module):
         return val(1, 0)
 
     # --- the cycle ----------------------------------------------------------------
-    def on_update_meta(self):
-        """Resolve allocation against commit into ONE write of the count."""
+    @flow
+    def run_update_meta(self):
+        """Resolve allocation against commit into ONE write of the count.
+
+        The ROB's OWN flow, and UNCONDITIONAL: the count is this block's state,
+        so it must move in every cycle either port acted. Driving it from
+        inside dispatch's granted transfer would lose every commit made in a
+        cycle the front end did not dispatch, and the buffer would believe it
+        still held entries it had retired.
+
+        - both ports are wires that read 0 when their side did nothing, so an
+          idle cycle adds and subtracts nothing
+        - a squash overrides this write at PRI_MIS_PRED (on_mis_pred)
+        """
         self.used_entry_cnt |= (self.used_entry_cnt
-                           + self.alloc_cnt - self.commit_cnt)
+                                + self.alloc_cnt - self.commit_cnt)
 
     # --- squash -------------------------------------------------------------------
     def on_mis_pred(self, rob_idx):
@@ -334,3 +346,4 @@ class Rob(Module):
     def dbg_probes(self):
         self.dbg_commit_meta = PipStatusProbe(self.commit_meta)
         self.dbg_table       = KarrayProbe   (self.table, head=self.com_ptr, count=self.used_entry_cnt)
+        self.dbg_com_row     = KarrayProbe   (self.com_row)      # the rows commit reads, one per lane
