@@ -3,7 +3,8 @@
 #   block has them, the head pointer and the used count that bound its live rows.
 # - KarraySimProbe (sim side): the same three as KSim objects, plus row reading;
 #   built by `KarrayProbe.convert(sim_reps)`.
-# - LIMIT: one-dimensional tables only (the ROB, a station, the store buffer).
+# - LIMIT: rows() reads a ONE-dimensional table (the ROB, a station, the store
+#   buffer). A 2-D table is read one plane at a time, through `plane(idx)`.
 
 from __future__ import annotations
 
@@ -55,6 +56,10 @@ class KarraySimProbe:
 
     def __len__(self) -> int:       return len(self.table)
     def fields (self) -> List[str]: return list(dir(self.table[0]))    # the table's own field names
+
+    def plane(self, index: int) -> "KarraySimProbe":
+        """One plane of a 2-D table, as a probe over its rows (a rename table's master plane)."""
+        return KarraySimProbe(self.table[index])
 
     def row(self, idx: int) -> Dict[str, Optional[int]]:
         elem = self.table[idx]
