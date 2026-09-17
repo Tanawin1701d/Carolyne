@@ -13,7 +13,7 @@ import argparse
 import sys
 
 from .elf32 import read_elf32
-from .machine import DEFAULT_DMEM_BYTES, DEFAULT_IMEM_BYTES
+from .layout import DEFAULT_DMEM_BYTES, DEFAULT_IMEM_BYTES
 from .target import TARGETS, target_named
 from .verify import verify_program
 

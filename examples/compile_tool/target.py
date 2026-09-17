@@ -24,8 +24,7 @@ from carolyne.isa.riscv import Rv32im
 from carolyne.isa.riscv.field_match import RESET_PC as RV32_RESET_PC
 
 from .elf32 import EM_MIPS, EM_RISCV
-from .layout import DMEM_BASE, MachineMem
-from .machine import DEFAULT_DMEM_BYTES, DEFAULT_IMEM_BYTES
+from .layout import DEFAULT_DMEM_BYTES, DEFAULT_IMEM_BYTES, DMEM_BASE, MachineMem
 
 MIPS_RESET_PC = 0xBFC00000        # the architectural reset vector; a MIPS IsaBase will own it
 

@@ -27,8 +27,7 @@ from typing import Sequence
 
 from .elf32 import Elf32, read_elf32
 from .image import ProgramImage, build_image
-from .layout import MemoryLayout, MachineMem
-from .machine import DEFAULT_DMEM_BYTES, DEFAULT_IMEM_BYTES, idx_width_for
+from .layout import DEFAULT_DMEM_BYTES, DEFAULT_IMEM_BYTES, MemoryLayout, MachineMem
 from .target import MIPS32, RV32IM, TARGETS, Target, resolve_target, target_named
 from .toolchain import BuildArtifacts, compile_program
 from .verify import VerifyReport, verify_program
@@ -36,7 +35,6 @@ from .verify import VerifyReport, verify_program
 __all__ = ["build_program", "Program",
            "Target", "TARGETS", "RV32IM", "MIPS32", "target_named",
            "MachineMem", "MemoryLayout", "ProgramImage", "VerifyReport",
-           "idx_width_for",
            "DEFAULT_IMEM_BYTES", "DEFAULT_DMEM_BYTES"]
 
 REPO_ROOT   = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))

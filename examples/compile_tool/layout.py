@@ -21,11 +21,12 @@ from dataclasses import dataclass
 
 from carolyne.util import is_power_of_two
 
-from .machine import idx_width_for
-
 # --- fixed choices ------------------------------------------------------------
 
 DMEM_BASE = 0x10000000      # any multiple of the data memory size would serve
+
+DEFAULT_IMEM_BYTES = 8 * 1024       # what a build gets when no size is stated
+DEFAULT_DMEM_BYTES = 4 * 1024
 
 # The CODE region is not chosen here: it starts at MachineMem.imem_base — the
 # ISA's reset_pc — so the linker script and the fetch reset cannot disagree.
@@ -36,6 +37,29 @@ DMEM_BASE = 0x10000000      # any multiple of the data memory size would serve
 
 MMIO_BYTES = 16                                 # reserved at the TOP of the data region
 MMIO_NAMES = ("putchar", "putint", "exit")      # one word each, in this order
+
+
+# --- bytes to index width -------------------------------------------------------
+
+def _idx_width_for(total_bytes: int, banks: int, word_bytes: int) -> int:
+    """The index width one bank needs for a memory of this many bytes.
+
+    - private twin of examples/o3/core/mem_size.idx_width_for: the tool may not
+      import a machine package, and the size tests hold the two equal
+    """
+    for what, value in (("total_bytes", total_bytes), ("banks", banks),
+                        ("word_bytes", word_bytes)):
+        if not is_power_of_two(value):
+            raise ValueError(
+                f"MemoryLayout: {what} must be a power of two — the address "
+                f"is a part-select, not a compare — got {value}")
+
+    words_per_bank, remainder = divmod(total_bytes, banks * word_bytes)
+    if remainder or words_per_bank < 1:
+        raise ValueError(
+            f"MemoryLayout: {total_bytes} bytes does not divide into {banks} "
+            f"bank(s) of {word_bytes}-byte words")
+    return words_per_bank.bit_length() - 1
 
 
 # --- what the caller states -----------------------------------------------------
@@ -104,19 +128,19 @@ class MemoryLayout:
     def from_spec(cls, machine_mem: MachineMem) -> "MemoryLayout":
         """The layout `machine_mem` describes.
 
-        - idx_width_for is what holds the sizes to account (powers of two,
+        - _idx_width_for is what holds the sizes to account (powers of two,
           whole banks); the region and overlap checks are __post_init__'s
         """
         return cls(imem_base      = machine_mem.imem_base,
                    imem_bytes     = machine_mem.imem_bytes,
                    imem_banks     = machine_mem.imem_banks,
-                   imem_idx_width = idx_width_for(machine_mem.imem_bytes,
-                                                  machine_mem.imem_banks,
-                                                  machine_mem.word_bytes),
+                   imem_idx_width = _idx_width_for(machine_mem.imem_bytes,
+                                                   machine_mem.imem_banks,
+                                                   machine_mem.word_bytes),
                    dmem_base      = machine_mem.dmem_base,
                    dmem_bytes     = machine_mem.dmem_bytes,
-                   dmem_idx_width = idx_width_for(machine_mem.dmem_bytes, 1,
-                                                  machine_mem.word_bytes),
+                   dmem_idx_width = _idx_width_for(machine_mem.dmem_bytes, 1,
+                                                   machine_mem.word_bytes),
                    word_bytes     = machine_mem.word_bytes)
 
     def __post_init__(self) -> None:
