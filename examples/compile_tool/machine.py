@@ -1,16 +1,13 @@
-# The machine a program is built for.
+# Memory SIZES in bytes to the INDEX WIDTH a memory of that size needs — the two
+# differ by the bank count and the bus width. This is the one place that
+# conversion happens, so no caller computes a width by hand.
 #
-# The user asks for memory SIZES in bytes; the config wants INDEX WIDTHS, and
-# the two differ by the bank count and the bus width. This is the one place
-# that conversion happens, so a caller never computes a width by hand and the
-# layout is always derived from a config that really was built that way.
+# NOT here: a machine. Which core runs a program is the caller's choice, stated
+# as a CPUO3_Config it hands in (target.py, layout_for).
 
 from __future__ import annotations
 
-from carolyne.uarch.o3.config import CPUO3_Config
 from carolyne.util import is_power_of_two
-
-from examples.o3.rv32im.config import rv32im_config
 
 DEFAULT_IMEM_BYTES = 8 * 1024
 DEFAULT_DMEM_BYTES = 4 * 1024
@@ -35,22 +32,3 @@ def idx_width_for(total_bytes: int, banks: int, word_bytes: int) -> int:
             f"idx_width_for: {total_bytes} bytes does not divide into {banks} "
             f"bank(s) of {word_bytes}-byte words")
     return words_per_bank.bit_length() - 1
-
-
-def config_for_sizes(imem_bytes : int = DEFAULT_IMEM_BYTES,
-                     dmem_bytes : int = DEFAULT_DMEM_BYTES,
-                     **knobs) -> CPUO3_Config:
-    """An RV32I machine with memories of the requested size.
-
-    - every other knob passes through to examples.o3.rv32im.config.rv32im_config
-    - the instruction memory has one bank per front-end lane, so its index
-      width falls as fe_lanes rises for the same total size
-    """
-    lanes = knobs.get("fe_lanes", 2)
-    probe = rv32im_config(**knobs)              # for ilen_bytes / dlen_bytes
-    isa   = probe.isa
-
-    return rv32im_config(
-        instr_mem_idx_width = idx_width_for(imem_bytes, lanes, isa.ilen_bytes),
-        data_mem_idx_width  = idx_width_for(dmem_bytes, 1, isa.dlen_bytes),
-        **knobs)

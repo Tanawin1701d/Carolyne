@@ -9,7 +9,7 @@ python -m examples.compile_tool build programs/hello.c
 python -m examples.compile_tool build a.c b.c --target rv32im --imem 16K --dmem 8K
 python -m examples.compile_tool build programs/hello.c --target mips32
 python -m examples.compile_tool layout --target mips32 --imem 16K
-python -m examples.compile_tool verify out/hello.elf --target rv32i
+python -m examples.compile_tool verify out/hello.elf --target rv32im
 ```
 
 or from Python:
@@ -17,7 +17,8 @@ or from Python:
 ```python
 from examples.compile_tool import build_program
 
-program = build_program(["hello.c"], target="rv32i", imem_bytes=8192, dmem_bytes=4096)
+machine_mem = target_named("rv32im").machine_mem(imem_bytes=8192, dmem_bytes=4096, banks=2)
+program  = build_program(["hello.c"], machine_mem)
 print(program.describe())
 program.image.write_files("out/")
 ```
@@ -29,8 +30,7 @@ CLI is `python -m ...` from the repo root rather than a console script.
 
 | target   | toolchain                | flags                       | verify                                  |
 | -------- | ------------------------ | --------------------------- | --------------------------------------- |
-| `rv32i`  | `riscv64-unknown-elf-`   | `-march=rv32i  -mabi=ilp32` | against `carolyne.isa.riscv.Rv32i`      |
-| `rv32im` | `riscv64-unknown-elf-`   | `-march=rv32im -mabi=ilp32` | against the same description, which carries the M extension since 2026-09-15 |
+| `rv32im` | `riscv64-unknown-elf-`   | `-march=rv32im -mabi=ilp32` | against `carolyne.isa.riscv.Rv32im`, which carries the M extension |
 | `mips32` | `mipsel-linux-gnu-`      | `-march=mips32r2 -mabi=32`  | not verified: no `carolyne/isa/mips` yet |
 
 MIPS32 carries multiply and divide in its base ISA, so there is no `mips32im`
@@ -59,8 +59,11 @@ simulation harness. There is no hardware decode, so they cost nothing.
 
 ## What it does
 
-1. pick the target (`target.py`) and size a machine (`machine.config_for_sizes`) when it has one
-2. derive the memory map from it (`layout.MemoryLayout.from_config`, or `from_sizes` for a target with no machine yet)
+1. pick the target (`target.py`) and take the memories to lay out for as a
+   `MachineMem` the caller states — a machine config derives one
+   (`examples/o3`'s `machine_mem_of`), a machine-less target states its own
+   (`Target.machine_mem`); the tool names no machine type at all
+2. derive the memory map from it (`layout.MemoryLayout.from_spec`)
 3. generate the linker script and the C header from that map
 4. compile and link (`toolchain`)
 5. decode every instruction against the ISA description (`verify`)
@@ -100,10 +103,9 @@ are.
 - **The data region has its own base** (`0x10000000`). The hardware
   part-selects the low address bits, so the base is truncated away before the
   memory sees it; it only makes the ELF and the disassembly readable.
-- **`-march=rv32im` is accepted and will fail verification** until the ISA
-  description grows multiply µops. That is the point: the build names the
-  offending instruction instead of handing the core a word it decodes into
-  nothing. With `rv32i`, `*` and `/` work through libgcc's `__mulsi3`.
+- **Verification holds every word to the description**: an instruction the
+  ISA cannot decode fails the build by name, instead of handing the core a
+  word it decodes into nothing.
 - **Everything is compiled `-mstrict-align`**, because a misaligned access is
   silently wrong in the load/store unit (`docs/open_items.md`).
 

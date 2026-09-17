@@ -9,7 +9,7 @@ int main(void)
     print_str("hello from carolyne\n");
 
     for (i = 0; i < 5; i++) {
-        print_int(i * i);          /* rv32i has no MUL: this calls __mulsi3 */
+        print_int(i * i);          /* a real MUL: the muldiv station runs it */
         print_char('\n');
     }
 

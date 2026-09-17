@@ -5,7 +5,7 @@
 #   python -m examples.compile_tool build a.c b.c --target rv32im --imem 16K --dmem 8K
 #   python -m examples.compile_tool build hello.c --target mips32
 #   python -m examples.compile_tool layout --target mips32 --imem 16K
-#   python -m examples.compile_tool verify out/hello.elf --target rv32i
+#   python -m examples.compile_tool verify out/hello.elf --target rv32im
 
 from __future__ import annotations
 
@@ -40,8 +40,8 @@ def build_parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="command", required=True)
 
     def add_target(command):
-        command.add_argument("--target", default="rv32i", choices=sorted(TARGETS),
-                             help="rv32i (default), rv32im or mips32")
+        command.add_argument("--target", default="rv32im", choices=sorted(TARGETS),
+                             help="rv32im (default) or mips32")
 
     def add_sizes(command):
         command.add_argument("--imem", type=parse_size,
@@ -80,8 +80,9 @@ def main(argv=None) -> int:
     target = target_named(args.target)
 
     if args.command == "layout":
-        from . import layout_for              # local: the layout pulls in the machine config
-        _config, layout = layout_for(target, args.imem, args.dmem, args.lanes)
+        from .layout import MemoryLayout
+        machine_mem = target.machine_mem(args.imem, args.dmem, banks=args.lanes)
+        layout      = MemoryLayout.from_spec(machine_mem)
         print(f"target {target.name}\n\n{layout.describe()}")
         return 0
 
@@ -95,9 +96,10 @@ def main(argv=None) -> int:
         return 0
 
     from . import build_program            # local: the build pulls in the toolchain
-    program = build_program(args.sources, target=target, name=args.name, opt=args.opt,
-                            out_dir=args.out, imem_bytes=args.imem, dmem_bytes=args.dmem,
-                            lanes=args.lanes, verify=not args.no_verify)
+    machine_mem = target.machine_mem(args.imem, args.dmem, banks=args.lanes)
+    program     = build_program(args.sources, machine_mem, target=target, name=args.name,
+                            opt=args.opt, out_dir=args.out,
+                            verify=not args.no_verify)
     print(program.describe())
     print(f"\nimages written to {program.build.out_dir}")
     return 0

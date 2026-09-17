@@ -42,7 +42,7 @@ class BuildArtifacts:
     dump_path   : str                # objdump -d -S text, for reading the code
     script_path : str                # the GENERATED linker script, not a fixed one
     header_path : str                # the GENERATED carolyne_io.h the sources include
-    target      : str                # which target was built: rv32i, rv32im, mips32
+    target      : str                # which target was built: rv32im, mips32
     objects     : Tuple[str, ...]    # crt0.o first, then one per source file
 
 
@@ -117,9 +117,9 @@ def _compile_one(path: str, out_dir: str, cflags: Sequence[str], target: Target)
 def _link(objects: Sequence[str], script: str, elf: str, target: Target) -> None:
     """Link through gcc, not ld, so libgcc comes from the right multilib.
 
-    -lgcc is stated explicitly because -nostdlib drops it, and a plain rv32i
-    program needs it the moment it multiplies: with no M extension GCC turns
-    `*` and `/` into calls to __mulsi3 and __divsi3.
+    -lgcc is stated explicitly because -nostdlib drops it, and a program can
+    still need libgcc the moment GCC emits a helper call — 64-bit shifts and
+    division helpers on rv32im, __mulsi3 on anything built without M.
     """
     _run(target, [target.tool("gcc"), *target.arch_flags,
                   "-nostdlib", "-nostartfiles", "-static",

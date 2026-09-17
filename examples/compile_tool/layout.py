@@ -1,12 +1,13 @@
 # Memory layout — the one place an address or a size is written down.
 #
-# Built from the CPUO3_Config, so every number comes from the same
-# instr_mem_spec()/data_mem_spec() calls the hardware sizes itself from and
-# cannot drift from the RTL.
+# Built from a MachineMem the CALLER states. A machine config DERIVES one
+# (examples/o3's machine_mem_of reads the same per-memory specs the hardware
+# sizes itself from, so nothing drifts from the RTL); a target with no machine
+# states its own numbers (Target.machine_mem).
 #
 # Its consumers: the linker script (ldscript.py), the C header (cheader.py),
-# the image writer (image.py), and whatever loads the images into the machine
-# (examples/o3/core/build.py) and watches its store port.
+# the image writer (image.py), and the simulation that loads the images into
+# the machine and watches its store port (examples/sim/rv_sim).
 #
 # The two memories are SEPARATE, so each region states its own base. The data
 # base costs nothing: the load/store unit part-selects the word index down to
@@ -18,7 +19,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from carolyne.uarch.o3.config import CPUO3_Config
 from carolyne.util import is_power_of_two
 
 from .machine import idx_width_for
@@ -27,8 +27,8 @@ from .machine import idx_width_for
 
 DMEM_BASE = 0x10000000      # any multiple of the data memory size would serve
 
-# The CODE region is not chosen here: it starts at the ISA's reset_pc
-# (from_config), so the linker script and the fetch reset cannot disagree.
+# The CODE region is not chosen here: it starts at MachineMem.imem_base — the
+# ISA's reset_pc — so the linker script and the fetch reset cannot disagree.
 #
 # 0x10000000, not 0x80000000: a pc-relative pair (auipc+addi, what `la` and
 # `call` assemble to) reaches +-2GB, and 0x80000000 is exactly that far from a
@@ -38,13 +38,34 @@ MMIO_BYTES = 16                                 # reserved at the TOP of the dat
 MMIO_NAMES = ("putchar", "putint", "exit")      # one word each, in this order
 
 
+# --- what the caller states -----------------------------------------------------
+@dataclass(frozen=True)
+class MachineMem:
+    """The memories a program is laid out for — everything a build needs to
+    know about the machine, stated by the CALLER.
+
+    - a machine config DERIVES one (examples/o3's machine_mem_of), so the images
+      and the hardware cannot disagree; a target with no machine states the
+      numbers itself (Target.machine_mem)
+    - pure data: from_spec() is where it is held to account, and the index
+      widths are derived there — the store-the-count bargain
+    """
+
+    imem_base  : int      # where code starts: the ISA's reset_pc
+    imem_bytes : int      # the WHOLE instruction memory, every bank together
+    imem_banks : int      # one per fetch lane — a lane IS a bank
+    dmem_base  : int      # a multiple of the memory size; the hardware truncates it away
+    dmem_bytes : int      # the whole data memory, I/O words included
+    word_bytes : int      # the bus width: 4 for RV32
+
+
 # --- the layout ---------------------------------------------------------------
 @dataclass(frozen=True)
 class MemoryLayout:
     """Where code, data, the stack and the I/O words are, in bytes.
 
-    - build it with from_config(): the config is what the hardware is sized
-      from, so deriving keeps the two from disagreeing
+    - build it with from_spec(): one MachineMem in, every derived number out,
+      so no address is ever written down twice
     - every address here is a BYTE address; image.py converts to word indices
     """
 
@@ -80,45 +101,23 @@ class MemoryLayout:
 
     # --- construction ---------------------------------------------------------
     @classmethod
-    def from_config(cls,
-                    config    : CPUO3_Config,
-                    dmem_base : int = DMEM_BASE) -> "MemoryLayout":
-        """The layout the given machine can actually hold.
+    def from_spec(cls, machine_mem: MachineMem) -> "MemoryLayout":
+        """The layout `machine_mem` describes.
 
-        The code region starts at the ISA's reset_pc and cannot be moved from
-        here: a second statement of it is what could disagree with the fetch.
+        - idx_width_for is what holds the sizes to account (powers of two,
+          whole banks); the region and overlap checks are __post_init__'s
         """
-        instr = config.instr_mem_spec()
-        data  = config.data_mem_spec()
-        return cls(imem_base      = config.reset_pc,
-                   imem_bytes     = instr.size_bytes,
-                   imem_banks     = instr.bank_cnt,
-                   imem_idx_width = instr.index_width,
-                   dmem_base      = dmem_base,
-                   dmem_bytes     = data.size_bytes,
-                   dmem_idx_width = data.index_width,
-                   word_bytes     = data.data_bus_bytes)
-
-    @classmethod
-    def from_sizes(cls,
-                   imem_bytes : int,
-                   dmem_bytes : int,
-                   banks      : int,
-                   reset_pc   : int,
-                   word_bytes : int = 4,
-                   dmem_base  : int = DMEM_BASE) -> "MemoryLayout":
-        """The layout for a target with no Carolyne machine yet (mips32).
-        - the same shape from_config derives, sized the way machine.py sizes a
-          memory, so the images fit the machine that will exist
-        """
-        return cls(imem_base      = reset_pc,
-                   imem_bytes     = imem_bytes,
-                   imem_banks     = banks,
-                   imem_idx_width = idx_width_for(imem_bytes, banks, word_bytes),
-                   dmem_base      = dmem_base,
-                   dmem_bytes     = dmem_bytes,
-                   dmem_idx_width = idx_width_for(dmem_bytes, 1, word_bytes),
-                   word_bytes     = word_bytes)
+        return cls(imem_base      = machine_mem.imem_base,
+                   imem_bytes     = machine_mem.imem_bytes,
+                   imem_banks     = machine_mem.imem_banks,
+                   imem_idx_width = idx_width_for(machine_mem.imem_bytes,
+                                                  machine_mem.imem_banks,
+                                                  machine_mem.word_bytes),
+                   dmem_base      = machine_mem.dmem_base,
+                   dmem_bytes     = machine_mem.dmem_bytes,
+                   dmem_idx_width = idx_width_for(machine_mem.dmem_bytes, 1,
+                                                  machine_mem.word_bytes),
+                   word_bytes     = machine_mem.word_bytes)
 
     def __post_init__(self) -> None:
         self._reject_bad_region("instruction", self.imem_base, self.imem_bytes)
