@@ -7,7 +7,7 @@
 #
 # Its consumers: the linker script (ldscript.py), the C header (cheader.py),
 # the image writer (image.py), and the simulation that loads the images into
-# the machine and watches its store port (examples/sim/rv_sim).
+# the machine and watches its store port (examples/sim).
 #
 # The two memories are SEPARATE, so each region states its own base. The data
 # base costs nothing: the load/store unit part-selects the word index down to
