@@ -73,7 +73,8 @@ def _drive(cfg, commit_ports=None):
             # is what says a squash stops commit.
             with zif(self.mis_pred):
                 self.rob.on_mis_pred(self.mis_idx)
-            self.rob.on_update_meta()
+            # The count is the ROB's own @flow (run_update_meta), unconditional:
+            # a commit in a cycle with no dispatch must still be subtracted.
 
     host = Host()
     set_top(host)

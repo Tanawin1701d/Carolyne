@@ -13,8 +13,8 @@ import pytest
 from kathryn import SignalRef, arena, build_model, emit_verilog, reset
 from kathryn.sim.manifest.schema import SIM_MANIFEST_FILE
 
-from carolyne.debug.sim import (BUSY, FLUSH, GRANTED, HELD, IDLE, QUIET, RUNNING, STALL, WAITING, KarraySimProbe,
-                            PipStatusSimProbe, ProbeBase)
+from carolyne.debug.sim import (BUSY, FLUSH, GRANTED, HELD, IDLE, QUIET, RUNNING, STALL, UNKNOWN, WAITING,
+                                KarraySimProbe, PipStatusSimProbe, ProbeBase)
 from tests.dbg_toy_model import LOG_ROWS, DbgToy
 
 REPO = pathlib.Path(__file__).resolve().parents[1]
@@ -145,7 +145,9 @@ class _Table(list):
     pass
 
 
-def pip_node(mreq: int, mack: int, pip_wait: int, leaves=(), hold=None, reset=None) -> _Node:
+# con_b really is held by a wire, so its probe stores `hold`: a node that left
+# it out would read UNRESOLVED, which is what the UNKNOWN test below pins.
+def pip_node(mreq: int, mack: int, pip_wait: int, leaves=(), hold=0, reset=None) -> _Node:
     gates = {name: _Handle(bit) for name, bit in (("hold", hold), ("reset", reset)) if bit is not None}
     return _Node(mreq=_Handle(mreq), mack=_Handle(mack), pip_req=_Handle(0), pip_ack=_Handle(0),
                  pip_wait=_Handle(pip_wait),
@@ -203,6 +205,34 @@ def test_stage_status(own, gates, next_leaf, word):
     own_probe  = toy().pipe_b.convert(pip_node(*own, **gates))
     next_probe = toy().pipe_b.convert(sink_node([next_leaf]))
     assert own_probe.stage_status(next_probe, 0) == word
+
+
+# ---- a signal out of the holding module's scope --------------------------------
+# A leaf's wires are declared by the module that ZYNCS on the arb, and a flush
+# wire by the module that calls flush(), so in a multi-module design the probe's
+# own module cannot resolve them. The words say UNKNOWN instead of reading 0.
+
+def test_a_stored_signal_the_manifest_cannot_reach_reads_unresolved():
+    node = pip_node(1, 1, 0, leaves=[(1, 1)])
+    del node.hold                                    # declared by the model, out of scope here
+    probe = toy().pipe_b.convert(node)
+    assert probe.unresolved == ("hold",) and probe.lost("hold") and not probe.lost("mack")
+    assert probe.pip_status() == RUNNING             # reads only what resolved
+    assert probe.stage_status(probe, 0) == UNKNOWN   # the gate it needs is gone
+
+
+def test_an_unresolved_leaf_list_reads_unknown_not_quiet():
+    node = pip_node(1, 1, 0, leaves=[(1, 1)])
+    del node.leaf_req
+    probe = toy().pipe_b.convert(node)
+    assert probe.lost("leaf_req") and probe.leaf_count == 0
+    assert probe.leaf_status(0) == UNKNOWN and probe.leaf(0) == (None, None)
+
+
+def test_a_signal_the_model_never_stored_is_not_unresolved():
+    # pipe_b's arb has no reset bound, so a node without one is complete.
+    probe = toy().pipe_b.convert(pip_node(1, 1, 0, leaves=[(1, 1)]))
+    assert "reset" not in probe.unresolved and probe.reset is None
 
 
 def table_node(rows, **bounds) -> _Node:
