@@ -20,9 +20,6 @@ from carolyne.uarch.o3.config import CPUO3_Config, RsvSpec, RsvType
 from examples.compile_tool.layout import DEFAULT_DMEM_BYTES, DEFAULT_IMEM_BYTES
 from examples.o3.core.mem_size import idx_width_for
 
-# What another process imports to rebuild this machine: run_spec carries it as text.
-RV32IM_FACTORY = "examples.o3.rv32im.config:gen_o3_rv32im_config"
-
 
 def rv32im_isa() -> Rv32im:
     """The RISC-V description as the package ships it: RV32IM."""

@@ -14,7 +14,7 @@
 
 from __future__ import annotations
 
-from kathryn import Module, init
+from kathryn import Module, build_model, init, reset
 
 from carolyne.uarch.mem.easy_mem import EasyMem
 from carolyne.uarch.o3.config import CPUO3_Config
@@ -53,3 +53,16 @@ class O3Machine(Module):
 def build_machine(config: CPUO3_Config) -> O3Machine:
     """The machine, ready for set_top(). Call inside a fresh reset()."""
     return O3Machine(config)
+
+
+def build_debug_model(config: CPUO3_Config) -> O3Machine:
+    """The machine with its debug probes, in a fresh session — ONE recipe, two processes.
+
+    - the process that EMITS and the simulator process that reads probes must
+      build the same model: KSim resolves the manifest's names in the compiled
+      simulator, so a drift between two copies of this call fails at run time
+    - the model cannot travel between them (the simulator is another process),
+      so what is shared is this function, not its result
+    """
+    reset()
+    return build_model(build_machine(config), debug=True)
