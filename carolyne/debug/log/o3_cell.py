@@ -14,7 +14,7 @@ from __future__ import annotations
 from typing import Dict, List, Optional, Sequence, Tuple
 
 from carolyne.debug.log.o3_cell_fields import (DecodeFields, DispatchFields, FetchFields,
-                                               RobFields, RsvFields, StBufFields)
+                                               RobFields, RsvFields, SlotFields, StBufFields)
 
 UNSET       = "--"      # a value that did not resolve; never printed as 0
 NOT_RENAMED = "-"       # a register the rename table does not cover
@@ -133,6 +133,16 @@ def dispatch_lines(
 
 # ---- the back end ------------------------------------------------------------------
 
+def read_wait_label(row: ProbeRow, slot: SlotFields) -> str:
+    """One waiting slot: its name, and the physical register it waits on.
+
+    - which producer has not written back is what a stuck station is always
+      asking; a µtemp source carries no pr_idx field, so it names itself alone
+    """
+    phy = row.get(slot.pr_idx)
+    return slot.label if phy is None else f"{slot.label}<-p{phy}"
+
+
 def rsv_entry_lines(
     idx            : int,
     row            : ProbeRow,
@@ -148,7 +158,7 @@ def rsv_entry_lines(
         head += f" pc:{cvt_val_to_hex(row.get(fields.pc))}"
     head += f" rob:{cvt_val_to_dec(row.get(fields.rob_des_idx))}"
     lines = [head]
-    waits = [slot.label for slot in fields.src_slots
+    waits = [read_wait_label(row, slot) for slot in fields.src_slots
              if row.get(slot.active) == 1 and row.get(slot.valid) != 1]
     lines.append("   READY!" if not waits else "   W:" + ",".join(waits))
     if row.get(fields.is_spec) == 1:

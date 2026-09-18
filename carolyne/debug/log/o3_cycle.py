@@ -226,7 +226,8 @@ class O3CycleLogger:
     def station_fields(self, station: StationHandles) -> FIELDS.RsvFields:
         slots = [FIELDS.SlotFields(label  = opr.name,
                                    active = field_name(ACTIVE, opr),
-                                   valid  = field_name(VALID,  opr))
+                                   valid  = field_name(VALID,  opr),
+                                   pr_idx = field_name(PR_IDX, opr))
                  for opr in station.src_slots]
         return FIELDS.RsvFields(valid       = CF.VALID,
                                 uop_idx     = CF.UOP_IDX,

@@ -12,7 +12,8 @@ TAG_BITS = 5
 
 
 def rsv_fields(with_pc: bool = True) -> FIELDS.RsvFields:
-    slots = [FIELDS.SlotFields("src_1", active="active_src_1", valid="valid_src_1"),
+    slots = [FIELDS.SlotFields("src_1", active="active_src_1", valid="valid_src_1",
+                               pr_idx="pr_idx_src_1"),
              FIELDS.SlotFields("src_2", active="active_src_2", valid="valid_src_2")]
     return FIELDS.RsvFields(valid="valid", uop_idx="uop_idx", rob_des_idx="rob_des_idx",
                             is_spec="is_spec", spec_tag="spec_tag", src_slots=slots,
@@ -21,7 +22,8 @@ def rsv_fields(with_pc: bool = True) -> FIELDS.RsvFields:
 
 def entry(**over):
     row = {"valid": 1, "uop_idx": 2, "pc": 0x88, "rob_des_idx": 5, "is_spec": 0, "spec_tag": 0,
-           "active_src_1": 1, "valid_src_1": 1, "active_src_2": 0, "valid_src_2": 0}
+           "active_src_1": 1, "valid_src_1": 1, "pr_idx_src_1": 46,
+           "active_src_2": 0, "valid_src_2": 0}
     row.update(over)
     return row
 
@@ -57,9 +59,17 @@ def test_a_ready_entry_prints_the_two_line_form():
     assert lines == ["3] JAL pc:0x00000088 rob:5", "   READY!"]
 
 
-def test_an_entry_waiting_on_a_source_names_that_source():
+def test_an_entry_waiting_on_a_source_names_that_source_and_its_register():
+    """Which producer has not written back is what a stuck station is asking."""
     lines = CELL.rsv_entry_lines(3, entry(valid_src_1=0), True, rsv_fields(), TAG_BITS)
-    assert lines[1] == "   W:src_1"
+    assert lines[1] == "   W:src_1<-p46"
+
+
+def test_a_slot_with_no_physical_register_field_names_itself_alone():
+    """A µtemp source carries no pr_idx: the cell must not print 'pNone'."""
+    waiting = entry(active_src_2=1, valid_src_2=0)
+    lines   = CELL.rsv_entry_lines(3, waiting, True, rsv_fields(), TAG_BITS)
+    assert lines[1] == "   W:src_2"
 
 
 def test_a_slot_the_uop_does_not_fill_is_not_waited_on():
