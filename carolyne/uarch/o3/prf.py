@@ -1,42 +1,27 @@
 # Prf — one physical register file for ONE architectural register class
-# (uop_contract.md §4.1 / Q1: per-class PRF, per-class RAT). It holds the entry
-# storage plus the two numbers rename allocates from: how many entries are free,
-# and which entry goes out next.
+# (uop_contract.md §4.1 / Q1: per-class PRF, per-class RAT): the entry storage
+# plus the two numbers rename allocates from — how many entries are free, and
+# which entry goes out next.
 #
 # `phy_amount` must be a POWER OF TWO, checked at construction: the allocation
-# pointer is circular, so every step over it is arithmetic mod phy_amount, which at
-# a power-of-two size is what an idx_width adder already does. The explicit wrap
-# then drops out of every path — most importantly out of the mispredict
-# distance, which becomes one subtraction.
+# pointer is circular, so at that size the wrap is what an idx_width adder does
+# anyway and drops out of every path — the mispredict distance is then one
+# subtraction.
 #
-# TWO widths, not one. `idx_width` addresses an entry (0..phy_amount-1);
-# `cnt_width` holds a COUNT of free entries (0..phy_amount INCLUSIVE), one value
-# more and so one bit wider — free_entry resets to phy_amount, which idx_width bits
-# cannot hold.
-#
-# Hardware is declared in an `@init` method, never in `__init__`:
-# Module.__init__ opens the module scope, runs the @init methods and closes it
-# before returning, so anything declared after `super().__init__()` lands
-# outside the scope — a panic standalone, or silently attached to the PARENT.
-# `__init__` therefore does plain-Python configuration only, which is what lets
-# it validate phy_amount before any hardware exists.
+# TWO widths. `idx_width` addresses an entry (0..phy_amount-1); `cnt_width`
+# holds a COUNT (0..phy_amount INCLUSIVE), one bit wider — free_entry resets to
+# phy_amount, which idx_width bits cannot hold.
 #
 # Rename and commit resolve into ONE clocked write per quantity, built by the
-# Prf's OWN `@flow` (`update_meta`) — automatic, once, and in the Prf's own
-# UNGATED scope. That last part matters: on_rename/on_commit run
-# inside their stages' zync blocks, where every assignment is gated on that
-# stage's grant, so a meta write built THERE would fire only on that one
-# event's cycles. Instead the always-on write reads the PORT WIRES, which are
-# driven inside the granted scopes and read 0 otherwise: the gating is in
-# the wires, and the resolve composes whatever fired. The cost is that the
-# PORT COUNT is a construction parameter.
+# Prf's own UNGATED @flow (`update_meta`). on_rename/on_commit run inside their
+# stages' zync blocks, so a meta write built THERE would fire only on that
+# event's cycles; the always-on write reads the PORT WIRES, which are driven in
+# the granted scopes and read 0 otherwise. COST: the port count is a
+# construction parameter. A mispredict is EXCLUSIVE of both — it writes at
+# raised priority and overrides them.
 #
-# A mispredict is EXCLUSIVE of rename/commit, so it does not join the chain: it
-# writes at raised priority and overrides them.
-#
-# Kathryn sizes a binary expression to its LEFT operand (expression.rs), so
-# every expression here leads with the wide operand and extends the narrow one.
-# Backwards, it silently truncates.
+# Kathryn sizes a binary expression to its LEFT operand, so every expression
+# here leads with the wide operand; backwards it silently truncates.
 
 from kathryn import *
 from carolyne.debug.sim import KarrayProbe, PipStatusProbe
@@ -46,7 +31,7 @@ from carolyne.isa import RegFile
 from carolyne.util import is_power_of_two
 # One rung of the engine-wide ladder (priority.py): a mispredict write overrides
 # the rename/commit write of the same cycle.
-from carolyne.uarch.o3.priority import PRI_ISSUE, PRI_MIS_PRED
+from carolyne.uarch.o3.priority import PRI_ISSUE, PRI_MIS_PRED, PRI_RENAME
 from carolyne.uarch.o3.common_field import DATA, FIN
 
 
@@ -134,6 +119,10 @@ class Prf(Module):
                             for i in range(self.commit_ports)]
         # rename and commit arbiter
         self.rename_commit_trigger = wire(1, "rename_or_commit_trigger")
+        # The req ports carry the ASK (warm, before the grant); this says the
+        # bundle LANDED (driven in the granted scope, undriven reads 0). The
+        # counters may only move by what landed — see _resolve.
+        self.rename_landed = wire(1, "rename_landed")
 
     # ---- rename ----------------------------------------------------------------
     def book_rename(self, port, req):
@@ -150,8 +139,21 @@ class Prf(Module):
         return index
 
     def on_rename(self, dyn_idx):
-        """Mark the allocated entry not-yet-written (call in the granted scope)."""
+        """Mark the allocated entry not-yet-written (call in the granted scope).
+
+        - the register write lands at the EDGE, so a LATER LANE of the same
+          cycle reading this entry sees the previous owner's fin and data and
+          takes a stale value as ready. The read-view override closes that,
+          the way on_wb's does for a writeback: a just-allocated entry reads
+          not-finished, so the consumer waits for the bypass instead
+        """
+        dyn_idx = to_ref(dyn_idx)          # resolved ONCE, not per entry
+        self.rename_landed *= 1
         self.storage[dyn_idx].fin |= 0
+        with priority(PRI_RENAME):
+            for idx in range(self.phy_amount):
+                with zif(dyn_idx == idx):
+                    self.read_lane[idx] *= {FIN: 0}
         self.rename_commit_trigger *= 1
 
     # ---- commit -----------------------------------------------------------------
@@ -179,25 +181,29 @@ class Prf(Module):
 
 
     def _resolve(self):
-        """The cycle's free count and allocation pointer, read off the PORT
-        WIRES rather than off anything a caller accumulated.
+        """The cycle's free count and allocation pointer, read off the PORT WIRES.
 
-        Commits lead STRUCTURALLY — their sum is wired ahead of the rename
-        subtractions — so a commit retiring an instruction older than a rename
-        beside it really does refill the pool that rename draws from, and no
-        call order can change that. Reading wires instead of recorded terms is
-        also what frees this method from having to run last.
+        - commits lead STRUCTURALLY: their sum is wired ahead of the rename
+          subtractions, so no call order can change what rename draws from
+        - TWO accumulations, because a port carries the ASK and a counter may
+          only move by the LANDING. over_terms judges the raw asks (the caller
+          reads it to DECIDE the grant); free/next take `req & rename_landed`,
+          since the trigger also fires for a commit alone and a STALLED
+          bundle's asks must not count
         """
-        free       = self.free_entry + sum_cnt(self.commit_port).extend(self.cnt_width)
+        judge_free = self.free_entry + sum_cnt(self.commit_port).extend(self.cnt_width)
+        free       = judge_free
         next_index = self.next_index
 
         over_terms = []
         for req in self.req_port:
             # Over-use is the borrow out of the subtraction below: nothing free,
             # yet asked — judged against a pool the commits have already refilled.
-            over_terms.append((free == 0).land(req))
-            free       = free - req.extend(self.cnt_width)
-            next_index = next_index + req.extend(self.idx_width)
+            over_terms.append((judge_free == 0).land(req))
+            judge_free = judge_free - req.extend(self.cnt_width)
+            took       = req & self.rename_landed
+            free       = free - took.extend(self.cnt_width)
+            next_index = next_index + took.extend(self.idx_width)
         return free, next_index, over_terms
 
     # ---- read / write back -------------------------------------------------------
@@ -210,7 +216,8 @@ class Prf(Module):
             self.read_lane[idx] *= self.storage[idx]
 
     def on_get_entry(self, dyn_idx):
-        """The entry as the REGISTER holds it. A reader that CAN race a writeback wants `on_get_entry_with_bp`."""
+        """The entry as the REGISTER holds it; a reader that can race a
+        writeback wants on_get_entry_with_bp."""
         return self.storage[dyn_idx]
 
     def on_get_entry_with_bp(self, dyn_idx):
@@ -239,14 +246,18 @@ class Prf(Module):
         """Roll allocation back to just past `last_phy_idx` (idx_width bits)."""
         # phy_amount is 2**k, so this adder wraps to 0 past the last entry by itself.
         pre_next_index = last_phy_idx + 1
-        # Circular distance from there to the current head = the entries the
-        # squashed instructions took, all of which go back to the free pool. The
-        # subtraction leads with next_index, so it is mod 2**idx_width.
+        # The entries the squashed instructions took, all of which go back to
+        # the free pool. (next - pre) mod 2**k IS the forward distance around
+        # the ring, so there is NO wrap case to write: the subtraction leads
+        # with next_index, which is what makes it mod 2**idx_width.
         reclaimed = self.next_index - pre_next_index
 
         # Exclusive of the rename/commit write, so priority rather than a stage.
         with priority(PRI_MIS_PRED):
             self.next_index |= pre_next_index
+            # NO CLAMP to phy_amount: `reclaimed` counts only entries rename
+            # handed out, so allocated + free <= phy_amount by construction.
+            # A clamp would hide a broken count rather than surface it.
             self.free_entry |= self.free_entry + reclaimed.extend(self.cnt_width)
 
     @dbg

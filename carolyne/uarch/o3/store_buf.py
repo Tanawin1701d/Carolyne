@@ -118,6 +118,23 @@ class StoreBuf(Module):
         # the head to memory and the port's handshake decides when it moves.
         self.retire_meta = PipCon(name=f"{self.label}_retire")
 
+        # THE PUSH HANDSHAKE. A pusher zyncs on this arb as well as its own
+        # next stage, so the buffer can REFUSE a push rather than absorb one it
+        # cannot account for: on_mis_pred recomputes alloc_ptr from what the
+        # table holds NOW, and an entry landing in that same cycle would keep
+        # its row and lose its slot. Held for the squash cycle, so the two
+        # never coincide.
+        #
+        # - the gate is the arb's MASTER-ACK, the EasyMem read-lock idiom.
+        #   NOT PipCon.stall(): that binds set_hold, which only ever reaches a
+        #   pip's trigger (FlowBlockPip.feed_arb_ext_signals), and no pip
+        #   masters this arb — the emitted ack would stay plain master-ack
+        # - a FULL buffer is NOT gated here — `is_full` stays a zync condition,
+        #   because a load must pass a full buffer and an arb cannot exempt it
+        self.push_meta = PipCon(name=f"{self.label}_push")
+        self.push_open = wire(1, f"{self.label}_push_open").default(1)
+        self.push_meta.set_master_ack(self.push_open)
+
         self.alloc_ptr = reg(self.ptr_width, f"{self.label}_alloc_ptr")
         self.alloc_ptr.reset(0)
         self.com_ptr = reg(self.ptr_width, f"{self.label}_com_ptr")
@@ -238,6 +255,10 @@ class StoreBuf(Module):
         The tail lands at ret + the survivor count (the RsvIOR sum_cnt
         rule; the C++ original recomputed it with bit-pattern searches);
         com_ptr needs no repair, a committed store is never speculative.
+
+        - the count reads the table as it stands, which is only sound because
+          NO PUSH CAN LAND THIS CYCLE: the gate below shuts push_meta, so a
+          pusher's zync is refused and retries (the handshake in @init)
         """
         survivors = []
         with priority(PRI_MIS_PRED):
@@ -248,6 +269,7 @@ class StoreBuf(Module):
                 survivors.append(to_ref(row.busy) & ~squashed)
                 with zif(squashed):
                     self.table[row_idx] |= {BUSY: 0}
+            self.push_open *= val(1, 0)      # shut the gate for this cycle
             self.alloc_ptr |= self.ret_ptr \
                           + sum_cnt(survivors).extend(self.ptr_width)
 
@@ -302,4 +324,5 @@ class StoreBuf(Module):
     @dbg
     def dbg_probes(self):
         self.dbg_retire_meta = PipStatusProbe(self.retire_meta)
+        self.dbg_push_meta   = PipStatusProbe(self.push_meta)
         self.dbg_table       = KarrayProbe   (self.table, head=self.ret_ptr)   # rows in use: the `busy` field

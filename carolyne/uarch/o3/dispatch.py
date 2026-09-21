@@ -151,6 +151,11 @@ class Dispatch(Module):
         - the request is WB_REQUIRED, not active: a branch is forced active so
           the PRF allocates a register the squash can roll back to, but it
           writes no architectural register, so the RT must map nothing for it
+        - a write to a CONST register is DISCARDED (RISC-V x0), so the RT maps
+          nothing for it either: `ret` is `jalr x0, 0(ra)` and really does ask
+          to write its link. Map it and every later read of x0 takes the
+          renamed path, where the PRF answers with the discarded value instead
+          of the constant the Arf's mux would have given
         - pr_idx comes off prf_acquisition, is_branch / tag off
           tag_acquisition, ar_idx straight off the decode row
         - book_rename only RECORDS the port's metas; RT's on_rename (the
@@ -170,9 +175,12 @@ class Dispatch(Module):
                 # there is nothing to choose, that register is 0
                 if atm_opr.reg_file.index_width == 0:
                     ar_idx = 0
+                    if 0 in atm_opr.reg_file.const_regs:
+                        req = val(1, 0)
                 else:
-                    ar_idx = to_ref(getattr(decode_entry,
-                                            field_name(AR_IDX, atm_opr)))
+                    ar_idx = to_ref(getattr(decode_entry, field_name(AR_IDX, atm_opr)))
+                    for const_idx in atm_opr.reg_file.const_regs:
+                        req = req & (ar_idx != const_idx)
                 rt.book_rename(lane, req, is_branch, tag, ar_idx, pr_idx)
         return val(1, 1)
 

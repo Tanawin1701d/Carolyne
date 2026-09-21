@@ -87,6 +87,9 @@ class TagGen(Module):
         self.resolve_port = wire(1, "resolve_ok").default(0)
         # rename and resolve arbiter
         self.rename_success_trigger = wire(1, "rename_success_trigger")
+        # The branch ports carry the ASK (warm); this says the bundle LANDED
+        # (granted scope, undriven reads 0) — the Prf's rename_landed idiom.
+        self.rename_landed = wire(1, "rename_landed")
 
     # ---- rename ----------------------------------------------------------------
     def book_rename(self, port, is_branch):
@@ -103,6 +106,7 @@ class TagGen(Module):
 
     def on_rename(self):
         """Commit the cycle's bookings (call in the granted scope)."""
+        self.rename_landed          *= 1
         self.rename_success_trigger *= 1
 
     def _spec_before(self, earlier):
@@ -175,7 +179,9 @@ class TagGen(Module):
 
         with zif(self.rename_success_trigger):
             self.free_tag |= free
-            self.next_tag |= self._tag_after(self.branch_port, "tag_next")
+            # the pointer, like the count, steps only past bookings that LANDED
+            self.next_tag |= self._tag_after(
+                [b & self.rename_landed for b in self.branch_port], "tag_next")
 
     def _resolve(self):
         """The cycle's free-tag count, read off the PORT WIRES rather than off
@@ -187,14 +193,20 @@ class TagGen(Module):
         Reading wires instead of recorded terms is also what frees this method
         from having to run last.
         """
-        free = self.free_tag + self.resolve_port.extend(self.index_width)
+        judge_free = self.free_tag + self.resolve_port.extend(self.index_width)
+        free       = judge_free
 
+        # Judge on the ASK, count on the LANDING (the Prf's _resolve rule):
+        # the trigger also fires for a resolve alone, and a resolve cycle
+        # STALLS dispatch on purpose — unqualified, its asks would still be
+        # consumed and the tag pool leaks until it reads empty.
         over_terms = []
         for is_branch in self.branch_port:
             # Exhaustion is the borrow out of the subtraction below: none left,
             # yet asked — judged against a pool the resolves have refilled.
-            over_terms.append((free == 0).land(is_branch))
-            free = free - is_branch.extend(self.index_width)
+            over_terms.append((judge_free == 0).land(is_branch))
+            judge_free = judge_free - is_branch.extend(self.index_width)
+            free       = free - (is_branch & self.rename_landed).extend(self.index_width)
         return free, over_terms
 
     # ---- mispredict ---------------------------------------------------------------

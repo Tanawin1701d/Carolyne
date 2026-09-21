@@ -32,6 +32,7 @@ def copy_row(dst_row, src_row, amount, clocked):
         else:
             dst_row[arch_idx] *= src_row[arch_idx]
 
+
 class RtEntry(Karray):
     renamed = kaf(1)
     prf_idx = kaf()
@@ -95,17 +96,17 @@ class Rt(Module):
         self.rename_metas: list[tuple | None] = [None for _ in range(self.rename_ports)]
 
 
-
     @flow
     def on_normal_flow(self):
         # do update master every cycle
 
         amount = self.isa_reg_file.amount
 
-        # The stage chain: the committed state, then one row per RENAME PORT,
-        # each lane seeing what the lane before it left. The loop is bounded by
-        # the rows temp_dispatch HAS — it is (rename_ports, amount) — and the
-        # row that goes back to master is the last lane's, not the commit row.
+        # The stage chain: the committed state (master minus this cycle's
+        # commits, on_commit), then one row per RENAME PORT, each lane seeing
+        # what the lane before it left. The loop is bounded by the rows
+        # temp_dispatch HAS — (rename_ports, amount) — and the row that goes
+        # back to master is the last lane's, not the commit row.
         copy_row(self.temp_commit[0],   self.master_rt[0],  amount, clocked=False)
         copy_row(self.temp_dispatch[0], self.temp_commit[0], amount, clocked=False)
         for i in range(1, self.rename_ports):
@@ -119,8 +120,8 @@ class Rt(Module):
         `port_idx` sees it: AFTER every earlier lane's rename, BEFORE its own.
 
         - port 0 reads the commit row, port k the row lane k-1 overlaid
-        - a retirement in THIS cycle is not in either: it lands at the edge,
-          with the Arf write it belongs to (on_commit)
+        - a retirement in THIS cycle is already dropped from both, and the
+          Arf's read view answers with the value being committed
         """
         row = (self.temp_commit[0] if port_idx == 0
                else self.temp_dispatch[port_idx - 1])
@@ -142,23 +143,22 @@ class Rt(Module):
         - leaving `renamed` set points every later reader at a physical
           register that has been freed; once the pool wraps and reallocates it,
           that reader waits for a writeback which is not coming
-        - CLOCKED ONLY, never on the commit ROW the read path sees. The Arf
-          takes the value at the edge, so a reader in THIS cycle must still see
-          the rename and read the physical register, which still holds the
-          value; from the next cycle on it reads the Arf
-        - the guard reads what the rename CHAIN is about to write, not master:
-          a lane renaming this register in the same cycle leaves a different
-          physical index there, and that younger mapping must stand — the same
-          reason PRI_RENAME sits above PRI_COMMIT
+        - the drop goes on the COMMIT ROW, the head of the chain: every rename
+          port, the snapshot a branch takes and master itself inherit it, and
+          the Arf's read view gives a same-cycle reader the committing value
+        - the guard reads MASTER: a rename that landed in an earlier cycle
+          left a different physical index there and must stand; one landing
+          THIS cycle overlays a later row of the chain and wins on its own
         - EVERY speculative plane is repaired too. A snapshot taken while the
           speculation was open still claims the mapping, so a later squash
           would restore a rename that has since committed.
         """
-        last_row = self.temp_dispatch[self.rename_ports - 1][arch_dyn_idx]
+        amount       = self.isa_reg_file.amount
+        master_entry = self.master_rt[0][arch_dyn_idx]
         with priority(PRI_COMMIT):
-            with zif(to_ref(last_row.renamed)
-                     & (to_ref(last_row.prf_idx) == prf_dyn_idx)):
-                self.master_rt[0][arch_dyn_idx] |= {RENAMED: 0}
+            with zif(to_ref(master_entry.renamed)
+                     & (to_ref(master_entry.prf_idx) == prf_dyn_idx)):
+                write_entry(self.temp_commit[0], arch_dyn_idx, amount, renamed=0)
 
             for tag_idx in range(self.config.sptag_len):
                 spec_row = self.spec_rt[tag_idx][arch_dyn_idx]
@@ -197,6 +197,7 @@ class Rt(Module):
                 with zif(req_rename_sig):
                     write_entry(self.temp_dispatch[port_idx], arch_idx_to_set,
                                 amount, renamed=1, prf_idx=prf_idx_to_set)
+                # copy the temp table to the tag table
                 with zif(is_branch_sig):
                     copy_row(self.spec_rt[OH(spectag_dyn)],
                              self.temp_dispatch[port_idx],

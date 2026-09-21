@@ -10,6 +10,12 @@
 # KarrayRef carries `|=`/`*=` but no arithmetic, so `arf.read(i) + imm` would
 # be a TypeError.
 #
+# `read` answers from the READ VIEW (`read_lane`), not the register: a commit
+# writes the register at the edge, and the rename table drops the mapping on
+# the same cycle's commit row, so a reader of that cycle must get the value
+# being committed. `write` publishes it into the view at PRI_COMMIT — the
+# Prf's `read_lane` / `on_wb` shape.
+#
 # Both ports are indexed by a DECODED register number, so a hardwired register
 # can only be recognized at RUNTIME. The two halves of uop_contract.md §1.1 are
 # not symmetric: the WRITE port only has to know THAT the index is constant, so
@@ -31,6 +37,8 @@ from carolyne.debug.sim import KarrayProbe
 from kathryn.signal import to_ref
 
 from carolyne.isa import RegFile
+from carolyne.uarch.o3.common_field import DATA
+from carolyne.uarch.o3.priority import PRI_COMMIT
 
 
 class ArfEntry(Karray):
@@ -53,6 +61,19 @@ class Arf(Module):
             data = self.isa_reg_file.width
         )
 
+        # the read view: storage, plus this cycle's commit (see the header)
+        self.read_lane = ArfEntry(
+            HwComponentType.WIRE,
+            (self.isa_reg_file.amount,),
+            "arf_read_" + self.isa_reg_file.name,
+            data = self.isa_reg_file.width
+        )
+
+    @flow
+    def run_read_lane(self):
+        for idx in range(self.isa_reg_file.amount):
+            self.read_lane[idx] *= self.storage[idx]
+
     def _not_const(self, dyn_idx):
         """`dyn_idx` names none of the hardwired registers — None if there are
         none to guard against, so the caller emits an unconditional write."""
@@ -63,7 +84,7 @@ class Arf(Module):
         return guard
 
     def read(self, dyn_idx):
-        value = to_ref(self.storage[dyn_idx].data)
+        value = to_ref(self.read_lane[dyn_idx].data)
         # One mux per hardwired register, because each carries its OWN value —
         # a single not-const guard could not say which constant to return. Reads
         # as an if/elif chain ending in storage, and disappears entirely for a
@@ -76,11 +97,25 @@ class Arf(Module):
     def write(self, dyn_idx, data):
         guard = self._not_const(dyn_idx)
         if guard is None:
-            self.storage[dyn_idx].data |= data
+            self._write(dyn_idx, data)
             return
         with zif(guard):
-            self.storage[dyn_idx].data |= data
+            self._write(dyn_idx, data)
+
+    def _write(self, dyn_idx, data):
+        """The register at the edge, and the read view NOW.
+
+        - STATIC index + guard on the view: a runtime-indexed write needs a
+          reg backing and the view is wire
+        """
+        dyn_idx = to_ref(dyn_idx)          # resolved ONCE, not per entry
+        self.storage[dyn_idx].data |= data
+        with priority(PRI_COMMIT):
+            for idx in range(self.isa_reg_file.amount):
+                with zif(dyn_idx == idx):
+                    self.read_lane[idx] *= {DATA: data}
 
     @dbg
     def dbg_probes(self):
-        self.dbg_storage = KarrayProbe(self.storage)
+        self.dbg_storage   = KarrayProbe(self.storage)
+        self.dbg_read_lane = KarrayProbe(self.read_lane)

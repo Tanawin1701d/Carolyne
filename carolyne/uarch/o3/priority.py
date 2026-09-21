@@ -64,7 +64,9 @@ PRI_COMMIT   = DEFAULT_UE_PRI_USER + 3
 
 # A lane renames: it writes its destination, and a branch checkpoints the state
 # it leaves behind. Above commit, because a rename supersedes a retirement of
-# the same architectural register in the same cycle.
+# the same architectural register in the same cycle. A branch checkpointing in
+# the very cycle a mapping retires needs NO rung of its own: the snapshot copy
+# writes the corrected value (rt.copy_row_dropping), so it stays one driver.
 PRI_RENAME   = DEFAULT_UE_PRI_USER + 4
 
 # A prediction turns out wrong: speculative state is rolled back. The top rung,

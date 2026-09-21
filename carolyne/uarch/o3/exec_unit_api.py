@@ -53,7 +53,7 @@ class ExecUnitApiO3(ExecUnitApi):
         self.exu.declare_suc_pred(self.src, dyn_cond)
 
     @contextmanager
-    def zync_with_next_stage(self, src, cond=None):
+    def zync_with_next_stage(self, src, cond=None, with_lsq=False):
         """The handshake into the next stage, held in a `with` block.
 
         - `src` is the record this stage received; `des` is YIELDED, the
@@ -64,6 +64,11 @@ class ExecUnitApiO3(ExecUnitApi):
           declared, so `des` must carry each of them
         - `cond` gates the handshake: the (PipCon, cond) bind the station
           issue already uses, so the µop STALLS here while it is low
+        - `with_lsq` binds the store buffer's push arb TOO, under mode="all":
+          both must grant, so a stage that pushes a store cannot move in a
+          cycle the buffer refuses. The bind carries NO condition of its own —
+          mode="all" ANDs every bind's `ack & cond`, so a conditional bind
+          would hang the µops it excludes (a load, here)
         - the LAST stage has no next: completion is declare_fin/wb_reg's
           business
         """
@@ -74,7 +79,9 @@ class ExecUnitApiO3(ExecUnitApi):
                 f"declare_fin/wb_reg's business")
         des  = self.des
         bind = self.pip_con if cond is None else (self.pip_con, cond)
-        with zync(bind):
+        if with_lsq:
+            bind = [bind, self.exu.lsq_push_meta()]
+        with zync(bind, mode="all" if with_lsq else "any"):
             # At PRI_ISSUE, and the body's writes with it: a record LANDING in
             # a stage must beat on_suc_pred's mask, which is computed from
             # that stage record's PREVIOUS contents. Same rung, same reason,

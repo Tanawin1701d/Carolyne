@@ -93,7 +93,7 @@ class ExecUnitApi:
         raise NotImplementedError(
             f"{type(self).__name__}.declare_suc_pred: the generator supplies this")
 
-    def zync_with_next_stage(self, src, cond=None):
+    def zync_with_next_stage(self, src, cond=None, with_lsq=False):
         """The handshake with the next stage's arbiter — the mirror of the
         station-issue zync, used as a WITH block:
 
@@ -107,7 +107,10 @@ class ExecUnitApi:
         body places the block where its own Kathryn structure completes a
         transfer; work outside it does not move the µop on. `cond` gates
         the handshake itself: while it is low the µop STALLS in this stage
-        (a store waiting on a full store buffer)."""
+        (a store waiting on a full store buffer). `with_lsq` says this
+        stage may PUSH a store, so the store buffer must agree to the
+        transfer too — the buffer can then refuse a push it could not
+        account for, and the µop stalls here instead."""
         raise NotImplementedError(
             f"{type(self).__name__}.zync_with_next_stage: the generator supplies this")
 

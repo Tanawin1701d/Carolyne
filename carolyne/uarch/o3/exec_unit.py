@@ -1,29 +1,16 @@
-# ExecUnitO3 — the function-unit complex behind ONE reservation station: the
-# block that takes the station's issued entry and runs the ISA units'
-# exec_stage bodies over it (the natural-Kathryn semantics, isa/exec_unit.py).
+# ExecUnitO3 — the function-unit complex behind ONE reservation station: it
+# takes the station's issued entry and runs the ISA units' exec_stage bodies
+# over it (the natural-Kathryn semantics, isa/exec_unit.py).
 #
-# ONE COMPLEX PER UNIT OF A STATION, named by its position in the spec's unit
-# set: `unit_idx` picks the unit this complex runs, the station's issue slot it
-# reads (`rsv.exec_src[unit_idx]`) and the arbiter it hands back
-# (`rsv.connect`). A station feeding several units therefore has several
-# complexes, each with its own issue path, and only an OUT-OF-ORDER station may
-# feed several (config.RsvSpec).
+# ONE COMPLEX PER UNIT OF A STATION. `unit_idx` picks all three at once: the
+# unit this complex runs, the issue slot it reads (rsv.exec_src[unit_idx]) and
+# the arbiter it hands back to rsv.connect.
 #
-# THE STAGE CHAIN (`transfer`): one pip per stage, stage 0's arbiter BEING
+# THE STAGE CHAIN (`transfer`): one pip per stage, and stage 0's arbiter IS
 # `exec_meta` — the arb the station's build_issue zyncs against, so a busy
-# complex stalls the station. The body is called INSIDE its stage's pip, so
-# its scwait/cwhile compose with the stage's arbiter; stage k receives the
-# record declare_stage_src built for it at @init — a REGISTER Karray the body writes
-# itself, carrying everything the later stages need (the station holds the
-# first register transition: exec_src) — and the body places its own
-# transfer with `with api.zync_with_next_stage(src, des):`, INSIDE which
-# the api transfers is_spec / spec_tag / rob_des_idx from src to des (the
-# triple is in the body's records; the ENGINE writes it). Each stage's
-# api (ExecUnitApiO3, exec_unit_api.py) carries the NEXT stage's arbiter
-# itself and proxies declare_*/wb_reg BACK ONTO THIS COMPLEX — the landing
-# stubs below, each raising until its machinery lands.
-# NOT here yet: that machinery (writeback, squash/resolve fan-out), the
-# per-stage kill, and who calls build_issue with exec_meta.
+# complex stalls the station. A body runs INSIDE its stage's pip and writes
+# its own record; the api (exec_unit_api.py) carries the next stage's arbiter
+# and proxies declare_*/wb_reg back onto this complex.
 
 from kathryn import *
 from carolyne.debug.sim import BranchResolveProbe, KarrayProbe, PipStatusProbe
@@ -214,6 +201,8 @@ class ExecUnitO3(Module):
         for atm_opr in self.arch_dest_atm_oprs:
             phy_idx = to_ref(getattr(src[0], field_name(PR_IDX, atm_opr)))
             dest_renames.append((atm_opr, phy_idx))
+        # only a LIVE µop may roll the machine back: a stale record's rollback
+        # rebooks every pointer from state the machine has abandoned
         with zif(dyn_cond):
             self._core.on_mis_pred(to_ref(getattr(src[0], SPEC_TAG)),
                                    to_ref(getattr(src[0], ROB_DES_IDX)),
@@ -236,6 +225,7 @@ class ExecUnitO3(Module):
                 f"resolve condition — an unconditional resolve is nonsense")
         self._declared_suc_pred = True
         self._dbg_suc_pred = dyn_cond          # published by dbg_probes
+        # a stale resolve frees a tag that is no longer (or is newly) booked
         with zif(dyn_cond):
             self._core.on_suc_pred(to_ref(getattr(src[0], SPEC_TAG)),
                                    to_ref(getattr(src[0], ROB_DES_IDX)))
@@ -245,12 +235,10 @@ class ExecUnitO3(Module):
         self._core.rob.on_write_back(to_ref(getattr(src[0], ROB_DES_IDX)))
 
     def wb_reg(self, src, stage_idx: int, atm_opr, value):
-        """Write `value` back to that dest slot's promised physical register:
-        the class's PRF entry plus the bypass broadcast to every station.
+        """Write `value` back to the dest's promised register: the class's PRF
+        entry plus the bypass broadcast to every station.
 
-        - respects the enclosing Kathryn scope, so a gated-out cycle writes
-          and broadcasts nothing
-        - Prf.on_wb bypasses the value into its read view
+        - it respects the enclosing scope, so a gated-out cycle writes nothing
         """
         pr_idx = to_ref(getattr(src[0], field_name(PR_IDX, atm_opr)))
         self._core.reg_arch_mng.prf(atm_opr.reg_file).on_wb(pr_idx, value)
@@ -259,18 +247,20 @@ class ExecUnitO3(Module):
         for rsv in self._core.rsvs:
             rsv.on_bypass(bypass)
 
+
     # --- the load/store queue (api forwards, the declare pattern) ------------------
     def lsq_is_full(self):
         return self._core.store_buf.is_full()
 
-    def mem_index(self, mem_addr_wo_static_bit):
-        """A body's address, cut to the index the data memory has.
+    def lsq_push_meta(self):
+        """The store buffer's push arb — SHUT for a squash cycle."""
+        return self._core.store_buf.push_meta
 
-        `_wo_static_bit`: the body has already dropped the low bits an aligned
-        access holds at zero (AddrMeta's zero part), so what arrives counts
-        WORDS. A body computes in the ISA's own width and cannot know how big
-        the machine's memory is, so the engine takes the low bits from there —
-        a slice, not a mask: a part-select costs nothing.
+    def mem_index(self, mem_addr_wo_static_bit):
+        """A body's WORD address, cut to the index the data memory has.
+
+        - a body computes in the ISA's width and cannot know the machine's
+          memory size, so the engine takes the low bits — a slice, not a mask
         """
         width = self._core.data_read_port.addr_meta.total_var_width
         return to_ref(mem_addr_wo_static_bit)[width - 1, 0]
@@ -278,6 +268,9 @@ class ExecUnitO3(Module):
     def lsq_push_store(self, src, mem_addr_wo_static_bit, data):
         # The speculation pair is in the stage record; the engine reads it,
         # so a body cannot push a store that forgets its tags.
+        self._push_store(src, mem_addr_wo_static_bit, data)
+
+    def _push_store(self, src, mem_addr_wo_static_bit, data):
         self._core.store_buf.on_new_entry(to_ref(getattr(src[0], IS_SPEC)),
                                           to_ref(getattr(src[0], SPEC_TAG)),
                                           self.mem_index(mem_addr_wo_static_bit),
@@ -322,19 +315,13 @@ class ExecUnitO3(Module):
     def on_mis_pred(self, fix_tag):
         """Kill every in-flight µop speculating under a killed tag, per stage.
 
-        - selective: each stage's arb is flushed inside a zif on THAT
-          stage's own record tag, so an older µop the branch never covered
-          keeps running
-        - stage 0's record is the station's issued entry (exec_src), judged
-          by the station's own entry_squashed; later stages carry
-          is_spec/spec_tag on the body's records (the api's transfer)
-        - clearing the grant is the whole kill: the pip's state IS the
-          valid bit, so no writeback fires from a flushed stage
-        - call AFTER transfer for a multi-stage unit — the stage records
-          only exist once the chain is built
-        - the complex that DECLARED the squash returns immediately: the
-          mispredicting branch is older than everything the kill covers,
-          and it still has to finish and report its fin
+        - selective: each stage's arb is flushed under a zif on THAT stage's
+          own tag, so an older µop the branch never covered keeps running
+        - clearing the grant is the whole kill: the pip's state IS the valid bit
+        - call AFTER transfer on a multi-stage unit; the records exist only
+          once the chain is built
+        - the complex that DECLARED the squash returns at once — that branch is
+          older than everything the kill covers and must still report its fin
         """
         if self._declared_mis_pred:
             return

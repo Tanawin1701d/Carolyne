@@ -95,9 +95,13 @@ class LSExecUnit(ExecUnitBase):
                        | ((st_data & 0xff) << byte_bit_off)),
         ))
 
-        # a store may not move on while the buffer is full; a load always may
+        # a store may not move on while the buffer is full; a load always may.
+        # with_lsq binds the buffer's own arb as well: it refuses every push
+        # for a squash cycle, which a condition could not express — that bind
+        # carries no condition, so a load waits out the squash cycle too.
         with api.zync_with_next_stage(src,
-                                      is_ld | ~api.lsq_is_full()) as res:
+                                      is_ld | ~api.lsq_is_full(),
+                                      with_lsq=True) as res:
             res[0] |= {"loaded_word" : loaded_word,
                        "byte_bit_off": byte_bit_off,
                        "half_bit_off": half_bit_off}
