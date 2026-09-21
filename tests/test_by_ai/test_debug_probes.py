@@ -17,7 +17,7 @@ from carolyne.debug.sim import (BUSY, FLUSH, GRANTED, HELD, IDLE, QUIET, RUNNING
                                 KarraySimProbe, PipStatusSimProbe, ProbeBase)
 from tests.dbg_toy_model import LOG_ROWS, DbgToy
 
-REPO = pathlib.Path(__file__).resolve().parents[1]
+REPO = pathlib.Path(__file__).resolve().parents[2]
 
 
 def build_toy() -> DbgToy:

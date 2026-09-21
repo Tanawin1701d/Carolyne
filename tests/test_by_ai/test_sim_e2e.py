@@ -21,7 +21,7 @@ import pytest
 
 from examples.sim.oracle import host_compiler
 
-REPO  = pathlib.Path(__file__).resolve().parents[1]
+REPO  = pathlib.Path(__file__).resolve().parents[2]
 HELLO = "examples/compile_tool/programs/hello.c"
 WANT  = "hello from carolyne\n0\n1\n4\n9\n16\n"
 

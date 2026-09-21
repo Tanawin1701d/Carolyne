@@ -288,7 +288,7 @@ def test_the_package_is_description_data_only():
     SEMANTICS = {"exec_unit_alu.py", "exec_unit_br.py", "exec_unit_ls.py",
                  "exec_unit_muldiv.py", "exec_unit_util.py"}
 
-    pkg = pathlib.Path(__file__).resolve().parents[1] / "carolyne" / "isa" / "riscv"
+    pkg = pathlib.Path(__file__).resolve().parents[2] / "carolyne" / "isa" / "riscv"
     for source in sorted(pkg.glob("*.py")):
         for node in ast.walk(ast.parse(source.read_text())):
             if isinstance(node, ast.Import):

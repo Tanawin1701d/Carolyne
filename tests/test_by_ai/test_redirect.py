@@ -18,8 +18,8 @@ from carolyne.uarch.o3.priority import PRI_MIS_PRED
 from examples.o3.core.build import build_machine
 from examples.o3.rv32im.config import gen_o3_rv32im_config
 
-UARCH = pathlib.Path(__file__).resolve().parents[1] / "carolyne" / "uarch" / "o3"
-ISA   = pathlib.Path(__file__).resolve().parents[1] / "carolyne" / "isa"
+UARCH = pathlib.Path(__file__).resolve().parents[2] / "carolyne" / "uarch" / "o3"
+ISA   = pathlib.Path(__file__).resolve().parents[2] / "carolyne" / "isa"
 
 
 def build_debug_machine():

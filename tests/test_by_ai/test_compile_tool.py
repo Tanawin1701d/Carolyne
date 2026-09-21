@@ -38,7 +38,7 @@ from examples.o3.core.mem_size import idx_width_for, machine_mem_of
 from examples.compile_tool.verify import decode_hits, verify_program
 
 ISA      = Rv32im()
-PROGRAMS = os.path.join(os.path.dirname(__file__), "..", "examples", "compile_tool", "programs")
+PROGRAMS = os.path.join(os.path.dirname(__file__), "..", "..", "examples", "compile_tool", "programs")
 HELLO    = os.path.abspath(os.path.join(PROGRAMS, "hello.c"))
 
 needs_gcc  = pytest.mark.skipif(shutil.which(RV32IM.tool("gcc")) is None,

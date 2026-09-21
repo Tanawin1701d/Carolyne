@@ -70,7 +70,7 @@ contract bug — fix the contract, not the engine.
 | `examples/compile_tool/`      | C to memory images for any target (rv32i, rv32im, mips32); was `examples/o3_riscv32/compile_tool/` until 2026-09-15 |
 | `examples/regfile_demo.py`    | smallest end-to-end Kathryn flow (CPU-flavored)       |
 | `generated/`                  | emitted Verilog (gitignored)                          |
-| `tests/`                      | pytest; tests double as usage documentation           |
+| `tests/test_by_ai/`           | pytest, every test case built in an AI session (all of them, 2026-09-21 — Tanawin's split); `tests/` itself keeps the support files (`dbg_toy_model.py`, `sim/`) and is for hand-written tests |
 | `example_comment.py`          | the comment pattern, shown as code (§7)               |
 
 SUPERSEDED 2026-09-14 (see §4, THE OBSERVE / VIEW DELETION): the paragraph
@@ -3271,7 +3271,8 @@ elaboration from a `RegFile` in `uarch`.
   refuses — `env -u CONDA_PREFIX VIRTUAL_ENV=$PWD/.venv .venv/bin/maturin
   develop`); Python-side DSL changes are picked up automatically.
 - `pip install -e ".[dev]"` for carolyne + pytest. Run tests:
-  `.venv/bin/pytest tests -q`. Run the demo:
+  `.venv/bin/pytest tests -q` (the cases are under `tests/test_by_ai/`; skip the
+  slow simulator run with `--ignore=tests/test_by_ai/test_sim_e2e.py`). Run the demo:
   `.venv/bin/python examples/regfile_demo.py`.
 - User's IDE is **PyCharm** (interpreter pointed at `.venv/bin/python`).
   RustRover leftovers were removed; `.idea/` stays gitignored.
