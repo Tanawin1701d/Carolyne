@@ -382,6 +382,22 @@ suggested; the evidence is the cycle log each entry names.
       *Closes when:* Carolyne re-verifies a stage stalls its producer, ideally
       by dropping `tests/dbg_toy_model.py`'s `hold` workaround.
 
+- [ ] **A mode="all" zync activates each target on its OWN ack.** Kathryn
+      warns at elaboration ("All-mode grant is AND over (ack & cond); the
+      target may activate when not all conditions are satisfied"), and the
+      cycle log shows it: on `riscv_temp` at cycle 30 the LS stage 1 pip was
+      entered a second time with its OLD record (`SW rob:6`) while the store
+      buffer's push arb refused the transfer, so the body ran a phantom cycle
+      and re-reported a finished µop. Harmless for a store, idempotent for a
+      load's writeback (same value, same physical register), and wrong the
+      day a squash recycles that ROB entry or register in between.
+      *Where:* `carolyne/uarch/o3/exec_unit_api.py` (`with_lsq` binds
+      `[(pip_con, cond), push_meta]` under `mode="all"`), the LS body's
+      `zync_with_next_stage(..., with_lsq=True)`.
+      *What closes it:* a mode="all" whose targets activate on the COMBINED
+      grant (a Kathryn change), or a stage-1 body gated on a valid bit the
+      transfer sets.
+
 ## Debug probes
 
 - [ ] **A probe resolves only in the module that HOLDS it, and 60 of the

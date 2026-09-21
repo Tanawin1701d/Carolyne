@@ -3024,6 +3024,48 @@ lanes and stop on their exit door — hanoi 11,052 cycles, fib 3,151, acker
 komachi 6,097,536 — and the thirteen quick-enough ones match at -O0 as
 well. One lane, two lanes, -O0 and -O2 all agree with the host.
 
+**A ZYNC BODY READS WHAT ITS OWN CYCLE DRIVES** (2026-09-21) — the twelfth
+control bug, found by the first sweep after the store-buffer back-pressure
+landed: every program printed only the LAST character of each number
+(hanoi `00000001` -> `1`, stencil `0000002B` -> `B`, hello's `16` -> nothing)
+and the recursive ones never terminated. `riscv_temp` showed the mechanism
+in 34 cycles: the store after a squash cycle landed in the buffer as
+`@0 = 0x00000000`. The LS address stage drove `ls_eff_addr`, `ls_loaded_word`
+and `st_merged` as wires BEFORE its `zync_with_next_stage` block, and Kathryn
+gates a wire driven in a pip body on the stage's ENTRY node state
+(`SR_ST_par_state`) while the block's writes — the push, the stage-1
+transfer — fire on the zync's own state (`SR_ST_zync_state`, chased in the
+emitted Verilog). In a same-cycle grant both are true. Once the block PARKS,
+control has left the entry node: next cycle the wires read their undriven
+zero and the grant pushes a store to address 0 with data 0, or hands stage 1
+a zero word for a load — which is what turned every stack read into zero and
+made fib and hanoi loop. Parks were rare before; `with_lsq` binds
+`push_open`, which is shut for every squash cycle, and this machine
+mispredicts every `jal`, so after 2026-09-19 they were constant. Decision:
+**everything the block's writes read is computed INSIDE the block**, off
+`src` (a register): the whole address stage now sits in the `with`, which is
+the station's own precedent mirrored — `RsvIOR`/`RsvO3` drive `issue_lane`
+and `issue_ready` OUTSIDE their issue pip, unconditionally off the table,
+which is why a parked issue never loads zeros; a body cannot step outside
+its pip, so inside the block is the equivalent. Stated on the api contract
+(`isa/exec_unit_api.py`, `zync_with_next_stage`) and in §6. Pinned by
+`tests/test_by_ai/test_ls_park.py`: no `*=`/`|=` of the address stage
+outside the block, and the emitted `ls_eff_addr` guard reaches
+`SR_ST_zync_state` and never `SR_ST_par_state`. NOT fixed here, recorded:
+Kathryn's own warning on this bind — "All-mode grant is AND over (ack &
+cond); the target may activate when not all conditions are satisfied" — is
+real: stage 1 was entered at cycle 30 with its OLD record (`SW rob:6` a
+second time) while the push arb refused, a phantom run that re-reports a
+finished µop; harmless for a store, idempotent for a load's writeback,
+and a `docs/open_items.md` item. MEASURED, the 17-program sweep at two lanes,
+`--dmem 16384` for all (one build): every program matches its host build —
+riscv_temp 34, hello 244, ldst 51, rec 45, m4 44, fwd 49, subword 61,
+sort_3 6,215, stencil 4,896, fib 3,151, hanoi 11,052, acker 20,414,
+combinat 53,806, stirling 31,861, cprime 170,399, tarai 222,545, komachi
+1,744,670 cycles (its earlier 6,097,536 was the rv32i build's software
+multiply). Before the fix the same sweep had every console wrong and
+fib/hanoi at the 8,000,000-cycle cap.
+
 **A JUST-ALLOCATED PHYSICAL REGISTER READ AS FINISHED** (2026-09-17) — the
 ninth control bug, and the one that made TWO LANES differ from one.
 `Prf.on_rename` clears the allocated entry's `fin` with `|=`, which lands at
@@ -3346,6 +3388,13 @@ elaboration from a `RegFile` in `uarch`.
   stays dead after a flush (Kathryn2 tc42's control). `Arb.flush()` still
   drives its wire in whatever scope it is called from — a `zif` makes the
   one-cycle pulse a squash is.
+- **A wire driven in a pip body exists only in the ENTRY cycle; a zync's
+  body fires at GRANT time.** The drive is gated on the stage's entry-node
+  state, the zync's writes on the zync's own state; they agree when the grant
+  is same-cycle and disagree once the zync has parked — the wire then reads
+  its undriven zero. So everything a zync body reads is computed inside the
+  block or read off a register; the stations drive `issue_lane` outside the
+  pip for the same reason (2026-09-21, the LS address stage).
 - **A `pip` / `zync` block must be built in an UNCONDITIONAL scope.** Nesting one
   inside a `zif` panics at the block's exit with "zero-cond-if sub blocks must
   have BasicNodeFlow join policy" — a conditional block joins differently from

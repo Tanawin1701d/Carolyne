@@ -110,7 +110,14 @@ class ExecUnitApi:
         (a store waiting on a full store buffer). `with_lsq` says this
         stage may PUSH a store, so the store buffer must agree to the
         transfer too — the buffer can then refuse a push it could not
-        account for, and the µop stalls here instead."""
+        account for, and the µop stalls here instead.
+
+        EVERYTHING THE BLOCK'S WRITES READ IS COMPUTED INSIDE IT, or read off
+        `src`, which is a register. A wire the body drives BEFORE the block
+        is gated on the stage's entry state and exists only in the entry
+        cycle; a block that parks fires in a later cycle, when that wire
+        reads zero. Same-cycle grants hide the difference — a park shows
+        it."""
         raise NotImplementedError(
             f"{type(self).__name__}.zync_with_next_stage: the generator supplies this")
 

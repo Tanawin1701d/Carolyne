@@ -55,53 +55,59 @@ class LSExecUnit(ExecUnitBase):
 
     # --- stage 0: address, forward, merge, push -------------------------------
     def _address_stage(self, src, api):
-        base    = api.get_src(src, AOPR_SRC_1)
-        is_st   = uop_hit(src, U.STORES)
-        is_ld   = uop_hit(src, U.LOADS)
-        # a load's immediate is in src_2 (I-type); a store's data is in
-        # src_2 and its immediate src_3 (S-type)
-        imm     = mux(is_st, api.get_src(src, AOPR_SRC_3),
-                             api.get_src(src, AOPR_SRC_2))
-        st_data = api.get_src(src, AOPR_SRC_2)
+        is_st = uop_hit(src, U.STORES)
+        is_ld = uop_hit(src, U.LOADS)
 
-        # `eff_addr` counts BYTES; memory is addressed by WORDS, so the low
-        # two bits pick the byte inside the word rather than the word. Binary
-        # masks, because these name address BITS: 0b11 is both, 0b10 the one
-        # that picks the halfword. `<< 3` turns a byte offset into a bit one.
-        # TODO: an access that SPANS two words is not handled and does not
-        # trap — a caller must keep LW/SW 4-byte and LH/LHU/SH 2-byte
-        # aligned. See docs/open_items.md.
-        eff_addr                = wire(X_LEN, "ls_eff_addr")
-        eff_addr               *= base + imm
-        mem_addr_wo_static_bit  = eff_addr >> 2
-        byte_bit_off            = (eff_addr & 0b11) << 3   # 0, 8, 16, 24
-        half_bit_off            = (eff_addr & 0b10) << 3   # 0 or 16
-
-        # the newest value of the word: a buffered store beats memory
-        fwd_hit, fwd_data = api.lsq_search(mem_addr_wo_static_bit)
-        loaded_word  = wire(X_LEN, "ls_loaded_word")
-        loaded_word *= mux(fwd_hit, fwd_data, api.mem_read(mem_addr_wo_static_bit))
-
-        # a sub-word store merges its bytes into the current word, so the
-        # buffer holds full words and forwarding never needs a byte mask
-        b_mask = val(X_LEN, 0xff)   << byte_bit_off
-        h_mask = val(X_LEN, 0xffff) << half_bit_off
-        merged = wire(X_LEN, "st_merged")
-        drive_by_uop(merged, src, (
-            (U.UOP_SW, st_data),
-            (U.UOP_SH, (loaded_word & ~h_mask)
-                       | ((st_data & 0xffff) << half_bit_off)),
-            (U.UOP_SB, (loaded_word & ~b_mask)
-                       | ((st_data & 0xff) << byte_bit_off)),
-        ))
-
-        # a store may not move on while the buffer is full; a load always may.
-        # with_lsq binds the buffer's own arb as well: it refuses every push
-        # for a squash cycle, which a condition could not express — that bind
-        # carries no condition, so a load waits out the squash cycle too.
+        # EVERYTHING the transfer and the push read is computed INSIDE the
+        # handshake block: a wire driven before it exists only in the entry
+        # cycle, and a parked block fires later, when that wire reads zero
+        # (ExecUnitApi.zync_with_next_stage). A store may not move on while
+        # the buffer is full; a load always may. with_lsq binds the buffer's
+        # own arb as well: it refuses every push for a squash cycle.
         with api.zync_with_next_stage(src,
                                       is_ld | ~api.lsq_is_full(),
                                       with_lsq=True) as res:
+            base    = api.get_src(src, AOPR_SRC_1)
+            # a load's immediate is in src_2 (I-type); a store's data is in
+            # src_2 and its immediate src_3 (S-type)
+            imm     = mux(is_st, api.get_src(src, AOPR_SRC_3),
+                                 api.get_src(src, AOPR_SRC_2))
+            st_data = api.get_src(src, AOPR_SRC_2)
+
+            # `eff_addr` counts BYTES; memory is addressed by WORDS, so the
+            # low two bits pick the byte inside the word rather than the
+            # word. Binary masks, because these name address BITS: 0b11 is
+            # both, 0b10 the one that picks the halfword. `<< 3` turns a
+            # byte offset into a bit one.
+            # TODO: an access that SPANS two words is not handled and does
+            # not trap — a caller must keep LW/SW 4-byte and LH/LHU/SH
+            # 2-byte aligned. See docs/open_items.md.
+            eff_addr                = wire(X_LEN, "ls_eff_addr")
+            eff_addr               *= base + imm
+            mem_addr_wo_static_bit  = eff_addr >> 2
+            byte_bit_off            = (eff_addr & 0b11) << 3   # 0, 8, 16, 24
+            half_bit_off            = (eff_addr & 0b10) << 3   # 0 or 16
+
+            # the newest value of the word: a buffered store beats memory
+            fwd_hit, fwd_data = api.lsq_search(mem_addr_wo_static_bit)
+            loaded_word  = wire(X_LEN, "ls_loaded_word")
+            loaded_word *= mux(fwd_hit, fwd_data,
+                               api.mem_read(mem_addr_wo_static_bit))
+
+            # a sub-word store merges its bytes into the current word, so
+            # the buffer holds full words and forwarding never needs a byte
+            # mask
+            b_mask = val(X_LEN, 0xff)   << byte_bit_off
+            h_mask = val(X_LEN, 0xffff) << half_bit_off
+            merged = wire(X_LEN, "st_merged")
+            drive_by_uop(merged, src, (
+                (U.UOP_SW, st_data),
+                (U.UOP_SH, (loaded_word & ~h_mask)
+                           | ((st_data & 0xffff) << half_bit_off)),
+                (U.UOP_SB, (loaded_word & ~b_mask)
+                           | ((st_data & 0xff) << byte_bit_off)),
+            ))
+
             res[0] |= {"loaded_word" : loaded_word,
                        "byte_bit_off": byte_bit_off,
                        "half_bit_off": half_bit_off}
