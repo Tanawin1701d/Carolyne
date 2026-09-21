@@ -49,19 +49,24 @@ def test_every_speculative_plane_is_repaired_not_plane_zero_five_times():
             "a spec_rt plane is indexed by a constant inside the loop"
 
 
-def test_the_clear_is_clocked_and_not_put_on_the_row_readers_see():
-    """The Arf takes the value at the edge, so a reader in the commit cycle must
-    still see the rename and read the physical register. Clearing the bit on
-    temp_commit, which read_rename reads, hands that reader a stale value."""
+def test_the_clear_goes_on_the_commit_row_readers_see():
+    """The drop is on temp_commit, the head of the chain, so every rename
+    port, a branch's snapshot and master inherit it in one write. A reader
+    of that cycle is safe because the Arf's read view publishes the
+    committing value (test_arf_read_view.py)."""
     source = commit_source()
-    assert "self.master_rt[0][arch_dyn_idx] |=" in source
-    assert "temp_commit" not in source
+    assert "write_entry(self.temp_commit[0]" in source
+    assert "self.master_rt[0][arch_dyn_idx] |=" not in source
 
 
-def test_the_guard_reads_what_the_rename_chain_will_write():
-    """A lane renaming the same register this cycle leaves a different physical
-    index there, and that younger mapping must stand."""
-    assert "temp_dispatch[self.rename_ports - 1]" in commit_source()
+def test_the_guard_reads_master_not_the_chain():
+    """A rename landed in an EARLIER cycle left a different physical index
+    in master and must stand; one landing THIS cycle overlays a later row of
+    the chain and wins by structure. Reading the chain here would be a
+    combinational loop, since the chain now starts from this drop."""
+    source = commit_source()
+    assert "self.master_rt[0][arch_dyn_idx]" in source
+    assert "temp_dispatch" not in source
 
 
 def test_the_table_still_elaborates_in_the_whole_machine():

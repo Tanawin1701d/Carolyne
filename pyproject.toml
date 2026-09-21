@@ -19,3 +19,8 @@ sim = ["cocotb>=2.0,<3", "verilator>=5.36"]
 
 [tool.setuptools.packages.find]
 include = ["carolyne*"]
+
+[tool.pytest.ini_options]
+markers = [
+  "slow: runs a simulator end to end (compile, build, simulate); minutes on a cold build cache",
+]
