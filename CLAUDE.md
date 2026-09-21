@@ -58,7 +58,10 @@ contract bug — fix the contract, not the engine.
 | `carolyne/isa/`               | description types + the ISA-facing apis + per-ISA pkgs |
 | `carolyne/uarch/`             | generic OoO engine, Kathryn code lives here           |
 | `carolyne/util/`              | helpers BOTH planes reach — no kathryn, no isa/uarch  |
-| `carolyne/debug/sim/`         | debug probes: `kathryn.DebugProbe` subclasses for pipeline status and Karray tables |
+| `carolyne/debug/sim/`         | debug probes: `kathryn.DebugProbe` subclasses for pipeline status, Karray tables, memory ports and a declared branch resolution |
+| `carolyne/debug/log/`         | turning a run into something readable: the slot table, the console, cycle events, the O3 row |
+| `examples/sim/`               | the universal simulator: run a BUILT SimSystem (kathryn sim + report only); was `examples/sim/rv_sim/` until 2026-09-18 |
+| `examples/o3/rv32im/system.py`| builds the O3 RV32IM SimSystem: config, images, emitted Verilog, its cocotb test and run spec |
 | `carolyne/debugger/o3/`       | SUPERSEDED 2026-09-14 — deleted; see §4 THE OBSERVE / VIEW DELETION |
 | `carolyne/view/o3/`           | SUPERSEDED 2026-09-14 — deleted; see §4 THE OBSERVE / VIEW DELETION |
 | `examples/o3/core/build.py`   | `O3Machine(config)`: memories + ports + CoreO3, for ANY CPUO3_Config |
@@ -2734,6 +2737,496 @@ unit" and "no µop" one decision, so the trio left the description together
 nothing, which `verify` reports. LIMIT: the unit is checked by elaboration only — no simulation of a
 multiply or a divide yet; LIMIT: the combinational divider bounds fmax until
 a sequential divider replaces it (`docs/open_items.md`).
+
+**THE STORE PUSHED IN A SQUASH CYCLE** (2026-09-17) — the seventh control
+bug, and the one that had kept `hello.c` from ever reaching its exit door.
+`StoreBuf.on_mis_pred` recomputes `alloc_ptr` as `ret_ptr + popcount(survivors)`
+at **`PRI_MIS_PRED`**, which OUTRANKS `on_new_entry`'s `alloc_ptr + 1` — and the
+count is taken from the table's PRE-CLOCK contents, so the entry landing in that
+very cycle is invisible to it. The row write lands (a non-speculative store is
+not cleared by the squash) and the POINTER DOES NOT MOVE, so the next store
+overwrites that row. Decision: the push **STATES ITSELF ON A WIRE** the squash
+reads — `pushing`, exactly the shape `spec_overrider` already has for the tag a
+row will take — and `on_mis_pred` either counts it or, when the squash covers
+it, clears its row at the raised priority (its row write already landed at user
+priority, so nothing else would). MEASURED on `riscv_temp.c`, whose whole body
+is three stores: before, `A` pushed at cycle 29 in the same cycle
+`exu2_control` declared a mispredict, row 1 held `B` at cycle 30 with `alloc`
+still 1, and the exit store overwrote `B` at cycle 32 — three stores retired,
+ONE word reached memory, `com_ptr` ran past `alloc_ptr` (`a:2 c:3 r:1`). After:
+`riscv_temp` exits in 34 cycles and `hello.c` in 242, both matching a host build
+of the same C — the FIRST clean exits this core has produced. The bug was
+invisible to every unit test because it needs a store and a mispredict in ONE
+cycle; it took a compiled program to produce that.
+
+**THE ZERO REGISTER STOPPED BEING ZERO** (2026-09-17) — the eighth control
+bug. `ret` is `jalr x0, 0(ra)`: it really does ask to write its link, and
+`Dispatch.warm_rts` booked that rename like any other. From then on the RT
+said x0 was RENAMED, so every later read of x0 took the renamed path and the
+PRF answered with the discarded link instead of the constant the Arf's mux
+would have given. MEASURED on `m4.c`: `addi a0,x0,32` issued with
+`src_1 = 0x000000fc` — the link of the `ret` at 0xf8 — and computed
+0xfc + 0x20 = 0x11c, which is why `print_char(' ')` printed 0x1c (the low byte)
+and looked like a mysterious "minus four". `RegFile.const_regs` already said
+"rename bypasses reads, discards writes"; the READ half was implemented (the
+Arf's const mux) and the WRITE half was not. Fixed in `warm_rts`: a dest whose
+`ar_idx` names a const register books NO rename, so x0 is never renamed and
+every read of it takes the Arf. MEASURED after: at `--lanes 1` thirteen of
+thirteen programs stop asking, and eight match their host builds exactly,
+including `tarai` at 329,656 cycles.
+
+**RV32I THE TARGET IS GONE** (2026-09-18, Tanawin: "remove the rv32i option,
+only RV32IM is good enough") — `TARGETS` is `{rv32im, mips32}`, **`RV32IM` is
+declared directly** (no `replace` from a base constant), and `rv32im` is the
+default target everywhere (`build_program`, both CLIs, `RunOptions`,
+`MACHINES`). The no-M variant only ever bought a slower multiply — libgcc's
+`__mulsi3` loop against a description that has carried the M extension since
+2026-09-15 — and it SUPERSEDES that entry's "only the compile tool's rv32i
+target keeps its name". With it went the libgcc-fallback test (the rv32im
+multiply pin remains) and the stale prose in hello.c, the READMEs and
+toolchain.py's -lgcc note (still stated: helper calls exist under M too —
+64-bit shifts, division helpers). CONSEQUENCE, measured: the default build now
+puts real MUL/DIV through the muldiv station, which the 17/17 sweep had never
+exercised (it compiled rv32i) — all programs still match their host builds,
+`stirling` 52,401 -> 31,841 cycles and `cprime` 396,111 -> 170,399.
+
+**GEN_ NAMES THE CONFIG BUILDERS** (2026-09-18, Tanawin: "rv32im_config ->
+gen_o3_rv32im_config; rv32im_sized, the name is not meaningful") —
+`gen_o3_rv32im_config` (the knobs-in config builder) and
+**`gen_o3_rv32im_config_for_sizes`** (byte sizes in, `(config, knobs)` out),
+the verb-first scheme naming the machine family and the ISA both. The run
+spec's factory string follows
+(`"examples.o3.rv32im.config:gen_o3_rv32im_config"`); an old run_spec.json
+names the dead path, and a run regenerates its spec, so nothing rereads one.
+
+**THE SIM IS UNIVERSAL** (2026-09-18, Tanawin: "no rv_sim anymore, only
+sim/<files> and host folder... the machine, program, cocotb_test have to be
+built before put into this system as argument... the sim only contact to
+kathryn simulator system and manage report") — `examples/sim/rv_sim/` is
+FLATTENED into `examples/sim/`, and the package is split along machine-model:
+**`SimSystem`** (`sim/system.py`) is the contract — name, run_dir, rtl_dir,
+test_module/test_case, an `env` dict the sim forwards UNREAD, and the sources
+for the host oracle — and **`run_system(system, SimOptions)`**
+(`sim/runner.py`) is the whole sim: CocotbSim build (cache now
+`generated/sim/sim_build`, runs under `generated/sim/run/<name>`), run the
+named test, read result.json. `SimOptions` keeps only what the SIM varies
+(backend, waves, expect); every machine and program knob left for
+**`examples/o3/rv32im/system.py`'s `build_system(...)`** — config, images,
+emit with debug=True, and the handoff — which returns the finished SimSystem.
+`cocotb_test.py` and `run_spec.py` moved to `examples/o3/rv32im/` with it:
+Tanawin judged run_spec "not practical anymore" AS A SIM-SIDE CONTRACT, and
+that is what died — the test still runs in another process, so the spec
+survives as rv32im's PRIVATE handoff (its schema is rv32im's to change; the
+sim forwards `$CAROLYNE_RUN_SPEC` and never reads the file). TRIMMED
+2026-09-18 (Tanawin: "build_run_spec gets lanes as int — why not from the
+config?"): the spec's `lanes` field and the parameter are GONE — the test
+rebuilds the config from the factory string anyway, so it reads `fe_lanes`
+off that one object and the JSON no longer states the fact twice. AND (same
+exchange, on `rob_rows`): a knob that is NOT a machine fact says so in its
+name — the log knobs are **`log_enabled` / `log_window` / `log_chunk` /
+`log_rob_rows`** in the spec and `build_system`'s signature, so a reader can
+tell the machine's numbers from the viewer's choices; the CLI flags keep
+their short spellings and `O3CycleLogger(rob_rows=...)` keeps its, since the
+class is the context. AND `config_factory`/`RV32IM_FACTORY` are GONE
+(Tanawin: "do we still need it?"): the factory-as-string existed for a spec
+that was a sim-side contract read by a machine-blind test — now that
+`cocotb_test.py` is rv32im's own file it imports `gen_o3_rv32im_config`
+directly and the spec carries only `config_kwargs`; the one import path
+still travelling as a string is TEST_MODULE, which the sim forwards, and
+its exists-check pin keeps that honest. AND the MODEL is built through ONE
+recipe (Tanawin: "the model is built in system.py already, find the way to
+reuse it") — **`build_debug_model(config)`** in `examples/o3/core/build.py`,
+called by `emit_machine` and by the cocotb test. MEASURED, and it reverses
+the premise: the model OBJECT cannot be reused — cocotb runs the test inside
+the compiled simulator, a separate OS process, so nothing Python-side
+crosses — and the rebuild was never the cost anyway (`build_model`
+debug=True 0.37 s against `emit_verilog`'s 4.58 s; the probe object even
+survives its own emit, so arena consumption was not the blocker). What WAS
+duplicated is the two-line recipe, and a drift between the copies would make
+KSim resolve the manifest against names the compiled simulator does not
+have — a run-time failure only. The home is `core/build.py`, not
+`system.py`, BECAUSE it names no compile_tool: the simulator process has no
+cross-compiler and must not import one. Both facts are pinned
+(`test_both_processes_build_the_model_through_one_recipe`,
+`test_the_shared_recipe_drags_no_toolchain_into_the_simulator`). Decision
+(Tanawin's pick over a machine-side CLI): **the CLI stays in `sim/cli.py`
+with a `SYSTEMS` registry** — `python -m examples.sim run hello.c` keeps
+working, and the registry is the MACHINES caller's-own-table precedent: only
+the CLI names a machine family; runner/system/report/oracle read none of it.
+Pinned: `test_rv32im_system.py` (the spec round trip, the factory string, and
+the NEW TEST_MODULE-exists check — both import paths are strings, unchecked
+until run time), `test_sim_report.py` (CLI, verdict, oracle);
+`test_sim_e2e.py` (renamed) runs the new entry. MEASURED: hello.c through the
+restructured flow exits in 242 cycles and matches the host; the build cache
+was carried to its new path, so nothing recompiled.
+
+**idx_width_for IS THE MACHINE'S** (2026-09-18, Tanawin: "idx_width_for should
+be in examples/o3/core, not in compile_tool") — the bytes-to-index-width
+conversion moved to **`examples/o3/core/mem_size.py`** (no kathryn import, so a
+config builder reaches it before any hardware exists), and
+`gen_o3_rv32im_config_for_sizes` now sizes its knobs from the machine's own
+package. `examples/compile_tool/machine.py` is DELETED: the two
+`DEFAULT_*_BYTES` constants joined `layout.py`'s fixed choices (one home; the
+o3 config imports them from there — machine-side importing tool CONSTANTS is
+the allowed direction, the one `machine_mem_of` already uses). The tension is
+`MemoryLayout.from_spec`, which derives the same widths and may NOT import
+`examples/o3` back (mips32 lays out through the same file, and the MachineMem
+refactor exists so the tool names no machine): `layout.py` keeps a PRIVATE
+`_idx_width_for` twin, and
+`test_the_layout_derives_the_same_widths_as_the_machine_side` holds the two
+equal. Accepted cost: ten lines of math written twice, bought so neither
+dependency direction bends. SAME DAY (Tanawin: "machine_mem_of should be in
+mem_size.py too"): **`machine_mem_of` moved from `core/build.py` into
+`mem_size.py`** — it is pure sizing (config in, `MachineMem` out, no
+hardware), so the module now holds BOTH of the machine's sizing conversions
+and a config-only caller (rv_sim's driver, the compile-tool tests) derives a
+`MachineMem` without importing the kathryn-heavy build module. The
+`CPUO3_Config` hint is TYPE_CHECKING-guarded, so the module still imports no
+kathryn of its own; `build.py` keeps only the machine.
+
+**THE TOOL TAKES A MemSpec, NOT A MACHINE** (2026-09-18, Tanawin: "config is
+a must not optional anymore... the type is not CPUO3_Config because in the
+future we will have config for other config... dedicated config object for the
+memory, maybe MemSpec, as a input + dmem base") — `build_program(sources,
+machine_mem, target=...)`: **`machine_mem` is REQUIRED**, and its type is
+compile_tool's own **`MachineMem`** (`layout.py`) — imem_base/bytes/banks,
+dmem_base/bytes (the base an INPUT now, not the module constant), word_bytes.
+Index widths are DERIVED in `MemoryLayout.from_spec` (the store-the-count
+bargain), and from_spec REPLACES both `from_config` and `from_sizes`: the
+config-or-sizes split, `layout_for`, and `Program.config` are all gone.
+First named `MemSpec` (Tanawin's tentative pick), RENAMED **`MachineMem`** the
+same day on his call: the collision with uarch's per-memory `MemSpec`
+(index_width / bank_cnt / bus) was not worth living beside. The converter is
+`examples/o3/core/build.py`'s
+**`machine_mem_of(config, dmem_base=DMEM_BASE)`** — the o3 side derives the
+tool's record from the config's own mem specs, so the images and the hardware
+cannot disagree; a machine-less target states its own numbers through
+**`Target.machine_mem(imem_bytes, dmem_bytes, banks, dmem_base)`** (word 4 until
+a description owns it — the MIPS reset_pc bargain again). SUPERSEDED WITH IT:
+the `Target.config` binding from A TARGET STATES NO MACHINE two days earlier —
+`target_named(name)` is one-arg again and no compile_tool module names a
+machine CONFIG type any more — which was the point: a future machine with
+another config type hands the tool the same six numbers. (`verify.py` keeps
+its `uarch.o3.decode` import on purpose: reusing the REAL decoder functions
+is the 2026-09-09 one-definition decision, and they take an ISA, not a
+machine.) The `imem/dmem/lanes`
+parameters left `build_program` with the split (they only meant anything on
+the no-config path, and silently ignored themselves on the other). Pinned:
+`machine_mem` required (a TypeError before any tool runs), and
+config-vs-from_spec width agreement, in `tests/test_compile_tool.py`.
+
+**THE ASK IS NOT THE LANDING** (2026-09-17) — the tenth control bug, and the
+first half of the deep-recursion deadlock. `Prf.update_meta` and TagGen's
+`on_update_meta` move their counters off the PORT WIRES under a shared trigger
+— and the wires carry the ASK (driven at WARM time, before the grant, because
+the promised index and the over-use judgment must exist to DECIDE the grant),
+while the trigger's other half (a commit, a resolve) can fire on a cycle the
+bundle NEVER LANDED. On such a cycle a stalled bundle's asks were consumed
+anyway: `next_index` walked over LIVE registers, `free_entry` underflowed
+(MEASURED: 1 - 2 = 127 on a 64-entry file, 3,196 samples in one hanoi run),
+and TagGen leaked a tag on every resolve-with-stall cycle until `tag f:0`.
+Decision: the ports keep carrying the ask — over-use MUST judge the raw asks,
+since the grant reads it — and each block grows a **`rename_landed`** wire its
+granted-scope `on_rename` drives, so `_resolve` runs TWO accumulations: judge
+on the ask, count by `req & landed`. Stated in `_resolve` itself, both files,
+one idiom. The `free_entry` clamp to `phy_amount` from earlier the same day
+is GONE (2026-09-19, Tanawin: "why you fix it at the first time?"): it was
+put in for a symptom before the cause was found, and a clamp hides a broken
+count instead of surfacing it — `allocated + free <= phy_amount` holds by
+construction, so nothing needs guarding.
+
+**ONLY A LIVE µOP HAS EFFECTS** (2026-09-17) — the structural answer to the
+recorded "a branch the ROB already drained still resolves". **`Rob.
+entry_is_live(idx)`** — distance from `com_ptr`, judged against the COUNT,
+since pointers alone cannot tell empty from full — and every api effect site
+gates on it: `declare_mis_pred`, `declare_suc_pred`, `declare_fin`, `wb_reg`
+and `lsq_push_store` (via `ExecUnitO3._record_is_live`). A squash rolls
+allocation back while a killed µop can still be mid-pipe; ungated, its report
+sets `wb_fin` on an entry the ROB re-opened, its writeback lands in a recycled
+register, its rollback rebooks every pointer from abandoned state. The ROB is
+the authority on which instructions exist, so the gate is one predicate there
+and one helper on the complex. LIMIT, stated knowingly: liveness is not
+identity — an entry recycled AND re-occupied within the stale window would
+pass; the refill latency (fetch redirect -> decode -> dispatch, >= 3 cycles)
+against the 1-2 cycle declare latency of this machine's single branch complex
+is what makes that window empty today. REMOVED 2026-09-19 (Tanawin: "I don't
+think is_live structure is required anymore"): the hazard it guarded never
+happens. A parked pip DEFERS — an entry taken while parked runs only after
+the edge — so a stage flushed at N parks, takes the request at N+1 without
+running, and runs at N+2 with the correct record present; there is no stale
+run for a gate to catch. The real cause was in Kathryn (an arb kept granting
+a flushed or held zync; its REQ and the pip's master-ack are now gated by
+hold/reset). `Rob.entry_is_live`, `ExecUnitO3._record_is_live` and the five
+gate sites are gone; don't restore them from git.
+
+**THE SNAPSHOT AGED IN ITS OWN CYCLE** (2026-09-17) — the eleventh control
+bug, the deadlock's actual root, and the reason recursion died while straight
+code lived. `Rt.on_commit` repairs master AND every speculative plane when a
+mapping retires (the 2026-09-15 rule) — but a branch dispatching IN THE SAME
+CYCLE snapshots the chain at `PRI_RENAME`, one rung ABOVE the repair's
+`PRI_COMMIT`, and the chain deliberately still shows the retiring rename so a
+same-cycle reader can finish through the physical register. The fresh
+snapshot therefore recorded the dropped mapping, and a later mispredict
+RESTORED it: master said `x9 -> p46` forever after, p46 was freed and
+recycled every ~64 allocations, and every reader of s1 either read the
+recycled owner's value (hanoi's wrong bytes) or waited on a register whose
+writeback had already happened (the idle deadlock — the in-order branch
+station's head waits, READY entries pile behind it, every tag stays
+outstanding). TRACED on `generated/sim/rv_sim/h4`: `9:p46` set at cycle 466,
+written back 470, RESURRECTED by the restore at 472, p46 reallocated at 588/
+731/746/888. Decision (2026-09-21, Tanawin: "can we write the temp_commit
+directly... because the temp_commit will propagate to the temp_dispatch
+already?"): **the drop goes on the COMMIT ROW**. `Rt.on_commit` writes
+`renamed = 0` into `temp_commit` — the HEAD of the chain — at `PRI_COMMIT`,
+guarded by MASTER (`master.renamed & master.prf_idx == prf`: a rename that
+landed in an earlier cycle must stand; one landing THIS cycle overlays a later
+row and wins by structure). Every rename port, the snapshot a branch takes and
+master itself then inherit it through copies that already existed, so the
+snapshot is a PLAIN `copy_row` again, `on_commit` writes master no more (the
+chain lands it), and no wire has to carry the drop between scopes. The
+restore-cycle twin hole does NOT exist — the mispredict flushes the commit
+arb, so no mapping retires in a squash cycle. WHAT IT COSTS, and why the
+2026-09-15 rule ("CLOCKED ONLY, never on the commit ROW the read path sees")
+is now SUPERSEDED: `temp_commit` is what `read_rename(0, …)` returns, so a
+lane reading the register in the commit cycle is told "not renamed" and asks
+the Arf — whose `write` is `|=` and lands at the edge. So **the Arf gained
+the Prf's read view**: `read_lane`, a wire copy of storage, into which `write`
+also publishes the committing value at `PRI_COMMIT`; `read` answers from the
+view. It is the `Prf.read_lane` / `on_wb` shape one class over, and the ROB
+already calls `arf.write` and `rt.on_commit` in ONE `zif(writes)`, so the two
+halves are gated alike. It also restores what the 2026-08-27 entry said
+`temp_commit` WAS — "master's wire alias plus this cycle's commit fixups" —
+which the bug-6 fix had retreated from only because the Arf had no bypass.
+TWO EARLIER SHAPES the same week, both gone (don't restore either from git):
+2026-09-17 layered a SECOND write on the snapshot at a new rung
+`PRI_SNAPSHOT_FIX` (USER+5, `PRI_MIS_PRED` pushed to USER+6) — a rung bought
+to undo a write the same method had just made (Tanawin: "it is not clean
+code... PRI_SNAPSHOT_FIX is unnecessary"); 2026-09-19 folded the drop into the
+snapshot copy (`copy_row_dropping`, `renamed & ~dropped` per element, fed by
+per-lane `commit_drops` wires) — one driver, no rung, but the correction
+still lived at the DESTINATION. MEASURED on a standalone `Rt` (2 rename
+ports, 2 commit lanes, 32 registers), module lines / parent assigns: the rung
+15,750 / 2,513 -> the fold 11,966 / 1,881 -> the commit row 11,566 / 1,177.
+The rung wrote `spec_rt[OH(tag)][a_w]`, dynamic in BOTH dimensions
+(`sptag_len * 32` guarded writes per port per drop); the fold added two
+compares to 32 elements per port; the commit row is 32 guards per commit
+lane, once. Pinned: `tests/test_rt_snapshot_fix.py` (no snapshot rung, a
+plain copy, the drop on the head of the chain), `tests/test_rt_commit.py`
+(the drop on `temp_commit`, the guard on MASTER and never the chain — reading
+the chain there would now be a combinational loop), and the new
+`tests/test_arf_read_view.py` (`read` answers from the view; on the emitted
+Verilog the commit's publish is emitted AFTER the storage copy, so it wins).
+MEASURED: ALL SEVENTEEN programs in
+`examples/compile_tool/programs` match their host builds at the default two
+lanes and stop on their exit door — hanoi 11,052 cycles, fib 3,151, acker
+20,413, combinat 53,807, stirling 52,401, tarai 222,545, cprime 396,111 (on
+`--dmem 16384`: its sieve overflows the default data memory at LINK time),
+komachi 6,097,536 — and the thirteen quick-enough ones match at -O0 as
+well. One lane, two lanes, -O0 and -O2 all agree with the host.
+
+**A JUST-ALLOCATED PHYSICAL REGISTER READ AS FINISHED** (2026-09-17) — the
+ninth control bug, and the one that made TWO LANES differ from one.
+`Prf.on_rename` clears the allocated entry's `fin` with `|=`, which lands at
+the EDGE; but `Dispatch.rename_src_operand` reads that entry COMBINATIONALLY in
+the same cycle, so a LATER LANE consuming a register an EARLIER LANE of the same
+bundle just allocated saw the previous owner's `fin = 1` and its stale data, and
+took that value as ready instead of waiting for the bypass. It cannot happen at
+one lane — a lane never consumes a register allocated in its own cycle — and at
+-O2 the scheduler spreads dependent instructions apart, so it showed only at
+-O0, where every local is on the stack and consecutive instructions are
+dependent. Fixed with the read view the file already has: `on_rename` overrides
+`read_lane[idx].fin` to 0 at `PRI_RENAME`, exactly the shape `on_wb` uses at
+`PRI_ISSUE` to publish a writeback to same-cycle readers. MEASURED: `ldst`,
+`m4`, `fwd` and `rec` at -O0 two lanes went from wrong to matching their host
+builds.
+
+**THE RIDECORE PROGRAMS** (2026-09-16/17, Tanawin: "test the testcase that we
+use in kathryn c++ ... put the ready to run to examples/compile_tool/programs")
+— eleven programs from the C++ Kathryn's ridecore suite now live in
+`examples/compile_tool/programs/`, plus two written as reproducers (`ldst.c`,
+`rec.c`). The port is deliberately MECHANICAL: the algorithms are untouched and
+only RIDECORE's three MMIO doors (`0x0` char, `0x4` int, `0x8` finish) became
+the four `carolyne_io.h` calls, so a host build of the same file is a valid
+oracle and `--expect host` checks the machine against a real execution. LIMIT:
+`charout` (52,000 characters) and `matmul` (three files and a header) are not
+ported. After the store-buffer fix `hello`, `riscv_temp`, `ldst` and `rec` (at
+-O2) match; the rest still fail on a SECOND bug — real recursion computes wrong
+values (`docs/open_items.md`, with `rec.c --opt=-O0` as the ten-line
+reproducer).
+
+**A TARGET STATES NO MACHINE** (2026-09-16, Tanawin: "the machine_config
+should not be locked in in the compile tool, it should be gotten from caller
+target_named(name, CPUCONFIG)") — `Target.machine_config`, the
+`(imem, dmem, lanes) -> CPUO3_Config` factory the table held, is GONE;
+**`Target.config`** is a `CPUO3_Config` the CALLER binds and
+**`target_named(name, config)`** is where it binds. The coupling it removes is
+real: `compile_tool/target.py` imported `compile_tool/machine.py`, which
+imported `examples.o3.rv32im.config` — so a C toolchain driver named one
+microarchitecture, which is §3's "uarch must never name a specific ISA" one
+level up. A target is an ISA plus a toolchain; which core runs the program is
+the caller's choice. `target_named(name)` with NO config returns the shared
+constant, so `target_named("rv32im") is RV32IM` still holds and a bound target
+is a `replace()` copy — the `Rv32i(name=...)` idiom. `config_for_sizes` MOVED to
+`examples/o3/rv32im/config.py` as **`rv32im_sized(imem_bytes, dmem_bytes,
+**knobs) -> (config, knobs)`**, beside the machine it builds; `idx_width_for`
+STAYED in `compile_tool/machine.py`, since `MemoryLayout.from_sizes` uses it and
+it names no machine. CONSEQUENCE, and it is what the decision cost:
+`build_program` with no config lays out from the byte sizes alone and
+`program.config` is None, where a RISC-V target used to get a machine for free —
+`tests/test_compile_tool.py`'s flow test now binds one, which is the real flow
+anyway, and two new tests pin that a target holds no machine until one is bound
+and that binding leaves the shared constant alone.
+
+Decision (Tanawin's pick, over an rv_sim-side target->builder map): **the run
+spec NAMES THE FACTORY** — `config_factory` is
+`"examples.o3.rv32im.config:rv32im_config"` and `config_kwargs` is what it was
+called with, FINAL widths and all, replacing the spec's `imem_bytes`/
+`dmem_bytes`. The simulator process imports the one and calls it with the other,
+so it re-derives no width, and `cocotb_test.py` imports NOTHING from
+compile_tool (pinned). Precedent: the deleted view layer's session named its
+renderers `"package.module:NAME"`. COST: an import path is a string, unchecked
+until run time — `tests/test_rv_sim_spec.py` pins the round trip
+(rebuilt == emitted), because nothing else would catch a moved module.
+`MACHINES` in `rv_sim/driver.py` is the machines rv_sim can build, by target
+name: the caller's own table, which is why it is there and not in target.py.
+
+**RV_SIM — THE MACHINE RUNS A PROGRAM** (2026-09-15, Tanawin: "examples/sim/rv_sim
+… 1. compile program 2. build the cpu (O3) model 3. run simulation … log the
+status and data of the system … simulate until the system run with correct
+result until it stop the program … if there is bug on CPU please fix it and let
+me know … if it have to bug I want another node that dont log let verilator run
+until the program stop"). The first time this core ever ran a compiled C program
+to real output.
+
+**`examples/sim/rv_sim/`** is the three steps in one call: `compile_tool` makes
+the images, `examples/o3` builds the machine THOSE images were laid out for, and
+cocotb runs it to its exit. Decision: the machine is ALWAYS emitted with
+`debug=True` — debug grows the manifest and not the Verilog, so ONE compiled
+simulator serves both modes and every program after the first, since the images
+are deposited at run time rather than compiled in. The simulator is another
+process, so the handoff is EXPLICIT: `run_spec.py` carries the few numbers that
+rebuild the config (the target's name, the memory sizes, the lane count) and the
+test calls the same `target.machine_config` the driver did; a `CPUO3_Config` is
+not serialisable and guessing one would silently build a different machine. The
+answer comes back as `result.json`. `--no-log` reads ONLY the store port, which
+is all the exit door and the console need: MEASURED 2037 cycles in 0.87 s, where
+the logging mode reads about 350 handles a cycle. The ORACLE is a host build of
+the same C through `host/carolyne_io.h`, so the machine is checked against a real
+execution of the program rather than against a string somebody typed.
+
+**`carolyne/debug/log/`** is the reading side, the C++ `simStatePrintSlot` shape:
+one cycle is one row of centered cells, a cell holds several lines, an
+unoccupied entry prints NOTHING, and register state prints only what changed.
+Decision: the three sinks differ only in WHAT THEY KEEP — every row
+(`StreamWriter`), the last N rendered rows (`WindowWriter`, the default), or one
+file per N (`ChunkedWriter`) — and the window keeps RENDERED TEXT, so holding
+2500 cycles costs no handles and no model state. Decision: reads are GATE FIRST
+everywhere (a lane's `valid`, a station row's `valid`, a commit lane's
+`commit_ok`, the store port's `enable` before anything they guard), which is
+what keeps a quiet cycle cheap. One departure from the C++: the rule is
+`+---+---+` with a `+` at every column boundary, where the original ran the
+dashes flat and the rule did not line up with the separators. LEARNED THE HARD
+WAY, and fixed: the FETCH cell first printed the pc REGISTER beside the recorded
+words, but both are clocked, so the register has already moved to the next group
+— a lane now prints its OWN recorded address beside its own word.
+
+FOUND ON THE WAY: an EMPTY probe list reaches no manifest node at all (the writer
+drops a container with nothing in it), so a single-stage complex's
+`dbg_stage_srcs` raises on lookup — `o3_cycle.convert_list` answers `[]` without
+asking.
+
+**SIX CPU BUGS, FOUND BY RUNNING IT** (2026-09-15). Each was found from the
+cycle log, each has a pinned test, and in most of them the recorded SYMPTOM
+named the wrong culprit — which is the argument for the log.
+
+1. **The core had no redirect path.** `Fetch.override_pc` had no caller: a
+   squash emptied the front end and left the pc wherever the wrong path had run
+   to. The 2026-09-11 note called this "`jal` redirects to twice its offset";
+   the doubling was a coincidence of where fetch had got to. Decision, following
+   the declare pattern: **`declare_mis_pred(dyn_cond, next_pc)`** — the ISA body
+   states the pc execution continues at, because only it knows what the µop
+   does, and `next_pc` is REQUIRED (a squash with no redirect is the bug). It is
+   `actual_npc`, not the branch target: a branch predicted taken that falls
+   through continues at the instruction after it. `CoreO3.on_mis_pred` routes it
+   to `Fetch.on_mis_pred(new_pc)`, which flushes its arb AND writes the pc at
+   `PRI_MIS_PRED`, above the stage's own advance.
+2. **The ROB's count only moved on a dispatching cycle.** `on_update_meta` was
+   called from `on_dispatch`, which dispatch runs inside its GRANTED zync, so a
+   commit in a cycle the front end did not dispatch was never subtracted. The
+   log read `alloc 11, com 11, used 1` — pointers equal, count one — and commit
+   retired three wrong-path instructions. Decision: the count is the ROB's own
+   UNCONDITIONAL `@flow` (`run_update_meta`), the shape `TagGen.on_update_meta`
+   already had; both ports read 0 when their side did nothing, so an idle cycle
+   moves nothing.
+3. **A µop carried the tag the NEXT branch would allocate.** `book_rename`
+   handed every lane `next_tag`, so instructions after a branch sat under a tag
+   no branch owned: the branch squashed with `0b00010` while its own wrong-path
+   stores carried `0b00100`, the Mpft column read 0 and nothing was killed.
+   Decision: **a lane carries the speculation IN FORCE** (`_tag_in_force`), which
+   for a branch is the one it opens — so a branch and everything it covers carry
+   ONE value and a squash is a mask again. This is the convention the Mpft and
+   `on_suc_pred` already assumed; `book_rename` was the half that disagreed.
+4. **The store buffer's resolve guard read the wire it drives.**
+   `on_suc_pred` guarded the `spec_overrider` write on `spec_overrider` itself.
+   Harmless only while the tags never matched — once (3) made them match,
+   Verilator refused the design ("Active region did not converge"). Fixed with
+   `push_pair`, the pair as the caller stated it, which the guard reads instead:
+   the shape `ExecUnitO3.on_suc_pred` already documents in its own comment.
+
+5. **Fetch took ANY grant where it needed EVERY one.** `Fetch.transfer` zyncs
+   on a LIST of arbiters — decode's and one per instruction memory port — and
+   the default `mode="any"` ORs their grants. So the memory answering was
+   enough to capture a new group, whether or not decode had taken the previous
+   one, and fetch overwrote its own unread record. Decode and dispatch each
+   bind a SINGLE arbiter, where any and all coincide, which is why fetch was
+   the only stage losing instructions. `mode="all"` is the fix.
+   MEASURED: decode still held `(0xe0, 0xe4)` while fetch overwrote its record
+   with `(0xf0, 0xf4)`, destroying `li a4,16` and the store that prints it.
+   This looked exactly like the Kathryn back-pressure gap and was NOT it: that
+   gap is real and was fixed in Kathryn the same day (a pip now re-arms on its
+   zync's completion rather than its parked state, Kathryn2 tc43), and the
+   rebuilt design behaved identically — which is what proved the cause was
+   here.
+6. **The rename table never dropped a mapping.** `renamed` was set by
+   `on_rename` and cleared NOWHERE: `Rt.on_commit` wrote the physical index
+   back over itself, and the loop meant to repair the speculative snapshots
+   indexed plane 0 every time instead of the loop variable. Every
+   architectural register therefore stayed marked renamed forever, and once the
+   physical pool wrapped and reallocated that register a reader waited on a
+   writeback that was not coming — the `ret` at the end of main sat in the
+   branch station waiting on its return address for the rest of the run.
+   Decision: the clear is CLOCKED ONLY and never goes on the commit ROW the
+   read path sees. The Arf takes the value at the edge, so a reader in the
+   commit cycle must still see the rename and read the physical register, which
+   still holds it; from the next cycle on it reads the Arf. The guard reads
+   what the rename CHAIN is about to write, not master, so a lane renaming the
+   same register in that cycle keeps its younger mapping — the same reason
+   PRI_RENAME sits above PRI_COMMIT. SUPERSEDED 2026-09-21 (see THE SNAPSHOT
+   AGED IN ITS OWN CYCLE): the clear IS on the commit row now, the Arf has a
+   read view that publishes the committing value the same cycle, and the
+   guard reads MASTER.
+
+MEASURED, in order, on `hello.c`: `'\x000\n\n'` before any fix; `'h0\n'` after
+(1); `'h0'` after (2); the whole string and every square but the last after (3)
+and (4); the WHOLE expected output after (5) —
+`hello from carolyne\n0\n1\n4\n9\n16\n`, matching a host build of the same
+source. After (6) the program also RETURNS from main, executes crt0's exit
+store and parks, which it had never done: (6) costs one store on the way, the
+open item below.
+
+**THE PROBE SCOPE LIMIT** (2026-09-15, measured): a probe's signals resolve in
+the scope of the module HOLDING it, and Kathryn builds hardware in whatever
+module scope is open — so an arbiter leaf's req/ack wires belong to the module
+that ZYNCS on it, and every arb's flush wire to the one module that calls
+`flush()`. Of the machine's 941 probe signals, 881 resolve and 60 do not (22
+leaf req/ack, 27 arb `reset`, one `hold`, `Rt.rename_metas`). Decision:
+`PipStatusSimProbe` carries `unresolved`, the names the model stored that the
+manifest could not reach, and the status words answer **UNKNOWN** rather than
+reading 0 — a log that invents a status is worse than one that says it cannot
+tell. What the log reads instead is the squash AT ITS SOURCE:
+`ExecUnitO3.dbg_resolve` (a `BranchResolveProbe`) publishes the mispredict
+condition, the redirect pc and the correct-prediction condition, all built in
+the declaring complex's own scope.
 
 NEXT UP — the function unit, designed 2026-08-19. Step 1 (the declared port
 shape above) and step 2 (`ExecContext` + `AluUnit` + the fake-context test,
