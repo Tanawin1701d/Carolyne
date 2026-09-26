@@ -10,26 +10,25 @@
 # the jumps' link value) never name PC as an operand — the µop record carries
 # it, and a stage body reads it off that record.
 #
-# `RegFile` below is a module-level SHARED INSTANCE with `x_file()` as its
+# `X_FILE` is a module-level SHARED INSTANCE with `build_x_file()` as its
 # builder, because IsaBase matches register files by identity and the operand
-# rules that target this class are module constants too. The class itself is
-# imported under an alias so this name can be the instance.
+# rules that target this class are module constants too.
 #
-# `ImmTarget` is what an immediate operand points at: an Intermediate, not a
+# `IMM_TARGET` is what an immediate operand points at: an Intermediate, not a
 # RegFile, so it allocates no PRF and never goes through rename.
 
 from __future__ import annotations
 
-from ..reg import Intermediate, RegFile as _RegFileType
+from ..reg import Intermediate, RegFile
 
 X_LEN = 32                  # register width; RV32I by definition
 SIGN  = 1 << (X_LEN - 1)    # the sign bit, for signed-order tricks
 
 
-def x_file() -> _RegFileType:
+def build_x_file() -> RegFile:
     """Build the integer register class x0..x31; x0 reads as zero, writes vanish."""
-    return _RegFileType("x", X_LEN, 32, const_regs={0: 0})
+    return RegFile("x", X_LEN, 32, const_regs={0: 0})
 
 
-RegFile   = x_file()                        # the instance operands and the ISA share
-ImmTarget = Intermediate(X_LEN, "imm")      # what an immediate operand targets
+X_FILE     = build_x_file()                 # the instance operands and the ISA share
+IMM_TARGET = Intermediate(X_LEN, "imm")     # what an immediate operand targets

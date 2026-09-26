@@ -4,7 +4,7 @@
 # (uop_contract.md §1.1, §2).
 #
 # Module CONSTANTS, shared by every shape, built on four shared AtomicOperand
-# cores. The register rules target reg.RegFile, the one class instance this
+# cores. The register rules target reg.X_FILE, the one class instance this
 # description declares: IsaBase matches reg files by identity, so the operand
 # constants and the declared class must be the same object.
 #
@@ -19,7 +19,7 @@
 # fields, so no slot is ever both, and one OPR_RD serves all 30 instructions
 # that write a register.
 #
-# An immediate operand targets `reg.ImmTarget` and carries NO index: an index
+# An immediate operand targets `reg.IMM_TARGET` and carries NO index: an index
 # answers "which register of the class", which an immediate does not have. The
 # six immediate constants differ by their matcher and by `imm_extract`, the
 # rule that turns the matched bits into a value (imm.py). No µtemp operands
@@ -32,7 +32,7 @@ from ..atomic_operand import AtomicOperand, OperandRole, TargetKind
 from ..operand import FieldRef, Operand
 from . import field_match as FM
 from . import imm as IMM_RULE
-from .reg import ImmTarget, RegFile
+from .reg import IMM_TARGET, X_FILE
 
 SRC, DEST   = OperandRole.SRC, OperandRole.DEST
 ARCH, IMM   = TargetKind.ARCH, TargetKind.IMM
@@ -47,10 +47,10 @@ ARCH, IMM   = TargetKind.ARCH, TargetKind.IMM
 # single encoding slot resolves either way (x86 ModRM r/m); RV32I has no such
 # slot, and stating the selection anyway is what keeps a rule readable on its
 # own.
-AOPR_SRC_1   = AtomicOperand(SRC,  "src_1",  reg_file=RegFile)
-AOPR_SRC_2   = AtomicOperand(SRC,  "src_2",  reg_file=RegFile, intermediate=ImmTarget)
-AOPR_SRC_3   = AtomicOperand(SRC,  "src_3",  intermediate=ImmTarget)
-AOPR_DEST_1  = AtomicOperand(DEST, "dest_1", reg_file=RegFile)
+AOPR_SRC_1   = AtomicOperand(SRC,  "src_1",  reg_file=X_FILE)
+AOPR_SRC_2   = AtomicOperand(SRC,  "src_2",  reg_file=X_FILE, intermediate=IMM_TARGET)
+AOPR_SRC_3   = AtomicOperand(SRC,  "src_3",  intermediate=IMM_TARGET)
+AOPR_DEST_1  = AtomicOperand(DEST, "dest_1", reg_file=X_FILE)
 
 
 # --- register operands ------------------------------------------------------

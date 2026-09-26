@@ -33,7 +33,7 @@
 #
 # A group carries only the kinds its core can answer: `ar_idx` needs
 # `has_arch`, and `data` needs `has_imm`, which is how an immediate enters the
-# record (RV32I's ImmTarget).
+# record (RV32I's IMM_TARGET).
 #
 # LIMIT: `has_imm` is true of ANY µtemp target. A real µtemp is not known at
 # decode; it is produced by an earlier µop of the same crack, and the

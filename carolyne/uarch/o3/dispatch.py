@@ -172,9 +172,10 @@ class Dispatch(Module):
                                            field_name(WB_REQUIRED, atm_opr)))
                 req       = to_ref(decode_entry.valid) & wb_req
                 # a one-register class stores no ar_idx (index_width 0):
-                # there is nothing to choose, that register is 0
+                # there is nothing to choose, that register is 0 — as a
+                # SIGNAL, since Rt.write_entry compares it in a zif
                 if atm_opr.reg_file.index_width == 0:
-                    ar_idx = 0
+                    ar_idx = val(1, 0)
                     if 0 in atm_opr.reg_file.const_regs:
                         req = val(1, 0)
                 else:

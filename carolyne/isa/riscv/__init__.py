@@ -18,10 +18,11 @@
 # Not supplied: the trap policy (§6.5), which has no type yet.
 #
 # The operand rules are module constants, so the register class they target is
-# one too: `reg.RegFile`, built by `x_file()` and shared by every shape and by
-# the `reg_files=(RegFile,)` the description declares, because IsaBase matches
-# reg files by IDENTITY. Two Rv32im() builds therefore share it; call `x_file()`
-# and build your own operands for a genuinely independent description.
+# one too: `reg.X_FILE`, built by `build_x_file()` and shared by every shape
+# and by the `reg_files=(X_FILE,)` the description declares, because IsaBase
+# matches reg files by IDENTITY. Two Rv32im() builds therefore share it; call
+# `build_x_file()` and build your own operands for a genuinely independent
+# description.
 # MOP_TABLE is shared on the same terms; `exec_units()` stays a function.
 #
 # LIMIT: `Uop` has no immediate field, so the immediates are operands in
@@ -42,7 +43,7 @@ from .operand import (OPR_IMM_B, OPR_IMM_I, OPR_IMM_J, OPR_IMM_S, OPR_IMM_U,
                       OPR_IMM_SHAMT, OPR_IMMS, OPR_RD, OPR_REGS, OPR_RS1,
                       OPR_RS2)
 from .mop import MOP_TABLE
-from .reg import ImmTarget, RegFile, X_LEN, x_file
+from .reg import IMM_TARGET, X_FILE, X_LEN, build_x_file
 from .rv32im import Rv32im
 from .uop import BRANCHES, LOADS, STORES, UOPS
 
@@ -50,9 +51,9 @@ __all__ = [
     "Rv32im"       , "MOP_TABLE" , "exec_units",
     "AluExecUnit"  , "BrExecUnit", "LSExecUnit",
     "PC_WIDTH"     , "PC_ALIGN"  , "ILEN_BYTES",
-    "RegFile"      , "ImmTarget" , "X_LEN"     , "x_file"   ,
-    "OPR_RD"       , "OPR_RS1"   , "OPR_RS2"   , "OPR_REGS" ,
-    "OPR_IMM_I"    , "OPR_IMM_S" , "OPR_IMM_B" , "OPR_IMM_U", "OPR_IMM_J",
+    "X_FILE"       , "IMM_TARGET", "X_LEN"     , "build_x_file",
+    "OPR_RD"       , "OPR_RS1"   , "OPR_RS2"   , "OPR_REGS"    ,
+    "OPR_IMM_I"    , "OPR_IMM_S" , "OPR_IMM_B" , "OPR_IMM_U"   , "OPR_IMM_J",
     "OPR_IMM_SHAMT", "OPR_IMMS"  ,
-    "UOPS"         , "LOADS"     , "STORES"    , "BRANCHES" ,
+    "UOPS"         , "LOADS"     , "STORES"    , "BRANCHES"    ,
 ]

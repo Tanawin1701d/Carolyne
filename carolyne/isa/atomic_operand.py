@@ -114,7 +114,7 @@ class AtomicOperand:
 
     @property
     def has_imm(self) -> bool:
-        """The slot may name the core's `intermediate` (RV32I's ImmTarget)."""
+        """The slot may name the core's `intermediate` (RV32I's IMM_TARGET)."""
         return self.intermediate is not None
 
     @property

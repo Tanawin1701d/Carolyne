@@ -9,7 +9,7 @@
 # __post_init__ / uop() / units_for() — so every inherited cross-check still
 # runs. All ten fields are redeclared because a dataclass picks up a default
 # only through an ANNOTATED assignment; that is why the RegFile CLASS and this
-# ISA's one RegFile INSTANCE both appear below, the latter aliased X_FILE.
+# ISA's one RegFile INSTANCE, X_FILE, both appear below.
 #
 # The shapes name the shared constants of operand.py / uop.py / mop.py, and
 # this file declares those same instances: IsaBase matches cores, operands,
@@ -40,7 +40,7 @@ from .mop import MOP_TABLE
 from .exec_unit import exec_units
 from .operand import (AOPR_DEST_1, AOPR_SRC_1, AOPR_SRC_2, AOPR_SRC_3,
                       OPR_IMMS, OPR_REGS)
-from .reg import RegFile as X_FILE        # the INSTANCE operand.py's rules target
+from .reg import X_FILE        # the INSTANCE operand.py's rules target
 from .uop import UOPS
 
 # Built once, at import: a field default is evaluated once, and every Rv32im()
