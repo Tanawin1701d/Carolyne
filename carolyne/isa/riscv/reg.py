@@ -22,7 +22,8 @@ from __future__ import annotations
 
 from ..reg import Intermediate, RegFile as _RegFileType
 
-X_LEN = 32          # register width; RV32I by definition
+X_LEN = 32                  # register width; RV32I by definition
+SIGN  = 1 << (X_LEN - 1)    # the sign bit, for signed-order tricks
 
 
 def x_file() -> _RegFileType:

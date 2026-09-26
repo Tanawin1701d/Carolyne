@@ -15,12 +15,14 @@
 
 from __future__ import annotations
 
-from kathryn import HwComponentType, Karray, kaf, mux, val, wire, zif
+from kathryn import HwComponentType, Karray, kaf, mux, wire, zif
 from kathryn.signal import to_ref
 
 from ..exec_unit import ExecUnitBase
 from . import uop as U
-from .exec_unit_util import drive_by_uop, uop_hit
+from ..exec_unit_util import (drive_by_uop, extract_byte, extract_half, merge_byte          ,
+                              merge_half  , sext_byte   , sext_half   , sub_word_bit_offsets,
+                              uop_hit)
 from .operand import AOPR_SRC_1, AOPR_SRC_2, AOPR_SRC_3, AOPR_DEST_1
 from .reg import X_LEN
 
@@ -82,11 +84,10 @@ class LSExecUnit(ExecUnitBase):
             # TODO: an access that SPANS two words is not handled and does
             # not trap — a caller must keep LW/SW 4-byte and LH/LHU/SH
             # 2-byte aligned. See docs/open_items.md.
-            eff_addr                = wire(X_LEN, "ls_eff_addr")
-            eff_addr               *= base + imm
-            mem_addr_wo_static_bit  = eff_addr >> 2
-            byte_bit_off            = (eff_addr & 0b11) << 3   # 0, 8, 16, 24
-            half_bit_off            = (eff_addr & 0b10) << 3   # 0 or 16
+            eff_addr                    = wire(X_LEN, "ls_eff_addr")
+            eff_addr                   *= base + imm
+            mem_addr_wo_static_bit      = eff_addr >> 2
+            byte_bit_off, half_bit_off  = sub_word_bit_offsets(eff_addr)
 
             # the newest value of the word: a buffered store beats memory
             fwd_hit, fwd_data = api.lsq_search(mem_addr_wo_static_bit)
@@ -97,15 +98,11 @@ class LSExecUnit(ExecUnitBase):
             # a sub-word store merges its bytes into the current word, so
             # the buffer holds full words and forwarding never needs a byte
             # mask
-            b_mask = val(X_LEN, 0xff)   << byte_bit_off
-            h_mask = val(X_LEN, 0xffff) << half_bit_off
             merged = wire(X_LEN, "st_merged")
             drive_by_uop(merged, src, (
                 (U.UOP_SW, st_data),
-                (U.UOP_SH, (loaded_word & ~h_mask)
-                           | ((st_data & 0xffff) << half_bit_off)),
-                (U.UOP_SB, (loaded_word & ~b_mask)
-                           | ((st_data & 0xff) << byte_bit_off)),
+                (U.UOP_SH, merge_half(loaded_word, st_data, half_bit_off, X_LEN)),
+                (U.UOP_SB, merge_byte(loaded_word, st_data, byte_bit_off, X_LEN)),
             ))
 
             res[0] |= {"loaded_word" : loaded_word,
@@ -120,17 +117,16 @@ class LSExecUnit(ExecUnitBase):
         # bit 0 and zero-extended — LBU/LHU want them as they stand, LB/LH
         # sign-extend them below
         loaded_word    = to_ref(src[0].loaded_word)
-        addressed_byte = (loaded_word >> to_ref(src[0].byte_bit_off)) & 0xff
-        addressed_half = (loaded_word >> to_ref(src[0].half_bit_off)) & 0xffff
+        addressed_byte = extract_byte(loaded_word, to_ref(src[0].byte_bit_off))
+        addressed_half = extract_half(loaded_word, to_ref(src[0].half_bit_off))
 
         load_result = wire(X_LEN, "load_result")
         drive_by_uop(load_result, src, (
             (U.UOP_LW,  loaded_word),
             (U.UOP_LBU, addressed_byte),
             (U.UOP_LHU, addressed_half),
-            # sign extension by wraparound: (v ^ sign) - sign
-            (U.UOP_LB,  (addressed_byte ^ 0x80)   - 0x80),
-            (U.UOP_LH,  (addressed_half ^ 0x8000) - 0x8000),
+            (U.UOP_LB,  sext_byte(addressed_byte)),
+            (U.UOP_LH,  sext_half(addressed_half)),
         ))
 
         with zif(uop_hit(src, U.LOADS)):

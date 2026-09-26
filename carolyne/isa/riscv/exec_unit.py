@@ -7,7 +7,7 @@
 #   exec_unit_br.py    BrExecUnit — what AUGMENTS the pc: branches, jal, jalr
 #   exec_unit_ls.py    LSExecUnit — loads and stores, over the LSQ api
 #   exec_unit_muldiv.py MulDivExecUnit — the M extension, one combinational stage
-#   exec_unit_util.py  the shared body helpers (uop_hit / drive_by_uop / SIGN)
+#   ../exec_unit_util.py  the body helpers every ISA shares (uop_hit / drive_by_uop)
 #
 # The unit split is a MACHINE choice, not an ISA one: one unit per kind is
 # the plain default, and this file is where an issue-port / unit-count knob

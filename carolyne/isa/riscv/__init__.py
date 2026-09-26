@@ -4,7 +4,7 @@
 #   reg.py       — architectural register classes (§6.1); x only, PC is not one
 #   exec_unit.py — the unit FACTORY (exec_units()); each unit's semantics is in
 #                  its own module: exec_unit_alu.py / exec_unit_br.py /
-#                  exec_unit_ls.py, with shared helpers in exec_unit_util.py
+#                  exec_unit_ls.py, over the helpers in isa/exec_unit_util.py
 #   field_match.py — where each encoding field is in the 32-bit word (§6.2),
 #                  the six base formats as unions of those fields, and the
 #                  addressing group PC_WIDTH / PC_ALIGN / ILEN_BYTES that
@@ -47,11 +47,12 @@ from .rv32im import Rv32im
 from .uop import BRANCHES, LOADS, STORES, UOPS
 
 __all__ = [
-    "Rv32im", "MOP_TABLE", "exec_units",
-    "AluExecUnit", "BrExecUnit", "LSExecUnit",
-    "PC_WIDTH", "PC_ALIGN", "ILEN_BYTES",
-    "RegFile", "ImmTarget", "X_LEN", "x_file",
-    "OPR_RD", "OPR_RS1", "OPR_RS2", "OPR_REGS",
-    "OPR_IMM_I", "OPR_IMM_S", "OPR_IMM_B", "OPR_IMM_U", "OPR_IMM_J",
-    "OPR_IMM_SHAMT", "OPR_IMMS", "UOPS", "LOADS", "STORES", "BRANCHES",
+    "Rv32im"       , "MOP_TABLE" , "exec_units",
+    "AluExecUnit"  , "BrExecUnit", "LSExecUnit",
+    "PC_WIDTH"     , "PC_ALIGN"  , "ILEN_BYTES",
+    "RegFile"      , "ImmTarget" , "X_LEN"     , "x_file"   ,
+    "OPR_RD"       , "OPR_RS1"   , "OPR_RS2"   , "OPR_REGS" ,
+    "OPR_IMM_I"    , "OPR_IMM_S" , "OPR_IMM_B" , "OPR_IMM_U", "OPR_IMM_J",
+    "OPR_IMM_SHAMT", "OPR_IMMS"  ,
+    "UOPS"         , "LOADS"     , "STORES"    , "BRANCHES" ,
 ]

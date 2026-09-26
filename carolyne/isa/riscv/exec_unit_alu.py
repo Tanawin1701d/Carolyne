@@ -16,9 +16,9 @@ from kathryn.signal import to_ref
 
 from ..exec_unit import ExecUnitBase
 from . import uop as U
-from .exec_unit_util import SIGN, drive_by_uop
+from ..exec_unit_util import drive_by_uop
 from .operand import AOPR_DEST_1, AOPR_SRC_1, AOPR_SRC_2
-from .reg import X_LEN
+from .reg import SIGN, X_LEN
 
 
 class AluExecUnit(ExecUnitBase):
