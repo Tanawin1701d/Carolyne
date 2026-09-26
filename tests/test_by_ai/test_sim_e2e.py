@@ -24,6 +24,7 @@ from examples.sim.oracle import host_compiler
 REPO  = pathlib.Path(__file__).resolve().parents[2]
 HELLO = "examples/compile_tool/programs/hello.c"
 WANT  = "hello from carolyne\n0\n1\n4\n9\n16\n"
+MIPS_GCC = "mipsel-linux-gnu-gcc"
 
 pytestmark = pytest.mark.slow
 
@@ -40,6 +41,8 @@ def have_tools() -> bool:
 
 needs_tools = pytest.mark.skipif(not have_tools(),
                                  reason="needs cocotb, verilator, riscv gcc and a host cc")
+needs_mips  = pytest.mark.skipif(not have_tools() or shutil.which(MIPS_GCC) is None,
+                                 reason=f"needs the sim tools and {MIPS_GCC}")
 
 
 def run_cli(*args, name: str) -> subprocess.CompletedProcess:
@@ -78,3 +81,14 @@ def test_the_log_writes_a_readable_table_and_the_same_console():
     events = [json.loads(line) for line in (run / "events.jsonl").read_text().splitlines()]
     kinds  = {event["kind"] for line in events for event in line["events"]}
     assert "mmio" in kinds and "commit" in kinds
+
+
+@needs_mips
+def test_hello_runs_on_the_mips32_machine_too():
+    # the same source, the other ISA: one engine, two descriptions
+    done   = run_cli("--no-log", "--target", "mips32", name="hello_mips_e2e")
+    result = result_of("hello_mips_e2e")
+    assert result["stop_reason"] == "exit", f"stopped on {result['stop_reason']}\n{done.stdout[-3000:]}"
+    assert result["console"]   == WANT
+    assert result["exit_code"] == 0
+    assert done.returncode == 0

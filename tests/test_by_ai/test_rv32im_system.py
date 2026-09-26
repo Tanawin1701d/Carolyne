@@ -11,7 +11,7 @@ from carolyne.debug.log import MmioDoors
 from examples.compile_tool import MemoryLayout, target_named
 from examples.compile_tool.image import BankImage
 from examples.o3.rv32im.config import gen_o3_rv32im_config, gen_o3_rv32im_config_for_sizes
-from examples.o3.rv32im.run_spec import SPEC_ENV, RunSpec, read_hex_words, read_run_spec, write_run_spec
+from examples.o3.core.run_spec import SPEC_ENV, RunSpec, read_hex_words, read_run_spec, write_run_spec
 from examples.o3.rv32im.system import TEST_CASE, TEST_MODULE
 
 
@@ -61,7 +61,7 @@ def test_both_processes_build_the_model_through_one_recipe():
     - a drift between two copies makes KSim resolve the manifest against names
       the compiled simulator does not have, and it fails only at run time
     """
-    for path in ("examples/o3/rv32im/system.py", "examples/o3/rv32im/cocotb_test.py"):
+    for path in ("examples/o3/core/system.py", "examples/o3/core/cocotb_run.py"):
         source = open(path, encoding="utf-8").read()
         assert "build_debug_model" in source
         assert "build_model(" not in source, f"{path} spells the build itself"
@@ -76,8 +76,8 @@ def test_the_shared_recipe_drags_no_toolchain_into_the_simulator():
 
 def test_the_cocotb_test_needs_nothing_from_the_compile_tool():
     """cocotb_test rebuilds the machine from the spec, not from a target table."""
-    source = open("examples/o3/rv32im/cocotb_test.py", encoding="utf-8").read()
-    assert "compile_tool" not in source
+    for path in ("examples/o3/core/cocotb_run.py", "examples/o3/rv32im/cocotb_test.py"):
+        assert "compile_tool" not in open(path, encoding="utf-8").read(), path
 
 
 def test_an_image_reads_back_the_words_it_was_written_with(tmp_path):

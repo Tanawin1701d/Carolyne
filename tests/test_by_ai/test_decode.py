@@ -99,7 +99,7 @@ def test_no_physical_index_exists_before_rename():
 
 
 def test_data_is_built_only_where_a_slot_may_carry_a_utemp():
-    # An immediate enters the record as a µtemp target (RV32I's ImmTarget), so
+    # An immediate enters the record as a µtemp target (RV32I's IMM_TARGET), so
     # data is the slot's own value. rs1 is always a register and never carries
     # one, so it gets no data field.
     cfg = _cfg()

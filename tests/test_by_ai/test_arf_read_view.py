@@ -13,14 +13,14 @@ import re
 import pytest
 from kathryn import *
 
-from carolyne.isa.riscv.reg import x_file
+from carolyne.isa.riscv.reg import build_x_file
 from carolyne.uarch.o3.arf import Arf
 
 
 class ArfTop(Module):
     @init
     def com_declare(self):
-        self.arf    = Arf(x_file())
+        self.arf    = Arf(build_x_file())
         self.w_idx  = wire(5,  "w_idx")
         self.w_data = wire(32, "w_data")
         self.r_idx  = wire(5,  "r_idx")

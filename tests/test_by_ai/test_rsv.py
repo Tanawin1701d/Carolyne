@@ -108,7 +108,7 @@ def test_the_uop_id_is_sized_from_the_isa_not_the_rob():
 
 
 def test_a_utemp_source_carries_only_its_data():
-    # src_3 targets ImmTarget, an Intermediate: there is no PRF entry to wake
+    # src_3 targets IMM_TARGET, an Intermediate: there is no PRF entry to wake
     # on, so the value is in the µop record and the entry holds data only.
     cfg  = _cfg()
     spec = RsvSpec(False, 16, (MEM,), RsvType.RSV_LD_ST)

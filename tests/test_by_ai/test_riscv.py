@@ -9,8 +9,8 @@ from carolyne.isa import (
     AtomicOperand, FieldRef, Intermediate, InstrFieldMatch, IsaBase, Operand,
     OperandRole, TargetKind)
 from carolyne.isa.riscv import (
-    ILEN_BYTES, ImmTarget, MOP_TABLE, OPR_IMMS, OPR_RD, OPR_RS1, OPR_RS2,
-    RegFile, Rv32im, UOPS, X_LEN, field_match as FM, uop as U, x_file,
+    ILEN_BYTES, IMM_TARGET, MOP_TABLE, OPR_IMMS, OPR_RD, OPR_RS1, OPR_RS2,
+    X_FILE, Rv32im, UOPS, X_LEN, field_match as FM, uop as U, build_x_file,
 )
 
 
@@ -84,7 +84,7 @@ def test_unit_routing_covers_every_uop():
 def test_x0_is_declared_not_special_cased():
     # RISC-V's hardwired zero is just a const_regs entry: rename bypasses
     # reads and discards writes, no ISA-specific logic in the engine.
-    x = x_file()
+    x = build_x_file()
     assert x.is_const(0) and not x.is_const(1)
     assert x.const_regs == {0: 0}
 
@@ -92,14 +92,14 @@ def test_x0_is_declared_not_special_cased():
 def test_the_operand_rules_and_the_description_share_one_register_class():
     # IsaBase matches reg files by identity, and the operand rules are module
     # constants — so the class they target must BE the class the description
-    # declares. Sharing reg.RegFile is what makes that true by construction.
+    # declares. Sharing reg.X_FILE is what makes that true by construction.
     isa = Rv32im()
-    assert isa.reg_file("x") is RegFile
-    assert all(operand.target in (RegFile, ImmTarget)
+    assert isa.reg_file("x") is X_FILE
+    assert all(operand.target in (X_FILE, IMM_TARGET)
                for uop in _uops(isa) for operand in uop.srcs + uop.dests)
-    # Accepted cost: two builds share the class. x_file() is the way out.
+    # Accepted cost: two builds share the class. build_x_file() is the way out.
     assert Rv32im().reg_file("x") is isa.reg_file("x")
-    assert x_file() is not RegFile and x_file() == RegFile
+    assert build_x_file() is not X_FILE and build_x_file() == X_FILE
     # MOP_TABLE is shared on the same terms — frozen data all the way down, so
     # handing every build the same tuple changes nothing observable.
     assert isa.mops is MOP_TABLE and Rv32im().mops is MOP_TABLE
@@ -110,7 +110,7 @@ def test_operand_rules_agree_with_the_field_match_table():
     # never spelled twice, and it carries where its bits are.
     for operand, field in ((OPR_RD, FM.RD), (OPR_RS1, FM.RS1), (OPR_RS2, FM.RS2)):
         assert operand.index.name == field.name and operand.matcher is field
-        assert operand.target is RegFile
+        assert operand.target is X_FILE
     # Three different encoding fields, so no slot is ever both read and
     # written — which is what lets these stay shared constants (operand.py).
     assert OPR_RD.is_dest and OPR_RS1.is_src and OPR_RS2.is_src
@@ -121,12 +121,12 @@ def test_immediate_operands_carry_a_matcher_and_no_index():
     # not got — the layer above enforces exactly that, so the matcher is the
     # whole rule: which bits of the word carry the value.
     for imm in OPR_IMMS:
-        assert imm.target is ImmTarget and imm.index is None and imm.matcher
+        assert imm.target is IMM_TARGET and imm.index is None and imm.matcher
         assert imm.is_src                           # a value flowing in, never written
     assert [i.matcher.name for i in OPR_IMMS] == [
         "imm_i", "imm_s", "imm_b", "imm_u", "imm_j", "shamt"]
     with pytest.raises(ValueError):                 # an index on one is refused
-        Operand(AtomicOperand(OperandRole.SRC, intermediate=ImmTarget),
+        Operand(AtomicOperand(OperandRole.SRC, intermediate=IMM_TARGET),
                 TargetKind.IMM, FieldRef("imm"), matcher=FM.IMM_I)
 
 
@@ -137,7 +137,7 @@ def test_immediates_ride_in_srcs_for_now():
     # widest at rs1 + rs2 + imm.
     isa = Rv32im()
     with_imm = [uop for uop in _uops(isa)
-                if any(o.target is ImmTarget for o in uop.srcs)]
+                if any(o.target is IMM_TARGET for o in uop.srcs)]
     assert len(with_imm) == 27                  # every instruction but the R-type
     assert max(len(uop.srcs) for uop in _uops(isa)) == 3
     sw, = _uops(isa, U.UOP_SW)
@@ -147,7 +147,7 @@ def test_immediates_ride_in_srcs_for_now():
 def test_rv32i_needs_no_micro_temps():
     # No AGU µop, and nothing else produces an intra-instruction value, so
     # RV32I has no real µtemp. The only Intermediate in the table is
-    # ImmTarget, which stands for "this value comes from the encoding" — the
+    # IMM_TARGET, which stands for "this value comes from the encoding" — the
     # two are indistinguishable by type today, which is why this test names
     # the instance rather than the class. The µtemp mechanism proper is
     # pinned by the x86 read-modify-write shape in test_uop.py.
@@ -155,7 +155,7 @@ def test_rv32i_needs_no_micro_temps():
     temps = [operand.target
              for uop in _uops(isa) for operand in uop.srcs + uop.dests
              if isinstance(operand.target, Intermediate)]
-    assert temps and all(t is ImmTarget for t in temps)
+    assert temps and all(t is IMM_TARGET for t in temps)
 
 
 def test_load_and_store_are_single_uops():
@@ -286,7 +286,7 @@ def test_the_package_is_description_data_only():
     import ast, pathlib
 
     SEMANTICS = {"exec_unit_alu.py", "exec_unit_br.py", "exec_unit_ls.py",
-                 "exec_unit_muldiv.py", "exec_unit_util.py"}
+                 "exec_unit_muldiv.py"}
 
     pkg = pathlib.Path(__file__).resolve().parents[2] / "carolyne" / "isa" / "riscv"
     for source in sorted(pkg.glob("*.py")):

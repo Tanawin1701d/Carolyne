@@ -34,8 +34,11 @@ def test_the_run_directory_is_named_after_the_first_source():
 
 
 def test_a_target_with_no_system_is_refused_at_the_parser():
+    # both machine families are systems now; a target nothing builds is not
+    for target in ("rv32im", "mips32"):
+        assert build_parser().parse_args(["run", HELLO, "--target", target]).target == target
     with pytest.raises(SystemExit):
-        build_parser().parse_args(["run", HELLO, "--target", "mips32"])
+        build_parser().parse_args(["run", HELLO, "--target", "arm"])
 
 
 # ---- the verdict ---------------------------------------------------------------------

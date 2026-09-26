@@ -12,7 +12,8 @@
 #   * every instruction is held to the ISA's own encoding table, so a
 #     program the machine could not decode fails the BUILD
 #   * the code starts at the ISA's reset_pc, the address fetch starts from
-#   * a target with no description (mips32) is laid out and linked, not verified
+#   * mips32 is verified against its own description, and its branch delay
+#     slots must hold the nop the engine squashes
 #
 # The tests that run the cross compiler skip when it is absent, so the rest
 # still runs on a machine with no RISC-V toolchain.
@@ -25,6 +26,7 @@ import shutil
 
 import pytest
 
+from carolyne.isa.mips import Mips32
 from carolyne.isa.riscv import Rv32im
 from carolyne.uarch.o3.config import CPUO3_Config
 from examples.compile_tool import (MIPS32, RV32IM, TARGETS, _reject_wrong_entry,
@@ -338,10 +340,13 @@ def test_rv32im_is_the_one_riscv_target():
     assert "rv32i" not in TARGETS          # the no-M variant bought nothing
 
 
-def test_mips32_has_no_description_yet_so_it_cannot_verify():
+def test_mips32_verifies_against_its_description_and_holds_its_slots_to_a_nop():
     """MIPS32 carries multiply/divide in its base ISA: there is no 'im' to name."""
-    assert not MIPS32.can_verify
-    assert MIPS32.arch_flags == ("-march=mips32r2", "-mabi=32")
+    assert MIPS32.isa is Mips32 and MIPS32.can_verify
+    assert MIPS32.reset_pc == Mips32().reset_pc == 0xBFC00000
+    assert MIPS32.arch_flags == ("-march=mips32r2", "-mabi=32", "-msoft-float", "-mno-abicalls")
+    assert "-fno-delayed-branch" in MIPS32.cflags and "-mno-imadd" in MIPS32.cflags
+    assert MIPS32.delay_slot_nop == 0 and RV32IM.delay_slot_nop is None
 
 
 def test_the_linker_script_is_the_targets():
@@ -388,10 +393,45 @@ def test_a_machine_config_and_its_machine_mem_cannot_disagree():
 
 
 @needs_mips
-def test_a_mips_program_builds_and_is_not_verified(tmp_path):
+def test_a_mips_program_builds_and_is_verified(tmp_path):
     program = build_program([HELLO], MIPS32.machine_mem(banks=2), target="mips32",
                             name="hello", out_dir=str(tmp_path))
 
-    assert program.report.skipped and program.report.ok
+    assert program.report.ok and not program.report.skipped
+    assert program.report.checked > 0 and program.report.isa_name == "mips32"
     assert program.elf.entry == MIPS32.reset_pc
     assert program.image.instr_banks[0].used_words > 0
+
+
+def _mips_text(words, base=0xBFC00000):
+    """An ELF holding these words as its whole text, for verify alone."""
+    from examples.compile_tool.elf32 import Elf32, Section
+    blob = b"".join(w.to_bytes(4, "little") for w in words)
+    text = Section(name=".text", type=1, flags=0x2 | 0x4, addr_target_mem=base,
+                   offset_in_elf=0, size_bytes=len(blob))
+    return Elf32(path="<test>", entry=base, machine=8, sections=(text,), _raw=blob)
+
+
+def test_a_branch_whose_delay_slot_is_not_the_nop_is_refused():
+    """The engine squashes the word after a taken branch, so only a nop may stand there."""
+    beq   = 4 << 26 | 1 << 21 | 2 << 16 | 3          # beq $1,$2,+12
+    addiu = 9 << 26 | 1 << 21 | 1 << 16 | 4          # addiu $1,$1,4
+    nop   = 0
+    isa   = Mips32()
+
+    good = verify_program(_mips_text([beq, nop, addiu]), isa, delay_slot_nop=0)
+    assert good.ok and good.checked == 3
+
+    bad = verify_program(_mips_text([beq, addiu, nop]), isa, delay_slot_nop=0)
+    assert [p.kind for p in bad.problems] == ["delay slot"]
+    assert bad.problems[0].hits == ("BEQ",) and bad.problems[0].slot == addiu
+    assert "not the nop" in str(bad.problems[0])
+    with pytest.raises(ValueError, match="delay slot"):
+        bad.raise_if_bad()
+
+    last = verify_program(_mips_text([addiu, beq]), isa, delay_slot_nop=0)
+    assert [p.kind for p in last.problems] == ["delay slot"] and last.problems[0].slot is None
+    assert "missing" in str(last.problems[0])
+
+    # no rule: the machine executes the slot, so anything may stand there
+    assert verify_program(_mips_text([beq, addiu, nop]), isa).ok

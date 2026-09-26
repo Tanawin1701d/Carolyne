@@ -4,7 +4,7 @@
 import pytest
 
 from carolyne.isa import ExecUnit, Uop
-from carolyne.isa.riscv import Rv32im, x_file
+from carolyne.isa.riscv import Rv32im, build_x_file
 from carolyne.uarch.o3.config import CPUO3_Config, RsvSpec, RsvType
 
 ISA   = Rv32im()
@@ -59,8 +59,8 @@ def test_phy_specs_is_keyed_by_the_reg_file_instance():
     with pytest.raises(TypeError, match="unhashable"):
         {X: 64}
     # Rv32im() shares one RegFile instance by design, so a real twin comes from
-    # x_file(), the builder behind it.
-    twin = x_file()
+    # build_x_file(), the builder behind it.
+    twin = build_x_file()
     assert twin == X and twin is not X       # value-equal, different instance
     with pytest.raises(ValueError, match="which ISA 'rv32im' does not declare"):
         _cfg(phy_specs=((twin, 64),))
