@@ -168,15 +168,42 @@ suggested; the evidence is the cycle log each entry names.
 
 ## Compile tool
 
-- [ ] **MIPS32 is built, not verified, and not yet compiled here.** `mips32`
-      is a target (`examples/compile_tool/target.py`) with no
-      `carolyne/isa/mips` description behind it, so `verify` is skipped with
-      a report that says so; the flags, `crt0_mips.S` and the linker script
-      are untested until `gcc-mipsel-linux-gnu` is installed.
-      *Where:* `examples/compile_tool/target.py` (`MIPS32`), `runtime/crt0_mips.S`.
-      *Closes when:* the compiler is installed and `test_a_mips_program_builds_and_is_not_verified`
-      runs; a MIPS description (branch-delay slots against the µop contract)
-      is its own bring-up.
+- [x] **MIPS32 is built, not verified, and not yet compiled here.** CLOSED
+      2026-09-21: `carolyne/isa/mips` exists and `MIPS32.isa = Mips32`, so a
+      MIPS build is verified word by word like a RISC-V one. Still untested
+      HERE until `sudo apt install gcc-mipsel-linux-gnu binutils-mipsel-linux-gnu`:
+      the flags, `crt0_mips.S`, the linker script and the 17-program sweep.
+      *Where:* `examples/compile_tool/census.py`, `examples/sim/sweep.py`.
+
+## MIPS
+
+- [ ] **A branch delay slot must hold a nop.** The engine squashes the word
+      after a taken branch, so MIPS is compiled `-fno-delayed-branch` and
+      `verify` refuses any other slot (`Target.delay_slot_nop`). The
+      description already marks every branch and jump `"delay_slot"`.
+      *Where:* `examples/compile_tool/target.py` (`MIPS32`), `verify.py`.
+      *Closes when:* the engine reads the feature (CLAUDE.md §4, MIPS32
+      BRING-UP, phase B: the tag booked at the slot, the ROB rolled back by
+      two, the branch's issue held until its slot dispatched) and the flag
+      and the check go.
+- [ ] **add / addi / sub do not trap on overflow.** They compute what
+      addu / addiu / subu compute; GCC never emits the trapping forms for C.
+      *Closes when:* the §1.5 trap policy exists.
+- [ ] **lwl / lwr / swl / swr are not described.** GCC emits them for
+      unaligned struct copies and `memcpy` expansions; a program that needs
+      one fails the build by name. Cross-reference: the Load / store item on
+      spanning accesses.
+      *Closes when:* the LS unit reads a spanning access, or the four
+      instructions get their own read-modify-write µops.
+- [ ] **A branch holds one physical register in EVERY destination class.**
+      Decode forces every dest slot active on a branch so the squash has a
+      pointer to roll back to — a pointer `declare_mis_pred` never uses
+      (`dest_renames` is empty). With `hi` and `lo` that is two spare
+      registers per in-flight branch; `hilo_phy_size` is sized to the ROB
+      depth to hide it.
+      *Where:* `carolyne/uarch/o3/decode.py` (`_operand_group`), `rsv_helper.py`.
+      *Closes when:* the per-tag PRF snapshot lands, or the branch books
+      only the classes its own dests name.
 
 ## The store pushed in a squash cycle — CLOSED 2026-09-17
 

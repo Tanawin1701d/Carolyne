@@ -156,8 +156,13 @@ bypass network) is ISA-blind.
 
 ### 4.3 Control flow
 PC, branch prediction, and redirect are engine-owned. The ISA influences them
-only via `br` fields, `ilen` (for sequential-PC computation) and the reset
-vector (where fetch starts after reset).
+only via `br` fields, `ilen` (for sequential-PC computation), the reset
+vector (where fetch starts after reset), and a **delay slot** stated on the
+µop: a template carrying the feature `"delay_slot"` says the instruction
+after it executes whether or not the branch is taken, so the engine retires
+that instruction before it redirects and never squashes it. Until the engine
+reads the feature, an ISA's toolchain holds every slot to a nop and the build
+refuses anything else (MIPS32 today).
 
 ### 4.4 Commit
 ROB retires at **instruction** granularity using `bound`: a multi-µop
@@ -166,18 +171,18 @@ which also gives precise traps for free on RISC-V.
 
 ---
 
-## 5. RV32I vs mini-x86 — the contract exercised
+## 5. RV32I vs MIPS32 vs mini-x86 — the contract exercised
 
-| contract concept   | RV32I                          | mini-x86 (scoped subset)                 |
-| ------------------ | ------------------------------ | ---------------------------------------- |
-| register classes   | X(32×32, x0 const)             | GPR(8×32), FLAGS(1×6)                    |
-| `ilen`             | constant 4                     | opcode+ModR/M window                     |
-| reset vector       | 0 (spec leaves it open)        | `0xFFFFFFF0` (fixed by the ISA)          |
-| cracking           | 1 µop nearly always            | 1–4 µops (mem operands via µtemps)       |
-| branches           | BR-COND(cmp-kind, rs1, rs2)    | BR-COND(flag-test, flags-src)            |
-| flags              | — (class absent)               | 2nd dest + old-flags 3rd src             |
-| second dest        | JAL link (or cracked)          | flags write                              |
-| traps              | ecall/ebreak/illegal           | int3/ud2/div-zero                        |
+| contract concept   | RV32I                          | MIPS32 (r2, user integer)                | mini-x86 (scoped subset)                 |
+| ------------------ | ------------------------------ | ---------------------------------------- | ---------------------------------------- |
+| register classes   | X(32×32, x0 const)             | R(32×32, r0 const), HI(1×32), LO(1×32)   | GPR(8×32), FLAGS(1×6)                    |
+| `ilen`             | constant 4                     | constant 4                               | opcode+ModR/M window                     |
+| reset vector       | 0 (spec leaves it open)        | `0xBFC00000` (fixed by the ISA)          | `0xFFFFFFF0` (fixed by the ISA)          |
+| cracking           | 1 µop nearly always            | 1 µop always                             | 1–4 µops (mem operands via µtemps)       |
+| branches           | BR-COND(cmp-kind, rs1, rs2)    | BR-COND(rs, rt, npc + off) + delay slot  | BR-COND(flag-test, flags-src)            |
+| flags              | — (class absent)               | — (class absent)                         | 2nd dest + old-flags 3rd src             |
+| second dest        | JAL link (or cracked)          | MULT/DIV → HI and LO                     | flags write                              |
+| traps              | ecall/ebreak/illegal           | none (overflow forms non-trapping)       | int3/ud2/div-zero                        |
 
 Mini-x86 v0.1 scope (freeze early, resist growth): 32-bit flat memory model
 only, ~20 integer instructions (mov/add/sub/and/or/xor/cmp/test/inc/dec/

@@ -55,19 +55,23 @@ contract bug — fix the contract, not the engine.
 | `docs/design/uop_contract.md` | normative ISA↔µarch boundary spec                     |
 | `docs/open_items.md`          | every known gap: what, where, what closes it          |
 | `docs/codestyle.md`           | vendored copy of the codestyle skill (the skill wins) |
-| `carolyne/isa/`               | description types + the ISA-facing apis + per-ISA pkgs |
+| `carolyne/isa/`               | description types + the ISA-facing apis + per-ISA pkgs (`riscv/`, `mips/`); `exec_unit_util.py` holds the body helpers both packages share |
+| `carolyne/isa/mips/`          | the MIPS32r2 description (63 µops, r/hi/lo classes, `Mips32`), same file set as `riscv/` |
 | `carolyne/uarch/`             | generic OoO engine, Kathryn code lives here           |
 | `carolyne/util/`              | helpers BOTH planes reach — no kathryn, no isa/uarch  |
 | `carolyne/debug/sim/`         | debug probes: `kathryn.DebugProbe` subclasses for pipeline status, Karray tables, memory ports and a declared branch resolution |
 | `carolyne/debug/log/`         | turning a run into something readable: the slot table, the console, cycle events, the O3 row |
 | `examples/sim/`               | the universal simulator: run a BUILT SimSystem (kathryn sim + report only); was `examples/sim/rv_sim/` until 2026-09-18 |
-| `examples/o3/rv32im/system.py`| builds the O3 RV32IM SimSystem: config, images, emitted Verilog, its cocotb test and run spec |
+| `examples/o3/core/system.py`  | `build_o3_system(config_for_sizes, target, test_module, ...)`: the ONE recipe every family runs — config, images, emitted Verilog, the run spec; `run_spec.py` and `cocotb_run.py` beside it |
+| `examples/o3/rv32im/system.py`| the RV32IM family: a few-line binding of the core recipe to `gen_o3_rv32im_config_for_sizes`; `cocotb_test.py` likewise (was the whole recipe until 2026-09-21) |
+| `examples/o3/mips32/`         | the MIPS32 family: `config.py` (`gen_o3_mips32_config`, r/hi/lo `phy_specs`), the same thin `system.py` / `cocotb_test.py` |
+| `examples/sim/sweep.py`       | every test program through the sim for one target, one subprocess each, a table at the end |
 | `carolyne/debugger/o3/`       | SUPERSEDED 2026-09-14 — deleted; see §4 THE OBSERVE / VIEW DELETION |
 | `carolyne/view/o3/`           | SUPERSEDED 2026-09-14 — deleted; see §4 THE OBSERVE / VIEW DELETION |
 | `examples/o3/core/build.py`   | `O3Machine(config)`: memories + ports + CoreO3, for ANY CPUO3_Config |
 | `examples/o3/rv32im/config.py`| the RV32IM description + config (`rv32im_isa` / `rv32im_stations` / `rv32im_config`) |
 | `examples/o3_riscv32/`        | SUPERSEDED 2026-09-15 — moved to `examples/o3/`; its `sim/` was deleted 2026-09-14 |
-| `examples/compile_tool/`      | C to memory images for any target (rv32i, rv32im, mips32); was `examples/o3_riscv32/compile_tool/` until 2026-09-15 |
+| `examples/compile_tool/`      | C to memory images for any target (rv32im, mips32); was `examples/o3_riscv32/compile_tool/` until 2026-09-15; `census.py` surveys what a compiler emits |
 | `examples/regfile_demo.py`    | smallest end-to-end Kathryn flow (CPU-flavored)       |
 | `generated/`                  | emitted Verilog (gitignored)                          |
 | `tests/test_by_ai/`           | pytest, every test case built in an AI session (all of them, 2026-09-21 — Tanawin's split); `tests/` itself keeps the support files (`dbg_toy_model.py`, `sim/`) and is for hand-written tests |
@@ -3304,6 +3308,156 @@ Agreed next steps: give `UopSeq` the cracker-sequence duties it still lacks
 `IsaBase` (ilen, trap policy); alternatively first Kathryn RAT/PRF
 elaboration from a `RegFile` in `uarch`.
 
+**MIPS32 BRING-UP** (2026-09-21, Tanawin: "implement mips 32 isa ... like
+rv32im that i have without csr or privilege ... test the same program that
+RV32I's test") — the second ISA on the one engine. `carolyne/isa/mips/`
+mirrors `riscv/` file for file: **`Mips32`**, 63 µops, three register
+classes, four units under the SAME names the station builders look up
+(`alu` / `mem` / `control` / `muldiv`), and the O3 machine builds from
+`examples/o3/mips32/config.py` unchanged. Four decisions, all Tanawin's picks:
+
+Decision: **delay slots, phase A — every slot is a nop.** MIPS executes the
+instruction after a branch whether or not it is taken, and the engine cannot:
+the branch books the speculation tag itself and everything younger carries
+it, so the slot would be squashed with the wrong path. Rather than open the
+tag/rename/rollback code on the first bring-up, MIPS is compiled
+`-fno-delayed-branch` (every slot a `nop` = `sll $0,$0,0`, word 0), the
+description marks every branch and jump with the feature **`"delay_slot"`**
+(unread today; `Uop.specified_feature` is free-form on purpose), and the
+compile tool REFUSES a program whose slot holds anything else —
+**`Target.delay_slot_nop`** (None on rv32im, 0 on mips32) is what `verify`
+checks, a third `Problem` kind beside no-match and ambiguous. Under that
+rule a taken branch squashes the nop and redirects, a not-taken branch
+retires it, and the Br body's compare is the RISC-V one: actual npc against
+the record's npc, which on MIPS is the delay slot's address. The link value
+is pc + 8, a branch adds its offset to npc, j/jal keep npc's top four bits.
+**Phase B** (its own task): decode marks a lane `is_delay_slot` off the
+previous instruction's feature; TagGen books on that lane while the branch
+CARRIES the tag its slot will book (`_tag_after(bookings < k)`), so the slot
+survives every squash by construction and the RT snapshot already holds
+its rename; `Rob.on_mis_pred` rolls back by 1 + has_delay_slot; the branch
+station holds a delay-slot branch's ISSUE until `rob.entry_allocated
+(rob_des_idx + 1)`, so the tag it carries is booked before it resolves.
+Then the flag and the check go. Recorded in `docs/open_items.md`.
+
+Decision: **HI and LO are two one-register renamed classes** (`hi`, `lo`,
+`RegFile(name, 32, 1)`), not one 64-bit accumulator. MULT/MULTU/DIV/DIVU
+write both as a µop's TWO destinations (the second-dest path x86 FLAGS will
+use), MFHI/MFLO read one through an index-omitted operand (`Operand(core,
+ARCH)`, the one-register rule, which no description had exercised), MTHI/MTLO
+write one. Rejected: `acc` 64 wide — madd would fit, but a class wider than
+the machine word buys nothing here and the manual says two registers.
+COST: **`madd/maddu/msub/msubu` are out** (rs, rt, hi, lo = four sources
+against the record's three), so GCC is told `-mno-imadd`; `teq` is out with
+`-mno-check-zero-division`. FOUND ON THE WAY, the one engine bug a
+one-register class hit: `Dispatch.warm_rts` passed a Python `0` as the
+implicit index, which reached `Rt.write_entry`'s `zif(dyn_idx == arch_idx)`
+as a bool — now `val(1, 0)`, the `rob._arch_index` pattern
+(`tests/test_by_ai/test_one_register_class.py` builds a throwaway two-class
+ISA through the whole machine and pins the line). SIZING, and it is an engine
+fact a second dest class exposed: decode forces EVERY dest slot active on a
+branch (`decode.py`, the squash's rollback anchor — unused while
+`declare_mis_pred` passes `dest_renames` empty), so each in-flight branch
+holds one `hi` and one `lo` physical register until it retires; `hilo_phy_size`
+defaults to 32, the ROB depth, so the accumulator files never stall
+dispatch. `-msoft-float` is an ARCH flag, not a C flag: crt0 is assembled
+with the arch flags alone, and a `.MIPS.abiflags` FP-mode mismatch is a link
+warning, fatal under `--fatal-warnings`.
+
+Decision: **the full MIPS32r2 user integer set**, 63 µops, the way rv32im
+carries all of RV32I: arith/logic/shifts/slt (add/addi/sub NON-TRAPPING —
+LIMIT, no trap policy), lui, movz/movn (the old rd is a THIRD source),
+seb/seh, ext/ins (both positions ride ONE immediate — `imm_bitfield` places
+the sa field at bit 0 and the rd field at bit 8, since two immediates would
+put ins at four sources), clz/clo (a 32-step mux chain), rotr/rotrv, the
+eight branches and four jumps, eight loads/stores, mult/multu/div/divu/mul/
+mfhi/mflo/mthi/mtlo. Out: lwl/lwr/swl/swr, likely branches, traps,
+syscall/break, sync, ll/sc, cache/pref, CP0, FPU, the madd family — `verify`
+reports a word of any of them. The slot table is the description's own
+statement: one SLOT reads several FIELDS (a shift's value is rt, an add's is
+rs; the count is sa or rs), each (core, field) pair its own `Operand`, and a
+body reads the slot by core. `srl`/`srlv` MUST state the `funct|rs` /
+`funct|sa` union or they claim the rotates (`test_mips_decode_templates`
+pins it). `uop_idx` runs are grouped by unit (alu 0–33, mem 34–41, control
+42–53, muldiv 54–62), so `uop_idx_ranges` is one compare each. The ISA fixes
+the reset vector: `RESET_PC = 0xBFC00000` in `mips/field_match.py`, and the
+compile tool's `MIPS_RESET_PC` constant is gone with it.
+
+Decision: **the sim glue is shared under `examples/o3/core/`**, keyed by a
+CALLABLE and never an import-path string (the 2026-09-18 rule):
+`build_o3_system(config_for_sizes, target, test_module, test_case, ...)`,
+`run_spec.py` (moved, `target` a parameter) and `cocotb_run.py`
+(`run_o3_program(dut, build_config)`); a family is `config.py` plus a
+few-line `system.py` and a `cocotb_test.py` whose `@cocotb.test()` calls the
+shared body with its own builder. The sim CLI's `SYSTEMS` gained the
+`mips32` row and nothing else changed. Also lifted: **`isa/exec_unit_util.py`**
+— `uop_hit` / `drive_by_uop` and the little-endian sub-word helpers
+(`sub_word_bit_offsets`, `merge_byte/half`, `extract_byte/half`,
+`sext_byte/half`) both packages' bodies use; `SIGN` moved beside `X_LEN` in
+each `reg.py`. The LS BODY is duplicated per package on purpose: it names
+the package's µops and cores in five places, and the paper's effort metric
+counts a package's own lines.
+
+MEASURED, without a MIPS compiler on this machine: the description passes
+every container check; the whole 2-lane MIPS machine elaborates with its
+probes (`test_o3_mips32_config.py`, four stations, `dbg_reg_arch` = r/hi/lo)
+and its emitted Verilog compiles under `iverilog -g2012`; the RV32IM
+`hello.c` still matches its host build through the shared glue at the same
+242 cycles; and a HAND-ASSEMBLED MIPS program (`tests/sim/run_mips_smoke.py`,
+run by the slow `test_mips32_smoke.py`: lui/ori/addiu, three console stores,
+mult/mflo, a data-memory round trip, one taken and one not-taken branch with
+nop slots, the exit door) runs under Verilator to its exit door in 27 cycles
+with the exact console `Hi\n4242*` — the FIRST program this ISA ever ran,
+fetched from 0xBFC00000.
+
+WITH THE COMPILER (`gcc-mipsel-linux-gnu` 10.3, installed the same day):
+the first link FAILED — "linking abicalls files with non-abicalls files",
+fatal under `--fatal-warnings` — because crt0 is assembled with the arch
+flags alone and `-mno-abicalls` was a C flag, so crt0 came out PIC; it is an
+ARCH flag now, beside `-msoft-float`, for the same reason. The census
+(`python -m examples.compile_tool.census --target mips32 --opt=-O0 --opt=-O2`
+— `--opt=-O0`, since argparse reads a bare `-O0` as a flag; it histograms what
+GCC emits and fails on a mnemonic outside the scope, a non-nop slot, or a
+libgcc symbol) then passed on all 34 builds: every word decodes into exactly
+one µop, 1,164 nops and not one branch with anything else in its slot, no
+libgcc member linked. What the programs actually use, most to least: move,
+nop, sw, addiu, lw, li, jal, lui, addu, b, sll, bnez, jr, beqz, andi, beq,
+bne, slti, slt, ori, srav, mul (37 — the muldiv station), sb, subu, lbu,
+seb (19 — the r2 sign-extend the full set was chosen for), bgez, lb, blez,
+negu, sra, and, bltz, lh, sh, bgtz, j, movz; no mult/mfhi/div at all, as
+predicted from the sources. `hello.c` compiled by GCC then ran on the MIPS
+machine and MATCHED its host build in 264 cycles (RV32IM: 242) — the first
+compiled program on the second ISA. A first census heuristic that grepped
+`gcc -S` output for `.set noreorder` said NO while every slot was a nop:
+GCC writes the nops itself under `-fno-delayed-branch`, so the check on the
+final objects is the real one and the heuristic went.
+THE SWEEP (`python -m examples.sim.sweep --target mips32 --opt=-O0 --opt=-O2
+--dmem 16384`, one Verilator build, 34 subprocess runs): **34 of 34 match
+their host builds on the first run** — no CPU bug surfaced, which is the
+engine-adapts-itself claim in one number. Cycles at -O2, with the RV32IM
+figure of 2026-09-21 beside each: riscv_temp 34 (34), hello 264 (244), ldst
+50 (51), rec 45 (45), m4 44 (44), fwd 50 (49), subword 58 (61), sort_3
+6,112 (6,215), stencil 4,565 (4,896), fib 3,391 (3,151), hanoi 9,854
+(11,052), acker 24,950 (20,414), combinat 52,098 (53,806), stirling 33,501
+(31,861), cprime 167,850 (170,399), tarai 247,744 (222,545), komachi
+1,709,313 (1,744,670) — the same engine, within a few percent either way,
+every taken branch paying its nop slot and every jal its mispredict. At -O0
+the same seventeen match too (komachi 6,960,317 cycles, acker 104,543).
+And the RV32IM sweep, rerun through the shared glue and the lifted helpers,
+matched 17 of 17 with every cycle count IDENTICAL to the table above — the
+refactor changed nothing on the first ISA.
+
+**REGISTER-CLASS INSTANCES ARE NAMED FOR THE CLASS** (2026-09-26, Tanawin:
+"the name is not meaningful") — the shared instances a description's operand
+rules target, and their builders, now say which class they hold: riscv
+`X_FILE` / `build_x_file()` (the instance used to be called `RegFile`, which
+shadowed the type it is an instance of, and the builder `x_file()`); mips
+`GPR_FILE` / `HI_FILE` / `LO_FILE` with `build_gpr_file()` /
+`build_hi_file()` / `build_lo_file()` (were `R` / `HI` / `LO` and
+`r_file()` …); and `IMM_TARGET` in both packages (was `ImmTarget`, which
+read as a type). Constants in SCREAMING_SNAKE, builders verb-first (codestyle
+rule 9). Older entries above keep the old spellings as the record of the day.
+
 ## 5. Environment & workflow
 
 - Venv at `.venv/` (Python 3.13). `kathryn` is an **editable install from
@@ -3313,8 +3467,9 @@ elaboration from a `RegFile` in `uarch`.
   refuses — `env -u CONDA_PREFIX VIRTUAL_ENV=$PWD/.venv .venv/bin/maturin
   develop`); Python-side DSL changes are picked up automatically.
 - `pip install -e ".[dev]"` for carolyne + pytest. Run tests:
-  `.venv/bin/pytest tests -q` (the cases are under `tests/test_by_ai/`; skip the
-  slow simulator run with `--ignore=tests/test_by_ai/test_sim_e2e.py`). Run the demo:
+  `.venv/bin/pytest tests -q -m "not slow"` (the cases are under
+  `tests/test_by_ai/`; the `slow` marker is every test that builds a simulator:
+  `test_sim_e2e.py`, `test_mips32_smoke.py`). Run the demo:
   `.venv/bin/python examples/regfile_demo.py`.
 - User's IDE is **PyCharm** (interpreter pointed at `.venv/bin/python`).
   RustRover leftovers were removed; `.idea/` stays gitignored.
