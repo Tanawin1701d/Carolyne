@@ -3,7 +3,8 @@
 C programs a generated machine is checked against: each is compiled twice —
 by the cross toolchain for the machine, and natively as the ORACLE — and the
 run passes only when the machine's console matches the host's, byte for byte
-(`python -m examples.sim.rv_sim run <program>.c`).
+(`python -m examples.sim run <program>.c --target rv32im|mips32`; the whole
+set at once: `python -m examples.sim.sweep --target mips32`).
 
 ## From RIDECORE — with our thanks
 

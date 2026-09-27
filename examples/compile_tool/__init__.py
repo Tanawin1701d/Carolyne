@@ -92,7 +92,7 @@ def build_program(sources    : Sequence[str],
     elf    = read_elf32(build.elf_path)
     _reject_wrong_machine(elf, target)
     _reject_wrong_entry(elf, layout)
-    report = (verify_program(elf, target.isa()) if target.can_verify
+    report = (verify_program(elf, target.isa(), target.delay_slot_nop) if target.can_verify
               else VerifyReport.not_verified(target.name))
     if verify:
         report.raise_if_bad()      # gates the REFUSAL only — the report is built either way

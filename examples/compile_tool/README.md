@@ -28,14 +28,18 @@ CLI is `python -m ...` from the repo root rather than a console script.
 
 ## Targets
 
-| target   | toolchain                | flags                       | verify                                  |
-| -------- | ------------------------ | --------------------------- | --------------------------------------- |
-| `rv32im` | `riscv64-unknown-elf-`   | `-march=rv32im -mabi=ilp32` | against `carolyne.isa.riscv.Rv32im`, which carries the M extension |
-| `mips32` | `mipsel-linux-gnu-`      | `-march=mips32r2 -mabi=32`  | not verified: no `carolyne/isa/mips` yet |
+| target   | toolchain                | flags                                    | verify                                  |
+| -------- | ------------------------ | ---------------------------------------- | --------------------------------------- |
+| `rv32im` | `riscv64-unknown-elf-`   | `-march=rv32im -mabi=ilp32`              | against `carolyne.isa.riscv.Rv32im`, which carries the M extension |
+| `mips32` | `mipsel-linux-gnu-`      | `-march=mips32r2 -mabi=32 -msoft-float -mno-abicalls` | against `carolyne.isa.mips.Mips32`; every branch delay slot must hold `nop` (`-fno-delayed-branch`) |
 
 MIPS32 carries multiply and divide in its base ISA, so there is no `mips32im`
 to name. The MIPS build is little-endian (`mipsel`), which is what the ELF
-reader, the image writer and the core's load/store unit assume.
+reader, the image writer and the core's load/store unit assume. The engine
+does not execute a branch delay slot yet, so MIPS is compiled
+`-fno-delayed-branch` and the build refuses a slot that holds anything but
+`nop`; `-mno-imadd` and `-mno-check-zero-division` keep `madd` and `teq`
+out, which the description has not got.
 `CAROLYNE_RISCV_PREFIX` / `CAROLYNE_MIPS_PREFIX` override the tool prefix.
 
 ## What a program gets
@@ -96,8 +100,9 @@ are.
 - **`.rodata` goes to the data memory.** The two memories are separate
   hardware and a load reads the data one, so a string literal placed beside
   the code would read back as an instruction word.
-- **The code starts at the ISA's `reset_pc`** — `0x00000000` for `Rv32i()`,
-  anything else with `Rv32i(reset_pc=...)` — because that is where fetch
+- **The code starts at the ISA's `reset_pc`** — `0x00000000` for `Rv32im()`,
+  `0xBFC00000` for `Mips32()` (the architecture fixes it), anything else with
+  `Rv32im(reset_pc=...)` — because that is where fetch
   starts after reset. No code base is written in this tool, and the build
   refuses an ELF whose entry is anywhere else.
 - **The data region has its own base** (`0x10000000`). The hardware
@@ -106,8 +111,10 @@ are.
 - **Verification holds every word to the description**: an instruction the
   ISA cannot decode fails the build by name, instead of handing the core a
   word it decodes into nothing.
-- **Everything is compiled `-mstrict-align`**, because a misaligned access is
-  silently wrong in the load/store unit (`docs/open_items.md`).
+- **RISC-V is compiled `-mstrict-align`**, because a misaligned access is
+  silently wrong in the load/store unit (`docs/open_items.md`); MIPS has no
+  such flag, and its unaligned forms (`lwl`/`lwr`/`swl`/`swr`) are not
+  described, so a program that needs one fails the build by name.
 
 ## Running the images
 

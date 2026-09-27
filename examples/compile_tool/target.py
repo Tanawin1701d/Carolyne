@@ -9,9 +9,10 @@
 #            description carries the M extension, so a no-M variant would buy
 #            only a slower multiply through libgcc
 #   mips32   MIPS32r2, little-endian (mipsel). Multiply and divide are in the
-#            MIPS32 base ISA, so there is no "im" variant to name.
-#            LIMIT: no carolyne/isa/mips description yet, so a MIPS build is
-#            laid out and linked but not verified.
+#            MIPS32 base ISA, so there is no "im" variant to name. Every
+#            branch delay slot must hold a nop (-fno-delayed-branch): the
+#            engine does not execute the slot yet, and verify refuses a
+#            program whose slot holds anything else.
 
 from __future__ import annotations
 
@@ -20,13 +21,13 @@ from dataclasses import dataclass, replace
 from typing import Callable, Optional, Tuple
 
 from carolyne.isa import IsaBase
+from carolyne.isa.mips import Mips32
+from carolyne.isa.mips.field_match import RESET_PC as MIPS_RESET_PC
 from carolyne.isa.riscv import Rv32im
 from carolyne.isa.riscv.field_match import RESET_PC as RV32_RESET_PC
 
 from .elf32 import EM_MIPS, EM_RISCV
 from .layout import DEFAULT_DMEM_BYTES, DEFAULT_IMEM_BYTES, DMEM_BASE, MachineMem
-
-MIPS_RESET_PC = 0xBFC00000        # the architectural reset vector; a MIPS IsaBase will own it
 
 
 @dataclass(frozen=True)
@@ -45,6 +46,7 @@ class Target:
     elf_machine    : int                       # the e_machine a linked ELF must carry
     reset_pc       : int                       # where the code starts when no machine config decides
     isa            : Optional[Callable[[], IsaBase]]         # the description verify holds a program to, or None
+    delay_slot_nop : Optional[int]             # the word every branch delay slot must hold, or None: the machine executes the slot
 
     def tool(self, what: str) -> str:
         return f"{os.environ.get(self.prefix_env, self.tool_prefix)}{what}"
@@ -85,21 +87,30 @@ RV32IM = Target(
     elf_machine    = EM_RISCV,
     reset_pc       = RV32_RESET_PC,
     isa            = Rv32im,
+    delay_slot_nop = None,
 )
 
 MIPS32 = Target(
     name           = "mips32",
     tool_prefix    = "mipsel-linux-gnu-",
     prefix_env     = "CAROLYNE_MIPS_PREFIX",
-    arch_flags     = ("-march=mips32r2", "-mabi=32"),
-    cflags         = ("-mno-abicalls", "-fno-pic", "-G0"),   # bare metal: no GOT, no gp-relative small data
+    # -msoft-float and -mno-abicalls are ARCH flags: crt0 is assembled with
+    # these alone, and an object whose FP mode or PIC marking differs from
+    # the others is a link warning, fatal under --fatal-warnings
+    arch_flags     = ("-march=mips32r2", "-mabi=32", "-msoft-float", "-mno-abicalls"),
+    cflags         = ("-fno-pic", "-G0",                   # bare metal: no GOT, no gp-relative small data
+                      "-mno-imadd",                         # madd/msub need four sources: not described
+                      "-mno-check-zero-division",           # no teq: traps are not described
+                      "-fno-delayed-branch",                # every delay slot a nop: the engine squashes it
+                      "-mno-branch-likely"),
     crt0           = "crt0_mips.S",
     output_arch    = "mips",
     gp_symbol      = "_gp = . + 0x7ff0;",
     discard        = (".MIPS.abiflags", ".MIPS.options", ".reginfo", ".mdebug.*", ".pdr", ".gnu.attributes"),
     elf_machine    = EM_MIPS,
     reset_pc       = MIPS_RESET_PC,
-    isa            = None,
+    isa            = Mips32,
+    delay_slot_nop = 0x00000000,           # sll $0,$0,0
 )
 
 TARGETS = {target.name: target for target in (RV32IM, MIPS32)}
