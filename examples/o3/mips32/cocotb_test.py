@@ -1,4 +1,4 @@
-# The RV32IM cocotb entry: the shared simulation body (examples/o3/core/
+# The MIPS32 cocotb entry: the shared simulation body (examples/o3/core/
 # cocotb_run.py) over this family's own config builder. cocotb imports this
 # module inside the simulator, where the repo is not on sys.path.
 
@@ -14,10 +14,10 @@ if str(REPO) not in sys.path:
     sys.path.insert(0, str(REPO))
 
 from examples.o3.core.cocotb_run import run_o3_program        # noqa: E402
-from examples.o3.rv32im.config   import gen_o3_rv32im_config  # noqa: E402
+from examples.o3.mips32.config   import gen_o3_mips32_config  # noqa: E402
 
 
 @cocotb.test()
 async def run_program(dut):
-    """Run the program on the RV32IM machine until it stops."""
-    await run_o3_program(dut, gen_o3_rv32im_config)
+    """Run the program on the MIPS32 machine until it stops."""
+    await run_o3_program(dut, gen_o3_mips32_config)

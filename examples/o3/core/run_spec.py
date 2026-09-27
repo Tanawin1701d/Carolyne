@@ -1,13 +1,12 @@
-# THE RUN SPEC — this package's OWN handoff to its own cocotb test, one JSON
+# THE RUN SPEC — an O3 family's OWN handoff to its own cocotb test, one JSON
 # file beside the emitted Verilog. The sim forwards the environment variable
-# naming it and never reads it: the schema is rv32im's to change.
+# naming it and never reads it: the schema is the machine side's to change.
 #
 # The handoff has to be EXPLICIT: the cocotb test runs in another process and a
 # CPUO3_Config is not serialisable, so the spec carries the KNOBS the config
-# builder was called with. The test calls this package's own
-# gen_o3_rv32im_config with them, so both processes build one machine and
-# neither re-derives a width. The images travel as hex FILES for the same
-# reason.
+# builder was called with. The test calls the family's own builder with
+# them, so both processes build one machine and neither re-derives a width.
+# The images travel as hex FILES for the same reason.
 #
 # Word INDICES, not byte addresses: the I/O doors are what the store port
 # reports, and that port names a word.
@@ -35,7 +34,7 @@ class RunSpec:
 
     name           : str
     target         : str              # which toolchain built the images; provenance, not a machine
-    config_kwargs  : Dict[str, int]   # what gen_o3_rv32im_config was called with, final widths and all
+    config_kwargs  : Dict[str, int]   # what the family's config builder was called with, final widths and all
     instr_hex      : List[str]           # one path per instruction bank, in bank order
     data_hex       : str
     doors          : Dict[str, int]      # putchar / putint / exit, as WORD indices
@@ -82,6 +81,7 @@ def build_run_spec(config,
                    program,
                    run_dir      : str,
                    name         : str,
+                   target       : str,
                    log_enabled  : bool,
                    log_window   : int,
                    log_chunk    : int,
@@ -92,13 +92,13 @@ def build_run_spec(config,
     """What the cocotb test needs, taken off the built program.
 
     - `knobs` are the RECIPE for the machine, not its numbers: the test calls
-      gen_o3_rv32im_config with them and re-derives no width of its own
+      the family's config builder with them and re-derives no width of its own
     """
     layout = program.layout
     images = os.path.join(run_dir, "program")
     return RunSpec(
         name           = name,
-        target         = "rv32im",
+        target         = target,
         config_kwargs  = knobs,
         instr_hex      = [os.path.join(images, f"{bank.name}.hex") for bank in program.image.instr_banks],
         data_hex       = os.path.join(images, f"{program.image.data_bank.name}.hex"),
