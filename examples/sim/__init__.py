@@ -1,5 +1,5 @@
 # The universal simulator: run a BUILT system — machine, program and cocotb
-# test all made beforehand (examples/o3/rv32im/system.py builds the O3 one) —
+# test all made beforehand (examples/o3/core/system.py builds the O3 ones) —
 # and manage the report. Nothing here is machine model.
 #
 #   system.py    the contract a machine family builds a SimSystem to

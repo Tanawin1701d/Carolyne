@@ -15,13 +15,14 @@ import sys
 
 from examples.compile_tool.cli import parse_size
 from examples.compile_tool.layout import DEFAULT_DMEM_BYTES, DEFAULT_IMEM_BYTES
+from examples.o3.mips32.system import build_system as build_mips32
 from examples.o3.rv32im.system import build_system as build_rv32im
 from examples.sim.options import SimOptions
 from examples.sim.oracle import compare_console, read_expected_text
 from examples.sim.report import EXIT_HARNESS, describe, exit_code_for
 from examples.sim.runner import SIM_ROOT, run_system
 
-SYSTEMS = {"rv32im": build_rv32im}
+SYSTEMS = {"rv32im": build_rv32im, "mips32": build_mips32}
 
 
 def build_parser() -> argparse.ArgumentParser:
