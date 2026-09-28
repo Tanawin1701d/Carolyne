@@ -93,6 +93,18 @@ class ExecUnitApi:
         raise NotImplementedError(
             f"{type(self).__name__}.declare_suc_pred: the generator supplies this")
 
+    def declare_br_outcome(self, taken, target):
+        """How this branch really went: `taken` (1 bit) and the `target` it
+        goes to when taken. The engine hands both to the branch predictor with
+        the µop's pc and the record the predictor gave it at fetch.
+
+        - separate from declare_mis_pred: the predictor learns from EVERY
+          branch, a squash happens only on a wrong one
+        - respects the enclosing Kathryn scope, like wb_reg
+        """
+        raise NotImplementedError(
+            f"{type(self).__name__}.declare_br_outcome: the generator supplies this")
+
     def zync_with_next_stage(self, src, cond=None, with_lsq=False):
         """The handshake with the next stage's arbiter — the mirror of the
         station-issue zync, used as a WITH block:

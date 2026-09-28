@@ -16,6 +16,7 @@ from carolyne.isa.riscv import Rv32im
 from carolyne.uarch.o3.config import CPUO3_Config, RsvSpec, RsvType
 from carolyne.uarch.o3.rob_helper import (build_rob_table, rob_dest_operands,
                                    rob_entry_shape, rob_operand_fields)
+from carolyne.uarch.o3.bp import FallThroughSpec
 
 ISA = Rv32im()
 X   = ISA.reg_file("x")
@@ -32,7 +33,8 @@ def _cfg(**overrides):
     kwargs = dict(isa=ISA, fe_lanes=2, commit_lanes=2, phy_specs=((X, 64),),
                   rsv_specs=STATIONS,
                   rob_depth=32, sptag_len=4, st_buf_depth=4,
-                  instr_mem_idx_width=8, data_mem_idx_width=8)
+                  instr_mem_idx_width=8, data_mem_idx_width=8,
+                  bp=FallThroughSpec())
     kwargs.update(overrides)
     return CPUO3_Config(**kwargs)
 
@@ -121,7 +123,8 @@ def test_a_one_register_class_has_no_architectural_index_to_store():
                         phy_specs=((flags, 4),),
                         rsv_specs=(RsvSpec(True, 4, (unit,), RsvType.RSV_EXEC),), rob_depth=8,
                         sptag_len=4, st_buf_depth=4,
-                        instr_mem_idx_width=8, data_mem_idx_width=8)
+                        instr_mem_idx_width=8, data_mem_idx_width=8,
+                        bp=FallThroughSpec())
 
     fields = rob_operand_fields(cfg, core)
     assert sorted(fields) == ["active_flags_out", "pr_idx_flags_out",

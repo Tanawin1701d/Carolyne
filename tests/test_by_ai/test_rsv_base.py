@@ -13,6 +13,7 @@ from carolyne.isa.riscv import Rv32im
 from carolyne.uarch.o3.config import CPUO3_Config, RsvSpec, RsvType
 from carolyne.uarch.o3.dispatch_helper import build_dispatch
 from carolyne.uarch.o3.rsv import RsvBase, RsvBypass
+from carolyne.uarch.o3.bp import FallThroughSpec
 
 ISA  = Rv32im()
 X    = ISA.reg_file("x")
@@ -32,7 +33,8 @@ def _cfg():
                         phy_specs=((X, 64),),
                         rsv_specs=STATIONS,
                         rob_depth=32, sptag_len=4, st_buf_depth=4,
-                        instr_mem_idx_width=8, data_mem_idx_width=8)
+                        instr_mem_idx_width=8, data_mem_idx_width=8,
+                        bp=FallThroughSpec())
 
 
 class OldestFirst(RsvBase):

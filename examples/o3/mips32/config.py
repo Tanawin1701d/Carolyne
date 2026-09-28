@@ -11,6 +11,7 @@ from __future__ import annotations
 from typing import Dict, Tuple
 
 from carolyne.isa.mips import Mips32
+from carolyne.uarch.o3.bp import FallThroughSpec
 from carolyne.uarch.o3.config import CPUO3_Config, RsvSpec, RsvType
 
 from examples.compile_tool.layout import DEFAULT_DMEM_BYTES, DEFAULT_IMEM_BYTES
@@ -77,7 +78,9 @@ def gen_o3_mips32_config(fe_lanes            : int = 2,
                         sptag_len           = sptag_len,
                         st_buf_depth        = st_buf_depth,
                         instr_mem_idx_width = instr_mem_idx_width,
-                        data_mem_idx_width  = data_mem_idx_width)
+                        data_mem_idx_width  = data_mem_idx_width,
+                        bp                  = FallThroughSpec())   # not a knob: config_kwargs
+                                                                   # crosses to the sim as JSON
 
 
 def gen_o3_mips32_config_for_sizes(imem_bytes : int = DEFAULT_IMEM_BYTES,

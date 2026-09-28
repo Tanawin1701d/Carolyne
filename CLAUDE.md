@@ -58,6 +58,7 @@ contract bug — fix the contract, not the engine.
 | `carolyne/isa/`               | description types + the ISA-facing apis + per-ISA pkgs (`riscv/`, `mips/`); `exec_unit_util.py` holds the body helpers both packages share |
 | `carolyne/isa/mips/`          | the MIPS32r2 description (63 µops, r/hi/lo classes, `Mips32`), same file set as `riscv/` |
 | `carolyne/uarch/`             | generic OoO engine, Kathryn code lives here           |
+| `carolyne/uarch/o3/bp/`       | the branch predictor contract (`BpSpec` / `BpBase`), the per-branch record helper, and `FallThroughSpec` |
 | `carolyne/util/`              | helpers BOTH planes reach — no kathryn, no isa/uarch  |
 | `carolyne/debug/sim/`         | debug probes: `kathryn.DebugProbe` subclasses for pipeline status, Karray tables, memory ports and a declared branch resolution |
 | `carolyne/debug/log/`         | turning a run into something readable: the slot table, the console, cycle events, the O3 row |
@@ -3475,6 +3476,55 @@ DIRECTORY now, not computed from the package location (it no longer knows
 where a repo root is). LICENSE: Kathryn2's Apache-2.0 plus a
 no-military-use rider (Tanawin's pick; the RIDECORE programs keep their own
 license). Edit the tool in its own repo, then bump the submodule here.
+
+**THE BRANCH PREDICTOR IS A CONFIG PART** (2026-09-28, Tanawin: "I want
+carolyne/uarch/o3 support the branch predictor … configurable, have standard
+for future upgrade … fall through first … a data structure that need to send
+via pipeline like bhr … *_helper.py and branch rsv ready to gather it") —
+`carolyne/uarch/o3/bp/`. `CPUO3_Config.bp` is a **`BpSpec`** (frozen data,
+Kathryn-free, like `RsvSpec`): `meta_fields(config)` states the per-branch
+record and `build(config)` makes the **`BpBase`** module `CoreO3` holds as
+`core.bp`. Three decisions, all Tanawin's picks:
+
+Decision: **the prediction is made in FETCH, per lane.** `BpBase.predict(
+lane_pcs)` returns one `BpPrediction(taken, npc, meta)` per lane, built outside
+the fetch pip so it is ready when the word is. The fetch row gained **`npc`**
+and decode COPIES it where it computed `pc + ilen_bytes`. When
+`may_predict_taken` is True, fetch also ends the group at the first kept lane
+predicted taken (`keep_until_taken`) and sends the pc to that lane's npc
+through a mux chain; a never-taken predictor builds neither. MEASURED on the
+2-lane RV32IM machine: Decode's 90 `pc + 4` adders (one per template per lane)
+went to zero, Fetch stays at 6; every other module is structurally identical
+to before (digit-normalized, sorted diff), the same for MIPS32, and both emit
+and pass `iverilog -g2012`.
+
+Decision: **`bp` is REQUIRED, no default** — every construction site names
+`FallThroughSpec()`. The example builders pass it INSIDE and take no `bp`
+knob, because their kwargs travel to the simulator process as JSON
+(`config_kwargs`) and a spec is not serialisable; a predictor that becomes a
+knob needs a serialisation story first.
+
+Decision: **the update path is plumbed now**, no-op on the base.
+`api.declare_br_outcome(taken, target)` joined the isa `ExecUnitApi`; both
+`BrExecUnit` bodies call it, and the O3 complex hands `bp.on_resolve(
+BpOutcome(pc, taken, target, meta))` the record it reads back off the branch
+station entry. `CoreO3.on_mis_pred` calls `bp.on_mis_pred()`. `on_commit` is
+declared with a TODO: the ROB carries no bp record, and whether a predictor
+learns at exec or at commit is the first real predictor's decision.
+
+THE RECORD (`bp_helper.py`): every name starts **`bp_`**, so a predictor can
+never take an engine field's name; it is added with `kaf()` to the fetch row,
+the decode row, the dispatch bus and **only `RSV_BRANCH` station entries**
+(`rsv_station_fields`). Fetch writes it, decode copies it by name, and the
+dispatch and station k2k copies carry it with no code of their own — `rsv.py`
+and `dispatch.py` did not change. Fetch refuses a prediction whose meta keys
+differ from the spec. `FallThroughSpec` has an empty record, so no record
+changed shape but fetch's. LIMIT: `declare_br_outcome` reads pc and the record
+off the stage-0 entry; a multi-stage branch unit would need them in
+`next_stage_fields`. Pinned by `tests/test_by_ai/test_bp.py`, whose test-only
+`ProbeBp` predicts taken and keeps a 4-bit history, so the group cut, the
+redirect mux, the transport and the resolve hook all elaborate (and emit and
+compile) today.
 
 ## 5. Environment & workflow
 

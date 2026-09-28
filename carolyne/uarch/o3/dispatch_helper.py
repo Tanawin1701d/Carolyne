@@ -18,6 +18,8 @@
 #   is_store
 #   pc           where the instruction is, and where the next one is
 #   npc
+#   bp_*         the predictor's per-branch record (bp/bp_helper.py), added
+#                last; a branch station keeps it
 #
 # WHICH KINDS an operand group carries follows from the operand's ROLE and its
 # TARGET:
@@ -43,6 +45,7 @@ from typing import Optional
 from kathryn import *
 
 from carolyne.isa import AtomicOperand
+from carolyne.uarch.o3.bp.bp_helper import bp_entry_fields
 from carolyne.uarch.o3.config import CPUO3_Config
 from carolyne.uarch.o3.operand_field import (ACTIVE, AR_IDX, DATA, PR_IDX,
                                              VALID, WB_REQUIRED,
@@ -133,6 +136,7 @@ def dispatch_entry_shape(config: CPUO3_Config) -> tuple:
     for atm_operand in named_atomic_operands(config.isa, where):
         fields.update(operand_fields(config, atm_operand,
                                      dispatch_operand_kinds(atm_operand), where))
+    fields.update(bp_entry_fields(config))       # decode's k2k copy fills them
     return DispatchEntryBase, fields
 
 

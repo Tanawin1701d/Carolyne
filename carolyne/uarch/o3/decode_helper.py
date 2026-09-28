@@ -5,13 +5,17 @@
 # The fixed half is what every decoded µop carries, whatever it is:
 #
 #   valid        the lane holds a µop at all
-#   pc / npc     where it came from, and where the next instruction is
+#   pc / npc     where it came from, and where the predictor says the next
+#                instruction is
 #   uop_idx      WHICH µop of the ISA's vocabulary it is: the id the whole core
 #                uses after decode, since no raw ISA bits are carried past it
 #                (uop_contract.md §2)
 #   is_branch    dispatch books a speculation tag against it
 #   is_store     with is_branch, the commit barrier the ROB groups on
 #   rsv_id       which station it is for; routing is decode's to supply
+#
+# The predictor's bp_* record (bp/bp_helper.py) is added last, copied from
+# the fetch row.
 #
 # The part that varies with the ISA is one field group per atomic operand,
 # core-wide: decode happens before a µop is routed anywhere, so the record must
@@ -44,6 +48,7 @@
 from kathryn import *
 
 from carolyne.isa import AtomicOperand, IsaBase
+from carolyne.uarch.o3.bp.bp_helper import bp_entry_fields
 from carolyne.uarch.o3.config import CPUO3_Config
 from carolyne.uarch.o3.operand_field import (ACTIVE, AR_IDX, DATA, WB_REQUIRED,
                                              VALID, field_name,
@@ -126,6 +131,7 @@ def decode_entry_shape(config: CPUO3_Config) -> tuple:
 
     for atm_operand in decode_atm_operands(config.isa):
         fields.update(decode_operand_fields(config, atm_operand))
+    fields.update(bp_entry_fields(config))       # copied from fetch, passed on to dispatch
     return DecodeEntryBase, fields
 
 

@@ -29,6 +29,9 @@
 # hardware is built to, so a cycle cannot retire more than the ROB holds, which
 # is checked here.
 #
+# `bp` names the branch predictor (uarch/o3/bp/). It is required like every
+# other knob: a machine with no predictor says FallThroughSpec().
+#
 # `sptag_len` is stated in BITS, the one knob holding a width where every other
 # holds a count and derives its log2: a tag is a value records carry and
 # compare, not an index into a structure.
@@ -45,6 +48,7 @@ from typing import NamedTuple, Tuple
 from ...isa import ExecUnit, IsaBase, RegFile, Uop
 from ...util import is_power_of_two
 from ..common import ceil_log2
+from .bp.bp_spec import BpSpec
 from .common_field import IS_BRANCH, NPC, PC
 
 
@@ -257,7 +261,7 @@ class CPUO3_Config:
     instr_mem_idx_width : int                # index bits of ONE instruction memory
                                              # bank: the words that bank holds
     data_mem_idx_width  : int                # the same, for the data memory's bank
-
+    bp                  : BpSpec             # the branch predictor fetch asks
 
     def __post_init__(self) -> None:
         if not isinstance(self.isa, IsaBase):
@@ -291,6 +295,10 @@ class CPUO3_Config:
             raise ValueError(
                 f"CPUO3_Config: st_buf_depth must be a power of two >= 2, "
                 f"got {self.st_buf_depth}")
+        if not isinstance(self.bp, BpSpec):
+            raise TypeError(
+                f"CPUO3_Config: bp must be a BpSpec (FallThroughSpec() for none), "
+                f"got {type(self.bp).__name__}")
         object.__setattr__(self, "phy_specs", tuple(self.phy_specs))
         object.__setattr__(self, "rsv_specs", tuple(self.rsv_specs))
         self._check_phy_specs()

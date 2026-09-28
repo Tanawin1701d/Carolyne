@@ -52,6 +52,9 @@ class ExecUnitApiO3(ExecUnitApi):
     def declare_suc_pred(self, dyn_cond=None):
         self.exu.declare_suc_pred(self.src, dyn_cond)
 
+    def declare_br_outcome(self, taken, target):
+        self.exu.declare_br_outcome(self.src, taken, target)
+
     @contextmanager
     def zync_with_next_stage(self, src, cond=None, with_lsq=False):
         """The handshake into the next stage, held in a `with` block.

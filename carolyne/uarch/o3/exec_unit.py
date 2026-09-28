@@ -16,6 +16,8 @@ from kathryn import *
 from carolyne.debug.sim import BranchResolveProbe, KarrayProbe, PipStatusProbe
 from kathryn.signal import to_ref
 
+from carolyne.uarch.o3.bp.bp_base import BpOutcome
+from carolyne.uarch.o3.bp.bp_helper import bp_field_names
 from carolyne.uarch.o3.common_field import (IS_SPEC, NPC, PC, ROB_DES_IDX, SPEC_TAG,
                                             SpecLane)
 from carolyne.uarch.o3.config import CPUO3_Config, RsvSpec, rsv_type_fields
@@ -229,6 +231,27 @@ class ExecUnitO3(Module):
         with zif(dyn_cond):
             self._core.on_suc_pred(to_ref(getattr(src[0], SPEC_TAG)),
                                    to_ref(getattr(src[0], ROB_DES_IDX)))
+
+    def declare_br_outcome(self, src, taken, target):
+        """A branch resolved: the predictor learns (pc, taken, target) with the
+        bp record the branch station carried.
+
+        - built in the caller's scope, so it fires on the stage's grant
+        - LIMIT: pc and the record are read off `src`, which only stage 0
+          (a branch station's entry) carries; a later stage's record would
+          need them in next_stage_fields
+        """
+        missing = [name for name in (PC, *bp_field_names(self.config))
+                   if not hasattr(src[0], name)]
+        if missing:
+            raise ValueError(
+                f"ExecUnitO3 '{self.label}'.declare_br_outcome: the stage record "
+                f"has no {', '.join(missing)} — declare the outcome where the "
+                f"branch station's entry is (stage 0 of an RSV_BRANCH station)")
+        meta = {name: to_ref(getattr(src[0], name))
+                for name in bp_field_names(self.config)}
+        self._core.bp.on_resolve(BpOutcome(to_ref(getattr(src[0], PC)),
+                                           to_ref(taken), to_ref(target), meta))
 
     def declare_fin(self, src, stage_idx: int):
         """A µop finished: report it against the `rob_des_idx` in `src`."""

@@ -23,6 +23,7 @@ from carolyne.debug.sim import KarrayProbe, PipStatusProbe
 from kathryn.signal import to_ref
 
 from carolyne.isa import IsaBase, Mop, Uop, UopSeq
+from carolyne.uarch.o3.bp.bp_helper import bp_field_names
 from carolyne.uarch.o3.config import CPUO3_Config
 from carolyne.uarch.common import (extract_arch_index, extract_imm_value,
                                    match_field_bits)
@@ -101,6 +102,7 @@ class Decode(Module):
         # would keep the previous instruction's claim.
         self.atm_operands = decode_atm_operands(self.config.isa)
         self.levels       = group_uops_by_level(self.config.isa)
+        self.bp_fields    = bp_field_names(self.config)   # copied as fetch wrote them
 
         self.decode      = build_decode_table(self.config, "decode")
         self.decode_meta = PipCon()
@@ -174,8 +176,8 @@ class Decode(Module):
 
         - runs inside the caller's match guard (the zif that picked this µop)
         - one `|=` for the whole row: no two writes at equal priority
-        - valid=1, pc and npc are written too; the no-hit half is
-          write_lane_default's valid=0, one rung below
+        - valid=1, pc, npc and the bp record are written too; the no-hit
+          half is write_lane_default's valid=0, one rung below
         - unfilled operand slots are written ZERO — the rows are REGs, and
           silence would keep the previous instruction's claim
         """
@@ -202,11 +204,13 @@ class Decode(Module):
         # previous instruction's claim.
         row = {VALID    : 1,
                PC       : pc,
-               NPC      : pc + self.config.isa.ilen_bytes,
+               NPC      : to_ref(fetch_entry.npc),     # the predictor's, from fetch
                UOP_IDX  : uop.uop_idx,
                IS_BRANCH: int(uop.has_feature(IS_BRANCH)),
                IS_STORE : int(uop.has_feature(IS_STORE)),
                RSV_ID   : self.rsv_id_for(uop, lane)}
+        row.update({name: to_ref(getattr(fetch_entry, name))
+                    for name in self.bp_fields})
         for atm_opr in self.atm_operands:
             operand = operand_by_atm_opr.get(id(atm_opr))   # None = slot left empty
             group   = self.build_atm_operand_value(word, atm_opr, operand,

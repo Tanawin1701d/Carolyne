@@ -9,7 +9,8 @@
 #                        station and one exec complex per unit the station
 #                        feeds (the spec's own issue_o3 picks RsvO3/RsvIOR,
 #                        its POSITION is the rsv_id a dispatch lane names)
-#   _build_front_end()   Fetch -> Decode -> Dispatch, and backend_meta
+#   _build_front_end()   the branch predictor (config.bp), Fetch -> Decode ->
+#                        Dispatch, and backend_meta
 #   _wire_stages()       every connect slot, filled HERE and nowhere else
 #
 # The PipCon map of the machine: Fetch/Decode/Dispatch own their stage arbs
@@ -83,6 +84,7 @@ class CoreO3(Module):
         granted transfer runs against; no pip masters it (`no_pip_master`),
         so dispatch's zync is granted the moment it wins arbitration —
         acceptance is `ready_to_go`'s AND, already bound on the zync."""
+        self.bp           = self.config.bp.build(self.config)
         self.fetch        = Fetch(self.config, self.instr_read_ports)
         self.decode       = Decode(self.config)
         self.dispatch     = Dispatch(self.config)
@@ -104,7 +106,7 @@ class CoreO3(Module):
     def _wire_stages(self):
         """Every stage's connect() called here and nowhere else, so the
         core's topology reads as one table."""
-        self.fetch   .connect(self.decode)
+        self.fetch   .connect(self.decode, self.bp)
         self.decode  .connect(self.fetch, self.dispatch)
         self.dispatch.connect(self.decode      , self.backend_meta,
                               self.reg_arch_mng, self.tag_gen     ,
@@ -163,6 +165,7 @@ class CoreO3(Module):
         self.fetch   .on_mis_pred(redirect_pc)
         self.decode  .on_mis_pred()
         self.dispatch.on_mis_pred()
+        self.bp      .on_mis_pred()
 
         # every entry and in-flight µop under a killed tag goes away — a
         # buffered speculative store with it

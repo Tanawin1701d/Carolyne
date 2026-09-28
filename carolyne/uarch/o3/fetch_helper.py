@@ -8,41 +8,48 @@
 #
 #   valid  this lane's bank answered, and every lower lane's did too
 #   pc     where this instruction is, sized from the ISA's pc_width
+#   npc    where the branch predictor says the next instruction is
 #   instr  the encoded word, ilen_bytes * 8 wide
+#   bp_*   the predictor's per-branch record (bp/bp_helper.py), added
 #
 # `valid` is PER LANE, which the stage's `pip` grant cannot be: a grant says
 # the stage moved, not that one bank of several failed to answer.
 #
-# pc and instr are sized at instantiation and neither has a default — a 32 that
+# pc, npc and instr are sized at instantiation and neither has a default — a 32 that
 # happens to be right for RV32I is a silent wrong answer for a 64-bit ISA, the
 # same rule `IsaBase.pc_width` makes.
 
 from kathryn import *
 
+from carolyne.uarch.o3.bp.bp_helper import bp_entry_fields
 from carolyne.uarch.o3.config import CPUO3_Config
-from carolyne.uarch.o3.common_field import INSTR, PC
+from carolyne.uarch.o3.common_field import INSTR, NPC, PC
 
 
 class FetchEntryBase(Karray):
 
-    #  THE WHOLE RECORD — build_fetch_table() adds NOTHING:
+    #  The declared record; build_fetch_table() adds only the predictor's
+    #  bp_* fields:
     #
-    #      valid  pc  instr
+    #      valid  pc  npc  instr  bp_*
     #
     #  Fetch runs before decode, so no field here varies with the ISA's
-    #  operands; the builder only SIZES pc and instr. Unsized kaf() = every
+    #  operands; the builder SIZES pc, npc and instr. Unsized kaf() = every
     #  instantiation must state a width, which keeps a 64-bit ISA from
     #  silently inheriting RV32I's 32.
     valid = kaf(1)
     pc    = kaf()
+    npc   = kaf()
     instr = kaf()
 
 
 def fetch_entry_shape(config: CPUO3_Config) -> tuple:
     """The entry class fetch uses, and the widths of every field it holds.
     Shared with any wire row of the same shape, so the two cannot disagree."""
-    return FetchEntryBase, {PC: config.pc_width,
-                     INSTR: config.instr_width}   # ilen_bytes * 8; valid is 1
+    return FetchEntryBase, {PC   : config.pc_width,
+                            NPC  : config.pc_width,
+                            INSTR: config.instr_width,   # ilen_bytes * 8; valid is 1
+                            **bp_entry_fields(config)}
 
 
 def build_fetch_table(config: CPUO3_Config, name: str = "fetch"):

@@ -16,6 +16,7 @@ from carolyne.uarch.o3.reg_arch_mng import RegArchMng
 from carolyne.uarch.o3.rob import Rob
 from carolyne.uarch.o3.rob_helper import build_rob_dispatch
 from carolyne.uarch.o3.store_buf import StoreBuf
+from carolyne.uarch.o3.bp import FallThroughSpec
 
 ISA = Rv32im()
 X   = ISA.reg_file("x")
@@ -40,7 +41,8 @@ def _cfg(**overrides):
     kwargs = dict(isa=ISA, fe_lanes=2, commit_lanes=2, phy_specs=((X, 64),),
                   rsv_specs=STATIONS,
                   rob_depth=8, sptag_len=4, st_buf_depth=4,
-                  instr_mem_idx_width=8, data_mem_idx_width=8)
+                  instr_mem_idx_width=8, data_mem_idx_width=8,
+                  bp=FallThroughSpec())
     kwargs.update(overrides)
     return CPUO3_Config(**kwargs)
 
@@ -160,6 +162,7 @@ def test_a_rename_table_elaborates_when_the_widths_differ():
     # walk sptag_len of them — which indexes past the array whenever the two
     # differ, as they do here (2 rename ports, 4 tag bits).
     cfg = _cfg(fe_lanes=2, sptag_len=4, st_buf_depth=4,
-    instr_mem_idx_width=8, data_mem_idx_width=8)
+    instr_mem_idx_width=8, data_mem_idx_width=8,
+    bp=FallThroughSpec())
     assert cfg.fe_lanes != cfg.sptag_len
     _drive(cfg)                                  # elaborating IS the assertion

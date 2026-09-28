@@ -76,6 +76,7 @@ class BrExecUnit(ExecUnitBase):
         with zif(uop_hit(src, U.LINKS)):
             api.wb_reg(AOPR_DEST_1, link)
 
+        api.declare_br_outcome(to_ref(taken), to_ref(target))   # the predictor learns
         api.declare_mis_pred(mis_pred, actual_npc)
         api.declare_suc_pred(suc_pred)
         api.declare_fin(src)

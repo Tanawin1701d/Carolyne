@@ -19,6 +19,7 @@ from carolyne.uarch.o3.dispatch_helper import (DEST_KINDS, SRC_KINDS,
                                                dispatch_operand_kinds)
 from carolyne.uarch.o3.operand_field import named_atomic_operands, operand_fields
 from carolyne.uarch.o3.rsv_helper import rsv_id_width
+from carolyne.uarch.o3.bp import FallThroughSpec
 
 ISA = Rv32im()
 X   = ISA.reg_file("x")
@@ -38,7 +39,8 @@ def _cfg(**overrides):
     kwargs = dict(isa=ISA, fe_lanes=2, commit_lanes=2, phy_specs=((X, 64),),
                   rsv_specs=STATIONS,
                   rob_depth=32, sptag_len=4, st_buf_depth=4,
-                  instr_mem_idx_width=8, data_mem_idx_width=8)
+                  instr_mem_idx_width=8, data_mem_idx_width=8,
+                  bp=FallThroughSpec())
     kwargs.update(overrides)
     return CPUO3_Config(**kwargs)
 
@@ -215,7 +217,8 @@ def test_a_one_register_class_has_no_architectural_index_to_store():
                        phy_specs=((flags, 8),),
                        rsv_specs=(RsvSpec(True, 4, (unit,), RsvType.RSV_EXEC),),
                        rob_depth=8, sptag_len=4, st_buf_depth=4,
-                       instr_mem_idx_width=8, data_mem_idx_width=8)
+                       instr_mem_idx_width=8, data_mem_idx_width=8,
+                       bp=FallThroughSpec())
 
     fields = operand_fields(cfg, core, dispatch_operand_kinds(core), "dispatch")
     assert "ar_idx_flags_out" not in fields

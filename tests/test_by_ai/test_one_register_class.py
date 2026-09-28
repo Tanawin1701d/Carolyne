@@ -19,6 +19,7 @@ from carolyne.isa.exec_unit import ExecUnitBase
 from carolyne.isa.exec_unit_util import drive_by_uop, uop_hit
 from carolyne.uarch.o3.config import CPUO3_Config, RsvSpec, RsvType
 from carolyne.uarch.o3.dispatch import Dispatch
+from carolyne.uarch.o3.bp import FallThroughSpec
 from examples.o3.core.build import build_machine
 
 SRC, DEST = OperandRole.SRC, OperandRole.DEST
@@ -97,7 +98,8 @@ def tiny_config() -> CPUO3_Config:
                         rsv_specs=(RsvSpec(True,  4, (isa.unit("alu"),),     RsvType.RSV_EXEC),
                                    RsvSpec(False, 4, (isa.unit("control"),), RsvType.RSV_BRANCH)),
                         rob_depth=8, sptag_len=3, st_buf_depth=4,
-                        instr_mem_idx_width=6, data_mem_idx_width=6)
+                        instr_mem_idx_width=6, data_mem_idx_width=6,
+                        bp=FallThroughSpec())
 
 
 def test_a_machine_with_a_renamed_one_register_class_elaborates():

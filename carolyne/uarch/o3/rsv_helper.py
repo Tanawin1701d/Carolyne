@@ -22,13 +22,15 @@
 # The PC is NOT in the base: which stations carry one is a question of what
 # KIND of station it is (`RsvSpec.rsv_type`), so `pc`/`npc` arrive as added
 # fields from `rsv_spec.entry_fields()` along with whatever the machine put on
-# top. A load/store station carries neither.
+# top. A load/store station carries neither. A BRANCH station also keeps the
+# predictor's bp_* record, which its unit hands back at resolve.
 
 from kathryn import *
 
 from carolyne.isa import AtomicOperand, IsaBase
 from carolyne.uarch.common import ceil_log2
-from carolyne.uarch.o3.config import CPUO3_Config, RsvSpec
+from carolyne.uarch.o3.bp.bp_helper import bp_field_widths
+from carolyne.uarch.o3.config import CPUO3_Config, RsvSpec, RsvType
 from carolyne.uarch.o3.operand_field import (ACTIVE, DATA, PR_IDX, WB_REQUIRED, VALID,
                                              operand_fields as build_fields,
                                              require_named)
@@ -46,6 +48,7 @@ class RsvEntryBase(Karray):
     #      per dest core         wb_required_<n>   if the write is required
     #                            pr_idx_<n>
     #      per station KIND      pc, npc           (RsvSpec.rsv_type)
+    #      per branch station    bp_*              (the predictor's record)
     #      per machine           whatever RsvSpec.extra_fields lists
     #
     #  <n> is the core's own name, and a group lands in operand_field's
@@ -166,13 +169,22 @@ def rsv_entry_shape(config: CPUO3_Config, rsv_spec: RsvSpec) -> tuple:
     # colliding with anything already in the record is caught here — the spec
     # can only check them against each other, never against an operand's.
     declared = {name for name, _ in entry_cls.__karray_fields__}
-    for name, width in rsv_spec.entry_fields(config.pc_width):
+    for name, width in rsv_station_fields(config, rsv_spec):
         if name in fields or name in declared:
             raise ValueError(
                 f"reservation station '{rsv_spec.label}': entry field '{name}' is "
                 f"already in the record — a name is one set of bits")
         fields[name] = kaf(width)
     return entry_cls, fields
+
+
+def rsv_station_fields(config: CPUO3_Config, rsv_spec: RsvSpec) -> tuple:
+    """The added (name, width) pairs: the kind's, the machine's, and the bp
+    record on a branch station, which is where a branch resolves."""
+    fields = rsv_spec.entry_fields(config.pc_width)
+    if rsv_spec.rsv_type is RsvType.RSV_BRANCH:
+        fields += tuple(bp_field_widths(config).items())
+    return fields
 
 
 def rsv_field_names(config: CPUO3_Config, rsv_spec: RsvSpec) -> tuple:

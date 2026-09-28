@@ -17,6 +17,7 @@ from carolyne.uarch.o3.rsv import RsvBypass
 from carolyne.uarch.o3.dispatch_helper import build_dispatch
 from carolyne.uarch.o3.rsv_helper import rsv_id_width
 from carolyne.uarch.o3.rsv_o3 import RsvO3
+from carolyne.uarch.o3.bp import FallThroughSpec
 
 ISA      = Rv32im()
 X        = ISA.reg_file("x")
@@ -41,7 +42,8 @@ def _cfg(fe_lanes=2):
                         phy_specs=((X, 64),),
                         rsv_specs=(O3_SPEC, IOR_SPEC, BR_SPEC, MD_SPEC),
                         rob_depth=32, sptag_len=4, st_buf_depth=4,
-                        instr_mem_idx_width=8, data_mem_idx_width=8)
+                        instr_mem_idx_width=8, data_mem_idx_width=8,
+                        bp=FallThroughSpec())
 
 
 def _drive(station_cls, spec, rsv_idx=0, fe_lanes=2):

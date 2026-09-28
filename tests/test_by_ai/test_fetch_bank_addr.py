@@ -81,6 +81,8 @@ def _machine(lanes: int):
             self.sink  = PipCon()
             self.sink.no_pip_master()
             self.fetch.decode_meta = self.sink
+            self.bp                = config.bp.build(config)
+            self.fetch.bp          = self.bp
 
     reset()
     host = Host()
@@ -205,6 +207,8 @@ def test_the_pc_resets_to_the_isas_reset_vector_in_the_emitted_verilog(tmp_path)
             self.sink  = PipCon()
             self.sink.no_pip_master()
             self.fetch.decode_meta = self.sink
+            self.bp                = config.bp.build(config)
+            self.fetch.bp          = self.bp
 
     reset()
     set_top(Host())

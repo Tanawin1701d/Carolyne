@@ -6,6 +6,7 @@ import pytest
 from carolyne.isa import ExecUnit, Uop
 from carolyne.isa.riscv import Rv32im, build_x_file
 from carolyne.uarch.o3.config import CPUO3_Config, RsvSpec, RsvType
+from carolyne.uarch.o3.bp import FallThroughSpec
 
 ISA   = Rv32im()
 X     = ISA.reg_file("x")
@@ -23,7 +24,8 @@ def _cfg(**overrides):
     kwargs = dict(isa=ISA, fe_lanes=2, commit_lanes=2, phy_specs=((X, 64),),
                   rsv_specs=STATIONS, rob_depth=32,
                   sptag_len=8, st_buf_depth=4,
-                  instr_mem_idx_width=8, data_mem_idx_width=8)
+                  instr_mem_idx_width=8, data_mem_idx_width=8,
+                  bp=FallThroughSpec())
     kwargs.update(overrides)
     return CPUO3_Config(**kwargs)
 
