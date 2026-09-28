@@ -1,0 +1,3 @@
+[submodule "examples/compile_tool"]
+	path = examples/compile_tool
+	url = https://github.com/Tanawin1701d/compile_tool.git

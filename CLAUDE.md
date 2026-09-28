@@ -71,7 +71,7 @@ contract bug — fix the contract, not the engine.
 | `examples/o3/core/build.py`   | `O3Machine(config)`: memories + ports + CoreO3, for ANY CPUO3_Config |
 | `examples/o3/rv32im/config.py`| the RV32IM description + config (`rv32im_isa` / `rv32im_stations` / `rv32im_config`) |
 | `examples/o3_riscv32/`        | SUPERSEDED 2026-09-15 — moved to `examples/o3/`; its `sim/` was deleted 2026-09-14 |
-| `examples/compile_tool/`      | C to memory images for any target (rv32im, mips32); was `examples/o3_riscv32/compile_tool/` until 2026-09-15; `census.py` surveys what a compiler emits |
+| `examples/compile_tool/`      | SUBMODULE (github.com/Tanawin1701d/compile_tool, since 2026-09-28): C to memory images for any target (rv32im, mips32); was `examples/o3_riscv32/compile_tool/` until 2026-09-15; `census.py` surveys what a compiler emits |
 | `examples/regfile_demo.py`    | smallest end-to-end Kathryn flow (CPU-flavored)       |
 | `generated/`                  | emitted Verilog (gitignored)                          |
 | `tests/test_by_ai/`           | pytest, every test case built in an AI session (all of them, 2026-09-21 — Tanawin's split); `tests/` itself keeps the support files (`dbg_toy_model.py`, `sim/`) and is for hand-written tests |
@@ -3458,6 +3458,24 @@ shadowed the type it is an instance of, and the builder `x_file()`); mips
 read as a type). Constants in SCREAMING_SNAKE, builders verb-first (codestyle
 rule 9). Older entries above keep the old spellings as the record of the day.
 
+**COMPILE_TOOL IS ITS OWN REPO** (2026-09-28, Tanawin: "make the
+examples/compile_tool as a new project … as github submodule") —
+`examples/compile_tool` is now a SUBMODULE of the public
+`github.com/Tanawin1701d/compile_tool` (history kept by `git subtree split`;
+commits from before the 2026-09-15 move are not in it). The path is
+unchanged, so every `examples.compile_tool` import still works. Decision
+(Tanawin's pick): **Carolyne is OPTIONAL there** — `target.py` imports the
+descriptions only when `find_spec("carolyne")` finds the package (installed
+but broken still raises, so verification never switches off in silence), and
+otherwise uses literal reset vectors (the values the descriptions state);
+`verify.py` imports the decoder inside its functions; `layout.py` has its own
+`is_power_of_two`. Without carolyne a build writes images and reports "not
+verified". The output and census paths are relative to the WORKING
+DIRECTORY now, not computed from the package location (it no longer knows
+where a repo root is). LICENSE: Kathryn2's Apache-2.0 plus a
+no-military-use rider (Tanawin's pick; the RIDECORE programs keep their own
+license). Edit the tool in its own repo, then bump the submodule here.
+
 ## 5. Environment & workflow
 
 - Venv at `.venv/` (Python 3.13). `kathryn` is an **editable install from
@@ -3466,6 +3484,7 @@ rule 9). Older entries above keep the old spellings as the record of the day.
   with both `VIRTUAL_ENV` and `CONDA_PREFIX` set in the shell maturin
   refuses — `env -u CONDA_PREFIX VIRTUAL_ENV=$PWD/.venv .venv/bin/maturin
   develop`); Python-side DSL changes are picked up automatically.
+- After a clone: `git submodule update --init` (`examples/compile_tool`).
 - `pip install -e ".[dev]"` for carolyne + pytest. Run tests:
   `.venv/bin/pytest tests -q -m "not slow"` (the cases are under
   `tests/test_by_ai/`; the `slow` marker is every test that builds a simulator:
