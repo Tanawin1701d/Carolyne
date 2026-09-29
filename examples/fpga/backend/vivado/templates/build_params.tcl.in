@@ -1,0 +1,24 @@
+# build_params.tcl — the inputs of build_bitstream.tcl for ONE build, filled by
+# examples/fpga/backend/vivado/backend.py. Every path is absolute.
+
+set project_name      "{PROJECT_NAME}"
+set part              "{PART}"
+set board_part        "{BOARD_PART}"
+set board_connections "{BOARD_CONNECTIONS}"
+set ps_ip             "{PS_IP}"
+
+set rtl_dir           "{RTL_DIR}"
+set wrapper_file      "{WRAPPER_FILE}"
+set wrapper_module    "{WRAPPER_MODULE}"
+
+set clock_mhz         {CLOCK_MHZ}
+set window_bytes      {WINDOW_BYTES}
+set host_base_addr    {HOST_BASE_ADDR}
+set gpio_base_addr    {GPIO_BASE_ADDR}
+set host_bram_cell    "{HOST_BRAM_CELL}"
+set reset_gpio_cell   "{RESET_GPIO_CELL}"
+
+set export_dir        "{EXPORT_DIR}"
+set bit_name          "{BIT_NAME}"
+set jobs              {JOBS}
+set synth_only        {SYNTH_ONLY}

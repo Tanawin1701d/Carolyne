@@ -17,3 +17,6 @@ docs/isa/**/*.pdf
 
 # research notes (thinking in progress, not a deliverable)
 research/
+
+# the board login the FPGA flow uses (examples/fpga/board/board.example.json is the shape)
+examples/fpga/board/board.local.json

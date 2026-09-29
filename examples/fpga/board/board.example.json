@@ -1,0 +1,10 @@
+{
+  "host"          : "192.168.1.149",
+  "port"          : 22,
+  "user"          : "root",
+  "password"      : "<the board's root password, or null to use an ssh key>",
+  "key_path"      : null,
+  "remote_dir"    : "/root/jupyter_notebooks/calolyne_test",
+  "python"        : "python3",
+  "shell_prelude" : "source /etc/profile.d/pynq_venv.sh"
+}
