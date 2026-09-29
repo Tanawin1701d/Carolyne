@@ -1,6 +1,6 @@
 ---
 peer_name    : Kathryn2
-peer_path    : /media/tanawin/tanawin1701e/project8/Kathryn2
+peer_path    : /media/tanawin/tanawin1701e/kathryn_arch/Kathryn2
 peer_guide   : CLAUDE.md
 my_role      : consumer
 peer_role    : foundation
