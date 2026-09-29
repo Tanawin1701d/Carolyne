@@ -32,8 +32,9 @@ def rv32im_stations(isa         : Rv32im,
                    ls_size     : int = 8,
                    br_size     : int = 8,
                    alu_cnt     : int = 2,
-                   muldiv_size : int = 8) -> Tuple[RsvSpec, ...]:
-    """Four stations: compute out of order; memory, branches and mul/div in order.
+                   mul_size    : int = 8,
+                   div_size    : int = 4) -> Tuple[RsvSpec, ...]:
+    """Five stations: compute out of order; memory, branches, mul and div in order.
 
     - the compute station holds `alu_cnt` ALUs, the SAME unit listed twice:
       how many a machine has is the machine's choice, not the ISA's, and each
@@ -47,7 +48,8 @@ def rv32im_stations(isa         : Rv32im,
     return (RsvSpec(True,  exec_size,   units,                 RsvType.RSV_EXEC),
             RsvSpec(False, ls_size,     (isa.unit("mem"),),    RsvType.RSV_LD_ST),
             RsvSpec(False, br_size,     (isa.unit("control"),),RsvType.RSV_BRANCH),
-            RsvSpec(False, muldiv_size, (isa.unit("muldiv"),), RsvType.RSV_EXEC))
+            RsvSpec(False, mul_size,    (isa.unit("mul"),),    RsvType.RSV_EXEC),
+            RsvSpec(False, div_size,    (isa.unit("div"),),    RsvType.RSV_EXEC))
 
 
 def gen_o3_rv32im_config(fe_lanes            : int = 2,
@@ -57,7 +59,8 @@ def gen_o3_rv32im_config(fe_lanes            : int = 2,
                         ls_rsv_size         : int = 8,
                         br_rsv_size         : int = 8,
                         alu_cnt             : int = 2,
-                        muldiv_rsv_size     : int = 8,
+                        mul_rsv_size        : int = 8,
+                        div_rsv_size        : int = 4,
                         rob_depth           : int = 32,
                         sptag_len           : int = 5,
                         st_buf_depth        : int = 32,
@@ -71,7 +74,8 @@ def gen_o3_rv32im_config(fe_lanes            : int = 2,
                         phy_specs           = ((isa.reg_file("x"), phy_size),),
                         rsv_specs           = rv32im_stations(isa, exec_rsv_size,
                                                              ls_rsv_size, br_rsv_size,
-                                                             alu_cnt, muldiv_rsv_size),
+                                                             alu_cnt, mul_rsv_size,
+                                                             div_rsv_size),
                         rob_depth           = rob_depth,
                         sptag_len           = sptag_len,
                         st_buf_depth        = st_buf_depth,

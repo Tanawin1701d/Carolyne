@@ -28,19 +28,21 @@ def mips32_stations(isa         : Mips32,
                     ls_size     : int = 8,
                     br_size     : int = 8,
                     alu_cnt     : int = 2,
-                    muldiv_size : int = 8) -> Tuple[RsvSpec, ...]:
-    """Four stations: compute out of order; memory, branches and mul/div in order.
+                    mul_size    : int = 8,
+                    div_size    : int = 4) -> Tuple[RsvSpec, ...]:
+    """Five stations: compute out of order; memory, branches, mul and div in order.
 
     - the compute station holds `alu_cnt` ALUs, the SAME unit listed twice
     - mem and control are in order, which their units require, and an
       in-order station feeds exactly one unit — so each takes a station
-    - muldiv has its own station: only it carries the hi/lo slots
+    - mul and div have their own stations: only they carry the hi/lo slots
     """
     units = (isa.unit("alu"),) * alu_cnt
     return (RsvSpec(True,  exec_size,   units,                  RsvType.RSV_EXEC),
             RsvSpec(False, ls_size,     (isa.unit("mem"),),     RsvType.RSV_LD_ST),
             RsvSpec(False, br_size,     (isa.unit("control"),), RsvType.RSV_BRANCH),
-            RsvSpec(False, muldiv_size, (isa.unit("muldiv"),),  RsvType.RSV_EXEC))
+            RsvSpec(False, mul_size,    (isa.unit("mul"),),     RsvType.RSV_EXEC),
+            RsvSpec(False, div_size,    (isa.unit("div"),),     RsvType.RSV_EXEC))
 
 
 def gen_o3_mips32_config(fe_lanes            : int = 2,
@@ -51,7 +53,8 @@ def gen_o3_mips32_config(fe_lanes            : int = 2,
                          ls_rsv_size         : int = 8,
                          br_rsv_size         : int = 8,
                          alu_cnt             : int = 2,
-                         muldiv_rsv_size     : int = 8,
+                         mul_rsv_size        : int = 8,
+                         div_rsv_size        : int = 4,
                          rob_depth           : int = 32,
                          sptag_len           : int = 5,
                          st_buf_depth        : int = 32,
@@ -73,7 +76,8 @@ def gen_o3_mips32_config(fe_lanes            : int = 2,
                                                (isa.reg_file("lo"), hilo_phy_size)),
                         rsv_specs           = mips32_stations(isa, exec_rsv_size,
                                                               ls_rsv_size, br_rsv_size,
-                                                              alu_cnt, muldiv_rsv_size),
+                                                              alu_cnt, mul_rsv_size,
+                                                              div_rsv_size),
                         rob_depth           = rob_depth,
                         sptag_len           = sptag_len,
                         st_buf_depth        = st_buf_depth,

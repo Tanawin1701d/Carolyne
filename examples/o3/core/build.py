@@ -11,25 +11,36 @@
 # sits in bank w % fe_lanes at index w / fe_lanes, and fetch drives one index
 # for every lane (uarch/o3/fetch.py). The data memory is one bank with two
 # ports, a load path and a store path.
+#
+# `build_bridge` is the one optional part: a callable that builds whatever
+# reaches the memories from OUTSIDE the machine (examples/fpga's HostBridge),
+# given the two memories and the core's store port. A simulation deposits its
+# images through the testbench and passes none; a board needs one.
 
 from __future__ import annotations
 
+from typing import Callable, Optional
+
 from kathryn import Module, build_model, init, reset
 
+from carolyne.uarch.mem.common.mem_port import MemPortWrite
 from carolyne.uarch.mem.easy_mem import EasyMem
 from carolyne.uarch.o3.config import CPUO3_Config
 from carolyne.uarch.o3.core import CoreO3
+
+BridgeBuilder = Callable[[EasyMem, EasyMem, MemPortWrite], Module]
 
 
 class O3Machine(Module):
     """One out-of-order core with its instruction and data memory."""
 
-    def __init__(self, config: CPUO3_Config):
+    def __init__(self, config: CPUO3_Config, build_bridge: Optional[BridgeBuilder] = None):
         # Plain-Python configuration BEFORE super().__init__(): that call runs
         # com_declare, which builds everything from it.
         if not isinstance(config, CPUO3_Config):
             raise TypeError(f"O3Machine: config must be a CPUO3_Config, got {type(config).__name__}")
-        self.config = config
+        self.config       = config
+        self.build_bridge = build_bridge
         super().__init__()
 
     @init
@@ -49,13 +60,19 @@ class O3Machine(Module):
 
         self.core = CoreO3(self.config, instr_ports, data_read, data_write)
 
+        # The outside agent's way in, when the machine has one: it takes the
+        # memories to write and the store port to watch. Built LAST, inside this
+        # module, since a sibling top-level module cannot be emitted.
+        if self.build_bridge is not None:
+            self.host_bridge = self.build_bridge(self.instr_mem, self.data_mem, data_write)
 
-def build_machine(config: CPUO3_Config) -> O3Machine:
+
+def build_machine(config: CPUO3_Config, build_bridge: Optional[BridgeBuilder] = None) -> O3Machine:
     """The machine, ready for set_top(). Call inside a fresh reset()."""
-    return O3Machine(config)
+    return O3Machine(config, build_bridge)
 
 
-def build_debug_model(config: CPUO3_Config) -> O3Machine:
+def build_debug_model(config: CPUO3_Config, build_bridge: Optional[BridgeBuilder] = None) -> O3Machine:
     """The machine with its debug probes, in a fresh session — ONE recipe, two processes.
 
     - the process that EMITS and the simulator process that reads probes must
@@ -65,4 +82,4 @@ def build_debug_model(config: CPUO3_Config) -> O3Machine:
       so what is shared is this function, not its result
     """
     reset()
-    return build_model(build_machine(config), debug=True)
+    return build_model(build_machine(config, build_bridge), debug=True)

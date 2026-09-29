@@ -1,17 +1,19 @@
-# THE SIMULATION ITSELF — the one cocotb body every O3 family runs: load the
-# images, release the memories and run the machine until the program stops.
-# A family's cocotb_test.py is the `@cocotb.test()` entry that calls
-# `run_o3_program` with its own config builder.
+# THE SIMULATION ITSELF — the one cocotb body every O3 family runs: for every
+# program of the batch, reset the machine, load the images, release the
+# memories and run until the program stops. A family's cocotb_test.py is the
+# `@cocotb.test()` entry that calls `run_o3_program` with its own config builder.
 #
-# It runs in the SIMULATOR's process, so it rebuilds the model: a probe's
+# It runs in the SIMULATOR's process, so it rebuilds the model ONCE: a probe's
 # `convert` is the MODEL probe's own method, and the manifest beside the
 # Verilog names the nets it resolves against. No emit here — the design is
-# already compiled.
+# already compiled — and every program of a batch is on the same machine.
 #
-# The order at reset is what makes a program run at all:
-#   1. deposit both images, word by word (the memories power up undefined)
-#   2. hold mrst for a few edges and release it
-#   3. only THEN release each memory's read lock — it is a synchronous reset,
+# The order per program is what makes it run at all:
+#   1. hold mrst for a few edges (the machine's state comes up clean, whatever
+#      the previous program left)
+#   2. deposit both images, word by word (the memories power up undefined)
+#   3. release mrst
+#   4. only THEN release each memory's read lock — it is a synchronous reset,
 #      so a 1 deposited under mrst would be cleared
 #
 # Two modes. With `--log` every column of the slot table is read each cycle;
@@ -20,7 +22,7 @@
 
 from __future__ import annotations
 
-from typing import Callable
+from typing import Callable, List
 
 import cocotb
 from cocotb.clock import Clock
@@ -37,13 +39,17 @@ from carolyne.debug.log.slot_writer import ChunkedWriter, WindowWriter
 from carolyne.debug.sim             import read_value
 from carolyne.uarch.o3.config       import CPUO3_Config
 from examples.o3.core.build         import build_debug_model
-from examples.o3.core.run_spec      import read_hex_words, read_run_spec
+from examples.o3.core.run_spec      import RunSpec, read_hex_words, read_run_specs
 from examples.sim.result            import RESULT_FILE, RunResult, write_result
 
 CLOCK_NS = 10
 
 
-def deposit_images(k, spec) -> None:
+def start_clock(dut) -> None:
+    cocotb.start_soon(Clock(dut.clk, CLOCK_NS, unit="ns").start())
+
+
+def deposit_images(k, spec: RunSpec) -> None:
     """Both memory images, one word at a time, before the read locks open."""
     for bank_idx, path in enumerate(spec.instr_hex):
         bank = k.instr_mem.banks[bank_idx]
@@ -54,9 +60,8 @@ def deposit_images(k, spec) -> None:
         data[index].value = word
 
 
-async def reset_and_release(dut, k, spec) -> None:
-    """Clock, reset, then the read locks — in that order, and it matters."""
-    cocotb.start_soon(Clock(dut.clk, CLOCK_NS, unit="ns").start())
+async def reset_and_release(dut, k, spec: RunSpec) -> None:
+    """Reset, load, then the read locks — in that order, and it matters."""
     dut.mrst.value = 1
     for _ in range(spec.reset_cycles):
         await RisingEdge(dut.clk)
@@ -71,25 +76,16 @@ async def reset_and_release(dut, k, spec) -> None:
     await Timer(1, unit="ns")
 
 
-def open_trace(spec, table):
+def open_trace(spec: RunSpec, table):
     if spec.log_chunk:
         return ChunkedWriter(spec.path_in("trace"), table, rows_per_file=spec.log_chunk)
     return WindowWriter(spec.path_in("trace.sl"), table, window=spec.log_window)
 
 
-async def run_o3_program(dut, build_config: Callable[..., CPUO3_Config]) -> None:
-    """Run until the exit door, the watchdog or the cycle limit.
-
-    - `build_config(**spec.config_kwargs)` is the family's own builder: the
-      knobs are the FINAL widths, so nothing is derived twice and the two
-      processes cannot disagree about the machine
-    """
-    spec    = read_run_spec()
-    config  = build_config(**spec.config_kwargs)
-    k       = KSim(dut)
-    model   = build_debug_model(config)      # rebuilt HERE: a model cannot cross a process
-    doors   = MmioDoors(**spec.doors)
-    store   = model.data_mem.dbg_write_wires[0].convert(k.data_mem.dbg_write_wires[0])
+async def run_one_program(dut, k, model, config: CPUO3_Config, spec: RunSpec, store) -> RunResult:
+    """One program: reset, load, run until the exit door, the watchdog or the
+    cycle limit; write its console, events and result into its run dir."""
+    doors = MmioDoors(**spec.doors)
 
     logger, sink, handles = None, None, None
     if spec.log_enabled:
@@ -138,8 +134,37 @@ async def run_o3_program(dut, build_config: Callable[..., CPUO3_Config]) -> None
                        files       = {"console": spec.path_in("console.txt"),
                                       "events" : spec.path_in("events.jsonl")})
     write_result(spec.path_in(RESULT_FILE), result)
-    dut._log.info(f"stopped: {reason} after {cycle} cycles, exit {watch.exit_code}")
-    dut._log.info("console: " + repr(console.text))
-    assert reason == "exit", (
-        f"the program did not reach its exit door: stopped on {reason} at cycle {cycle}; "
-        f"console so far {console.text!r}")
+    dut._log.info(f"{spec.name}: stopped {reason} after {cycle} cycles, exit {watch.exit_code}")
+    dut._log.info(f"{spec.name}: console " + repr(console.text))
+    return result
+
+
+async def run_o3_program(dut, build_config: Callable[..., CPUO3_Config]) -> None:
+    """Every program of the batch (or the one spec), on the machine the specs describe.
+
+    - `build_config(**spec.config_kwargs)` is the family's own builder: the
+      knobs are the FINAL widths, so nothing is derived twice and the two
+      processes cannot disagree about the machine
+    - every spec of a batch must name the same knobs: one compiled machine
+    """
+    specs: List[RunSpec] = read_run_specs()
+    for spec in specs[1:]:
+        if spec.config_kwargs != specs[0].config_kwargs:
+            raise RuntimeError(
+                f"batch program '{spec.name}' was laid out for other knobs "
+                f"({spec.config_kwargs}) than '{specs[0].name}' ({specs[0].config_kwargs}) — "
+                f"one compiled machine runs one batch")
+
+    config = build_config(**specs[0].config_kwargs)
+    k      = KSim(dut)
+    model  = build_debug_model(config)      # rebuilt HERE, once: a model cannot cross a process
+    store  = model.data_mem.dbg_write_wires[0].convert(k.data_mem.dbg_write_wires[0])
+
+    start_clock(dut)
+    failed = []
+    for spec in specs:
+        result = await run_one_program(dut, k, model, config, spec, store)
+        if not result.stopped_at_exit:
+            failed.append(f"{spec.name}: stopped on {result.stop_reason} after {result.cycles} "
+                          f"cycles; console so far {result.console!r}")
+    assert not failed, "programs that did not reach their exit door:\n" + "\n".join(failed)

@@ -1,6 +1,7 @@
 # The machine's memory SIZING facts, both directions: bytes to the INDEX
-# WIDTH a memory of that size needs (idx_width_for), and a config to the
-# whole-machine MachineMem the compile tool takes (machine_mem_of).
+# WIDTH a memory of that size needs (idx_width_for), a config to the
+# whole-machine MachineMem the compile tool takes (machine_mem_of), and a
+# config to the HostMap a board reaches the memories through (host_map_of).
 #
 # NOT here: kathryn. A config builder imports this before any hardware exists.
 
@@ -10,7 +11,8 @@ from typing import TYPE_CHECKING
 
 from carolyne.util import is_power_of_two
 
-from examples.compile_tool.layout import DMEM_BASE, MachineMem
+from examples.compile_tool.layout import DMEM_BASE, MachineMem, MemoryLayout
+from examples.fpga.bridge import HostMap
 
 if TYPE_CHECKING:
     from carolyne.uarch.o3.config import CPUO3_Config
@@ -52,3 +54,21 @@ def machine_mem_of(config: CPUO3_Config, dmem_base: int = DMEM_BASE) -> MachineM
                       dmem_base  = dmem_base,
                       dmem_bytes = data.size_bytes,
                       word_bytes = data.data_bus_bytes)
+
+
+def host_map_of(config: CPUO3_Config, console_depth: int) -> HostMap:
+    """The HostBridge window for this machine, DERIVED from the same specs the
+    hardware and the images are sized from.
+
+    - the doors are the layout's MMIO words as data-memory WORD indices — what
+      the store port reports, which is what the bridge compares against
+    """
+    machine_mem = machine_mem_of(config)
+    layout      = MemoryLayout.from_spec(machine_mem)
+    doors       = {name: layout.data_index(addr) for name, addr in layout.mmio_addrs.items()}
+    return HostMap(imem_bytes    = machine_mem.imem_bytes,
+                   imem_banks    = machine_mem.imem_banks,
+                   dmem_bytes    = machine_mem.dmem_bytes,
+                   console_depth = console_depth,
+                   doors         = doors,
+                   word_bytes    = machine_mem.word_bytes)

@@ -70,6 +70,27 @@ def read_run_spec(path: Optional[str] = None) -> RunSpec:
         return RunSpec(**json.load(handle))
 
 
+def read_run_specs() -> List[RunSpec]:
+    """Every program the simulator process is to run, in order.
+
+    - a batch ($CAROLYNE_SIM_BATCH, examples/sim/system.py) names one env per
+      program and each env names that program's spec; without a batch, the one
+      spec $CAROLYNE_RUN_SPEC names
+    """
+    from examples.sim.system import read_sim_batch      # the sim's file format is the sim's
+
+    programs = read_sim_batch()
+    if programs is None:
+        return [read_run_spec()]
+    specs = []
+    for program in programs:
+        spec_path = program["env"].get(SPEC_ENV)
+        if not spec_path:
+            raise RuntimeError(f"batch program '{program['name']}' names no ${SPEC_ENV} in its env")
+        specs.append(read_run_spec(spec_path))
+    return specs
+
+
 def read_hex_words(path: str) -> List[int]:
     """One word per line, the Verilog $readmemh text BankImage.to_hex writes."""
     with open(path, "r", encoding="utf-8") as handle:
