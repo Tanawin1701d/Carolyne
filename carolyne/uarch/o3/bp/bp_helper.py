@@ -23,31 +23,37 @@ if TYPE_CHECKING:
 
 
 def bp_field_widths(config: CPUO3_Config) -> Dict[str, int]:
-    """The predictor's record as {name: width}, checked."""
-    where  = f"branch predictor {config.bp.label}"
-    widths = {}
+    """The predictor's record as {field name: width}, every entry checked."""
+    where          = f"branch predictor {config.bp.label}"
+    width_by_field = {}
     for entry in config.bp.meta_fields(config):
-        if not (isinstance(entry, tuple) and len(entry) == 2):
-            raise TypeError(f"{where}: meta_fields holds (name, width) pairs, got {entry!r}")
-        name, width = entry
-        if not isinstance(name, str) or not name.isidentifier():
-            raise ValueError(f"{where}: field name {name!r} is not an identifier")
-        if not name.startswith(BP_FIELD_PREFIX):
-            raise ValueError(
-                f"{where}: field '{name}' must start with '{BP_FIELD_PREFIX}' — "
-                f"the prefix keeps it apart from the engine's own fields")
-        if isinstance(width, bool) or not isinstance(width, int) or width < 1:
-            raise ValueError(f"{where}: field '{name}' needs an int width >= 1, got {width!r}")
-        if name in widths:
+        name, width = check_bp_field(entry, where)
+        if name in width_by_field:
             raise ValueError(f"{where}: two fields named '{name}'")
-        widths[name] = width
-    return widths
-
+        width_by_field[name] = width
+    return width_by_field
 
 def bp_field_names(config: CPUO3_Config) -> Tuple[str, ...]:
     return tuple(bp_field_widths(config))
 
-
 def bp_entry_fields(config: CPUO3_Config) -> dict:
     """The record as kaf() specs, ready to merge into a record's field dict."""
     return {name: kaf(width) for name, width in bp_field_widths(config).items()}
+
+def check_bp_field(entry, where: str) -> Tuple[str, int]:
+    """One (name, width) pair of a predictor's record, held to what a record field can be.
+
+    - the `bp_` prefix keeps the name apart from the engine's own fields
+    """
+    if not (isinstance(entry, tuple) and len(entry) == 2):
+        raise TypeError(f"{where}: meta_fields holds (name, width) pairs, got {entry!r}")
+    name, width = entry
+    if not isinstance(name, str) or not name.isidentifier():
+        raise ValueError(f"{where}: field name {name!r} is not an identifier")
+    if not name.startswith(BP_FIELD_PREFIX):
+        raise ValueError(
+            f"{where}: field '{name}' must start with '{BP_FIELD_PREFIX}' — "
+            f"the prefix keeps it apart from the engine's own fields")
+    if isinstance(width, bool) or not isinstance(width, int) or width < 1:
+        raise ValueError(f"{where}: field '{name}' needs an int width >= 1, got {width!r}")
+    return name, width
