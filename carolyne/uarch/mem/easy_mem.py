@@ -14,7 +14,7 @@
 # EACH BANK IS DUAL PORT — one read and one write a cycle, each with its own
 # index — so a read and a write never conflict. Two READ ports naming one bank
 # do: the lower-numbered one is served and the other's `valid` reads 0. There
-# is ONE write port, and it reaches every bank, so writes never conflict.
+# is ONE machine write port, and it reaches every bank, so writes never conflict.
 #
 # A port is built WHEN IT IS ASKED FOR — there is no port count. A requestor
 # calls add_read_port / add_write_port at any time and gets back the wires it
@@ -27,13 +27,19 @@
 # 0, so no read is granted until something releases it and a core fetching
 # through it does not start. Writes stay open, which is what lets an outside
 # agent fill the memory first and release the reads afterwards.
+#
+# THE HOST WRITE PORT (add_host_write_port) is that outside agent's: at most
+# one, beside the machine's, honoured ONLY while the read lock is closed. A
+# host write that arrives with the lock open is dropped and `host_write_refused`
+# records it. The machine's write wins the bank when both arrive in one cycle,
+# so a machine write is never lost.
 
 from __future__ import annotations
 
 from typing import Optional, Tuple
 
-from kathryn import (Module, PipCon, flow, init, mem_blk, mem_ele, mux, reg,
-                     val, wire, zif)
+from kathryn import (PipCon, flow, init, mem_blk, mem_ele, mux, reg,
+                     val, wire, zelif, zif)
 
 from carolyne.uarch.common.hw_util import ceil_log2
 from carolyne.uarch.mem.common.addr_meta import AddrMeta
@@ -59,6 +65,7 @@ class EasyMem(MemBase):
 
         self._reads        = []     # per read port: its wires, for the routing
         self._writes       = []     # per write port: the same
+        self._host_write   = None   # the host write port's wires, once asked for
         self._read_release = None   # the condition release_read_on() bound
 
         # One bank means nothing to select, so the address states no bank
@@ -168,6 +175,32 @@ class EasyMem(MemBase):
                 f"port already reaches every bank — and '{name}' would be the "
                 f"second")
 
+    def add_host_write_port(self, name: str = "host") -> MemPortWrite:
+        """The outside agent's write port: fills the memory while the read lock is closed.
+
+        - at most one; not a machine write port, so `write_ports` and the
+          one-machine-writer rule are untouched
+        - `host_write_refused` is declared with it: a write under an open lock
+          is dropped and sets it
+        """
+        if self._host_write is not None:
+            raise ValueError(
+                f"EasyMem: already has a host write port, and '{name}' would be the second")
+        with self.own_scope():
+            parts           = self._gen_port_parts(name)
+            parts["data"]   = wire(self.addr_meta.data_bus_bits, f"{name}_data")
+            parts["enable"] = wire(1, f"{name}_en")
+            parts["meta"].no_pip_master()
+            self.host_write_refused = reg(1, "host_write_refused")
+            self.host_write_refused.reset(0)
+        self._host_write = parts
+        return MemPortWrite(self.addr_meta,
+                            parts["addr"],
+                            parts["meta"],
+                            PortTiming.NEXT_EDGE,
+                            parts["data"],
+                            parts["enable"])
+
     def _gen_port_parts(self, label: str) -> dict:
         # What every port gathers: one address wire per region, and a bare
         # arbiter. WHO masters it is the caller's choice — a write ties the
@@ -188,6 +221,9 @@ class EasyMem(MemBase):
         if self._read_release is not None:
             with zif(self._read_release):
                 self.read_ready |= 1
+        if self._host_write is not None:
+            with zif(self._host_write["enable"] & self.read_ready):
+                self.host_write_refused |= 1
 
         # Every wire has ONE driver — two would resolve by priority, not by
         # statement order — so the loops split by wire: banks, then read ports.
@@ -217,13 +253,32 @@ class EasyMem(MemBase):
 
     def _drive_bank_write(self, bank_id: int) -> None:
         """The bank's write port: the writer's index, and its data when it
-        named this bank."""
-        if not self._writes:
+        named this bank.
+
+        - the machine's write comes first in the chain, so it is never dropped;
+          the host's is taken only while the read lock is closed
+        - ONE write statement chain per bank, which is what lets synthesis
+          still infer a memory
+        """
+        machine = self._writes[0] if self._writes else None      # there is only ever one
+        host    = self._host_write
+        if machine is None and host is None:
             return
-        writer = self._writes[0]                    # there is only ever one
-        self.write_vary_index_4_phy_bank[bank_id] *= writer["index"]
-        with zif(self._match_bank(writer, bank_id) & writer["enable"]):
-            self.bank_write[bank_id] |= writer["data"]
+
+        index = self.write_vary_index_4_phy_bank[bank_id]
+        if machine is not None and host is not None:
+            index *= mux(machine["enable"], machine["index"], host["index"])
+        else:
+            index *= (machine or host)["index"]
+
+        if machine is not None:
+            with zif(self._match_bank(machine, bank_id) & machine["enable"]):
+                self.bank_write[bank_id] |= machine["data"]
+        if host is not None:
+            host_takes = (self._match_bank(host, bank_id) & host["enable"]
+                          & ~self.read_ready)
+            with (zelif if machine is not None else zif)(host_takes):
+                self.bank_write[bank_id] |= host["data"]
 
     def _drive_read_answer(self, port: dict) -> None:
         # The port reads back the bank it named.
