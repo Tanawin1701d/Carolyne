@@ -133,8 +133,9 @@ UOP_DIVU   = Uop("DIVU",   42, srcs=_REG, dests=_RD)
 UOP_REM    = Uop("REM",    43, srcs=_REG, dests=_RD)
 UOP_REMU   = Uop("REMU",   44, srcs=_REG, dests=_RD)
 
-MULDIVS = (UOP_MUL, UOP_MULH, UOP_MULHSU, UOP_MULHU,
-           UOP_DIV, UOP_DIVU, UOP_REM, UOP_REMU)
+MULS    = (UOP_MUL, UOP_MULH, UOP_MULHSU, UOP_MULHU)     # the mul unit's
+DIVS    = (UOP_DIV, UOP_DIVU, UOP_REM, UOP_REMU)         # the div unit's
+MULDIVS = MULS + DIVS
 
 UOPS = (UOP_LUI, UOP_AUIPC, UOP_JAL, UOP_JALR,
         UOP_BEQ, UOP_BNE, UOP_BLT, UOP_BGE, UOP_BLTU, UOP_BGEU,

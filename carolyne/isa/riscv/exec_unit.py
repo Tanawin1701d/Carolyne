@@ -6,14 +6,16 @@
 #                      it reads pc but never redirects)
 #   exec_unit_br.py    BrExecUnit — what AUGMENTS the pc: branches, jal, jalr
 #   exec_unit_ls.py    LSExecUnit — loads and stores, over the LSQ api
-#   exec_unit_muldiv.py MulDivExecUnit — the M extension, one combinational stage
-#   ../exec_unit_util.py  the body helpers every ISA shares (uop_hit / drive_by_uop)
+#   exec_unit_mul.py   MulExecUnit — the M extension's multiplies, two stages
+#   exec_unit_div.py   DivExecUnit — its divides, a six-stage restoring divider
+#   ../exec_unit_util.py  the body helpers every ISA shares (uop_hit / drive_by_uop,
+#                      the divider's state and steps)
 #
 # The unit split is a MACHINE choice, not an ISA one: one unit per kind is
 # the plain default, and this file is where an issue-port / unit-count knob
-# will go. MULDIV is absent: the M extension is not RV32I. The unit NAME
-# STRINGS ("alu", "mem", "control", "system") are stable: every lookup in
-# the tests and configs keys on them; the class is what carries semantics.
+# will go. The unit NAME STRINGS ("alu", "mem", "control", "mul", "div")
+# are stable: every lookup in the tests and configs keys on them; the class
+# is what carries semantics.
 #
 # `exec_units()` is a FUNCTION where the µops are constants, since the unit
 # set is the configuration knob. A unit lists the TEMPLATE INSTANCES uop.py
@@ -30,7 +32,8 @@ from . import uop as U
 from .exec_unit_alu import AluExecUnit
 from .exec_unit_br import BrExecUnit
 from .exec_unit_ls import LSExecUnit
-from .exec_unit_muldiv import MulDivExecUnit
+from .exec_unit_div import STAGE_CNT as DIV_STAGES, DivExecUnit
+from .exec_unit_mul import MulExecUnit
 from .operand import AOPR_DEST_1, AOPR_SRC_1, AOPR_SRC_2, AOPR_SRC_3
 
 
@@ -65,7 +68,13 @@ def exec_units() -> Tuple[ExecUnit, ...]:
                        src_operands=(AOPR_SRC_1, AOPR_SRC_2, AOPR_SRC_3),
                        dest_operands=(AOPR_DEST_1,),
                        needs=("pc", "npc")),
-            # the M extension, combinational; a station of its own (rv_config.py)
-            MulDivExecUnit("muldiv", U.MULDIVS,
-                           src_operands=(AOPR_SRC_1, AOPR_SRC_2),
-                           dest_operands=(AOPR_DEST_1,)))
+            # the M extension, split so a divide's six stages never hold up
+            # a multiply: each unit takes an in-order station of its own
+            MulExecUnit("mul", U.MULS,
+                        src_operands=(AOPR_SRC_1, AOPR_SRC_2),
+                        dest_operands=(AOPR_DEST_1,),
+                        stage_cnt=2),
+            DivExecUnit("div", U.DIVS,
+                        src_operands=(AOPR_SRC_1, AOPR_SRC_2),
+                        dest_operands=(AOPR_DEST_1,),
+                        stage_cnt=DIV_STAGES))

@@ -5,16 +5,17 @@
 #   exec_unit_alu.py    AluExecUnit — every integer template that writes rd/rt
 #   exec_unit_br.py     BrExecUnit — what AUGMENTS the pc: branches and jumps
 #   exec_unit_ls.py     LSExecUnit — loads and stores, over the LSQ api
-#   exec_unit_muldiv.py MulDivExecUnit — the HI/LO accumulator's instructions
+#   exec_unit_mul.py    MulExecUnit — the accumulator's multiplies and moves, two stages
+#   exec_unit_div.py    DivExecUnit — div/divu, a six-stage restoring divider
 #   ../exec_unit_util.py  the body helpers every ISA shares
 #
 # The unit split is a MACHINE choice, not an ISA one. The unit NAME STRINGS
-# ("alu", "mem", "control", "muldiv") are the ones the station builders look
-# up, the same four the RISC-V package uses; the class carries semantics.
+# ("alu", "mem", "control", "mul", "div") are the ones the station builders
+# look up, the same five the RISC-V package uses; the class carries semantics.
 #
 # Each unit declares its PORT SHAPE, which IsaBase holds every µop to, so a
 # field name a body reads is a name the record is guaranteed to have. Only
-# muldiv names the accumulator slots, so only its station carries them.
+# mul and div name the accumulator slots, so only their stations carry them.
 
 from __future__ import annotations
 
@@ -25,7 +26,8 @@ from . import uop as U
 from .exec_unit_alu import AluExecUnit
 from .exec_unit_br import BrExecUnit
 from .exec_unit_ls import LSExecUnit
-from .exec_unit_muldiv import MulDivExecUnit
+from .exec_unit_div import STAGE_CNT as DIV_STAGES, DivExecUnit
+from .exec_unit_mul import MulExecUnit
 from .operand import (AOPR_DEST_1, AOPR_DEST_HI, AOPR_DEST_LO, AOPR_SRC_1, AOPR_SRC_2,
                       AOPR_SRC_3, AOPR_SRC_HI, AOPR_SRC_LO)
 
@@ -57,10 +59,18 @@ def exec_units() -> Tuple[ExecUnit, ...]:
             dest_operands = (AOPR_DEST_1,),
             needs         = ("pc", "npc"),
         ),
-        # the accumulator's own station: its slots are only here
-        MulDivExecUnit(
-            "muldiv" , U.MULDIVS,
+        # the accumulator's instructions, split so a divide's six stages never
+        # hold up a multiply: each unit takes an in-order station of its own
+        MulExecUnit(
+            "mul"    , U.MULS,
             src_operands  = (AOPR_SRC_1, AOPR_SRC_2, AOPR_SRC_HI, AOPR_SRC_LO),
             dest_operands = (AOPR_DEST_1, AOPR_DEST_HI, AOPR_DEST_LO),
+            stage_cnt     = 2,
+        ),
+        DivExecUnit(
+            "div"    , U.DIVS,
+            src_operands  = (AOPR_SRC_1, AOPR_SRC_2),
+            dest_operands = (AOPR_DEST_HI, AOPR_DEST_LO),
+            stage_cnt     = DIV_STAGES,
         ),
     )

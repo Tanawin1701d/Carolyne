@@ -11,7 +11,7 @@
 #   uop.py         — one µop template per instruction (63)
 #   mop.py         — MOP_TABLE, the Mops binding encodings to templates
 #   exec_unit.py   — the unit FACTORY; each unit's semantics is in its own
-#                    module (exec_unit_alu / _br / _ls / _muldiv)
+#                    module (exec_unit_alu / _br / _ls / _mul / _div)
 #   mips32.py      — the IsaBase assembly
 # Not supplied: the trap policy (§6.5), which has no type yet.
 #
@@ -33,21 +33,22 @@ from .exec_unit import exec_units
 from .exec_unit_alu import AluExecUnit
 from .exec_unit_br import BrExecUnit
 from .exec_unit_ls import LSExecUnit
-from .exec_unit_muldiv import MulDivExecUnit
+from .exec_unit_div import DivExecUnit
+from .exec_unit_mul import MulExecUnit
 from .field_match import ILEN_BYTES, PC_ALIGN, PC_WIDTH, RESET_PC
 from .mips32 import Mips32
 from .mop import MOP_TABLE
 from .operand import ATOMIC_OPERANDS, OPR_IMMS, OPR_REGS
 from .reg import (GPR_FILE, HI_FILE, IMM_TARGET, LO_FILE, X_LEN, build_gpr_file,
                   build_hi_file, build_lo_file)
-from .uop import BRANCHES, CONTROL, JUMPS, LINKS, LOADS, MULDIVS, STORES, UOPS
+from .uop import BRANCHES, CONTROL, DIVS, JUMPS, LINKS, LOADS, MULDIVS, MULS, STORES, UOPS
 
 __all__ = [
     "Mips32"         , "MOP_TABLE"    , "exec_units"   ,
-    "AluExecUnit"    , "BrExecUnit"   , "LSExecUnit"   , "MulDivExecUnit",
+    "AluExecUnit"    , "BrExecUnit"   , "LSExecUnit"   , "MulExecUnit"   , "DivExecUnit",
     "PC_WIDTH"       , "PC_ALIGN"     , "ILEN_BYTES"   , "RESET_PC"      ,
     "GPR_FILE"       , "HI_FILE"      , "LO_FILE"      , "IMM_TARGET"    , "X_LEN",
     "build_gpr_file" , "build_hi_file", "build_lo_file",
     "ATOMIC_OPERANDS", "OPR_REGS"     , "OPR_IMMS"     ,
-    "UOPS"           , "LOADS"        , "STORES"       , "BRANCHES"      , "JUMPS", "LINKS", "CONTROL", "MULDIVS",
+    "UOPS"           , "LOADS"        , "STORES"       , "BRANCHES"      , "JUMPS", "LINKS", "CONTROL", "MULDIVS", "MULS", "DIVS",
 ]

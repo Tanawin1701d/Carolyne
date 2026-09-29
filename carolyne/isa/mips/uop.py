@@ -7,8 +7,9 @@
 #
 # Module constants named UOP_<mnemonic>, one per instruction; each template
 # NAMES ITSELF and DECLARES ITS ID (`uop_idx`), 0..62. The ids are grouped by
-# the unit that runs them — alu, mem, control, muldiv — so a unit's ids are
-# one contiguous run and ExecUnitBase.uop_idx_ranges() costs one compare.
+# the unit that runs them — alu, mem, control, then the accumulator's — so a
+# unit's ids are a contiguous run or two and ExecUnitBase.uop_idx_ranges()
+# costs one compare each (mul takes 54-55 and 58-62, div 56-57).
 #
 # A template carries NO MATCHER; the funct/rt rules are on the UopSeqs in
 # mop.py beside the opcode they refine.
@@ -136,7 +137,7 @@ JUMPS    = (UOP_J     , UOP_JAL   , UOP_JR  , UOP_JALR)
 LINKS    = (UOP_BLTZAL, UOP_BGEZAL, UOP_JAL , UOP_JALR)   # write the return address
 CONTROL  = BRANCHES + JUMPS
 
-# --- muldiv, ids 54..62: the HI/LO accumulator ---------------------------------
+# --- mul and div, ids 54..62: the HI/LO accumulator ----------------------------
 UOP_MULT  = Uop("MULT" , 54, srcs=_REG         , dests=_HILO         ,)
 UOP_MULTU = Uop("MULTU", 55, srcs=_REG         , dests=_HILO         ,)
 UOP_DIV   = Uop("DIV"  , 56, srcs=_REG         , dests=_HILO         ,)   # lo = quotient, hi = remainder
@@ -148,6 +149,9 @@ UOP_MTHI  = Uop("MTHI" , 61, srcs=_RS1         , dests=(OPR_HI_DEST,),)
 UOP_MTLO  = Uop("MTLO" , 62, srcs=_RS1         , dests=(OPR_LO_DEST,),)
 
 HILO_WRITERS = (UOP_MULT, UOP_MULTU, UOP_DIV , UOP_DIVU)   # write BOTH halves
+MULS         = (UOP_MULT, UOP_MULTU, UOP_MUL , UOP_MFHI,           # the mul unit's: the
+                UOP_MFLO, UOP_MTHI , UOP_MTLO)                      # accumulator moves ride with it
+DIVS         = (UOP_DIV , UOP_DIVU)                                 # the div unit's
 MULDIVS      = (UOP_MULT, UOP_MULTU, UOP_DIV , UOP_DIVU, UOP_MUL,
                 UOP_MFHI, UOP_MFLO , UOP_MTHI, UOP_MTLO)
 
