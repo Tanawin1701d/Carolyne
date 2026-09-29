@@ -62,11 +62,14 @@ contract bug — fix the contract, not the engine.
 | `carolyne/util/`              | helpers BOTH planes reach — no kathryn, no isa/uarch  |
 | `carolyne/debug/sim/`         | debug probes: `kathryn.DebugProbe` subclasses for pipeline status, Karray tables, memory ports and a declared branch resolution |
 | `carolyne/debug/log/`         | turning a run into something readable: the slot table, the console, cycle events, the O3 row |
-| `examples/sim/`               | the universal simulator: run a BUILT SimSystem (kathryn sim + report only); was `examples/sim/rv_sim/` until 2026-09-18 |
+| `examples/sim/`               | the universal simulator: run a BUILT machine's programs (kathryn sim + report only); since 2026-09-29 a `SimMachine` is emitted and compiled ONCE and a `SimBatch` runs many `SimProgram`s in one simulator process (`run batch`, the sweep); was `examples/sim/rv_sim/` until 2026-09-18 |
 | `examples/o3/core/system.py`  | `build_o3_system(config_for_sizes, target, test_module, ...)`: the ONE recipe every family runs — config, images, emitted Verilog, the run spec; `run_spec.py` and `cocotb_run.py` beside it |
 | `examples/o3/rv32im/system.py`| the RV32IM family: a few-line binding of the core recipe to `gen_o3_rv32im_config_for_sizes`; `cocotb_test.py` likewise (was the whole recipe until 2026-09-21) |
 | `examples/o3/mips32/`         | the MIPS32 family: `config.py` (`gen_o3_mips32_config`, r/hi/lo `phy_specs`), the same thin `system.py` / `cocotb_test.py` |
 | `examples/sim/sweep.py`       | every test program through the sim for one target, one subprocess each, a table at the end |
+| `examples/fpga/`              | the FPGA flow: a BUILT machine to a bitstream (`backend/`, Vivado today), the bitstream to the board (`board/`, ssh + PYNQ), the board's run compared with the sim's (`compare.py`); `system.py` is the contract, `cli.py` the one table naming families (2026-09-28) |
+| `examples/fpga/bridge/`       | the HostBridge: the window a host sees (`bridge_map.py`), the driver protocol written once for cocotb, PYNQ and tests (`bridge_driver.py`), the Kathryn module (`bridge_hardware.py`); the stdlib files are what the board receives |
+| `examples/o3/core/fpga_system.py` | the machine-side FPGA recipe: `build_o3_fpga_machine` (emit WITH the bridge, once per config), `build_o3_fpga_program` (images + `bridge_run_spec.json`, per program); `cocotb_bridge_test.py` beside it is the board-in-simulation test |
 | `carolyne/debugger/o3/`       | SUPERSEDED 2026-09-14 — deleted; see §4 THE OBSERVE / VIEW DELETION |
 | `carolyne/view/o3/`           | SUPERSEDED 2026-09-14 — deleted; see §4 THE OBSERVE / VIEW DELETION |
 | `examples/o3/core/build.py`   | `O3Machine(config)`: memories + ports + CoreO3, for ANY CPUO3_Config |
@@ -3526,6 +3529,272 @@ off the stage-0 entry; a multi-stage branch unit would need them in
 redirect mux, the transport and the resolve hook all elaborate (and emit and
 compile) today.
 
+**THE FPGA FLOW — THE MACHINE ON THE KV260** (2026-09-28, Tanawin: "I want
+fpga folder … support multiple backend (vivado, one_api, other) but right now
+support only vivado … complete flow from o3 core to fpga run on pynq kv260 …
+generality enough to upgrade to other board … code that compare both
+simulation and fpga running result"). `examples/fpga/`, the second flow
+beside `examples/sim/`, and the shape is the same: the machine side builds a
+`FpgaMachine` / `FpgaProgram` (`examples/o3/core/fpga_system.py`), the flow
+takes them and knows no machine. The reference block model was
+`project2/kathrynKv/absoluteRide` (GUI-built, memories in Vivado BRAM, a
+hand-written `resultObs` IP snooping the store port); the backend shape is
+hls4ml's VitisUnified (a name→backend registry, a JSON board table, one
+template filler, `build()` as a tool run with its log, a PYNQ driver).
+
+Decision (Tanawin's pick, console + exit code + EXACT cycles): **the memories
+stay INSIDE the Kathryn design.** Same `EasyMem`, same timing as the sim, so
+the board's cycle count must EQUAL the simulator's — that equality is the
+comparison's strongest check. Rejected: the reference's external BRAM, which
+needed an inverted clock to fake the same-cycle read and would have made the
+counts differ by construction. FOUND ON THE WAY: as emitted, the machine could
+not run on a board at all — the top had only `clk`/`mrst`, the instruction
+memory had NO write port (the sim deposits through VPI), and the read lock
+was only ever poked by the testbench; Vivado would have pruned the imem.
+
+Decision: **a `HostBridge` Kathryn module** (`examples/fpga/bridge/
+bridge_hardware.py`) is the host's whole way in: five top-level ports shaped
+like the BRAM side of an AXI BRAM controller (`host_en/we/addr/wdata` in,
+`host_rdata` out, READ_LATENCY 1), decoding one window (`bridge_map.py`:
+REGS, CONSOLE_WORDS, CONSOLE_TAGS, IMEM, DMEM, each region at a multiple of
+its own size so the select is a compare of the high bits and the low bits ARE
+the offset). It snoops the core's store port for the three doors — the same
+WORD-index compare `read_store_event` makes — captures putchar/putint stores
+with a tag, ends the run on the exit store, and counts cycles. Kathryn2's
+`mark_input`/`mark_output` (unused in Carolyne until now) route the ports from
+the bridge's depth to the top, so no hand-written Verilog wraps the emit; the
+20-line `core_wrapper.v` the Vivado backend generates only puts a
+`BRAM_PORTA` interface name on them and hides the generated top name.
+`O3Machine` gained an optional CALLABLE `build_bridge(instr_mem, data_mem,
+store_port)` — `examples/o3/core/build.py` imports nothing from
+`examples/fpga`; `fpga_system.py` is what supplies the bridge, the same
+direction `system.py` → `examples.sim` already has.
+
+Decision: **`EasyMem.add_host_write_port`** — ONE host write port beside the
+one machine write port, honoured only while the read lock is closed
+(`host_takes = enable & ~read_ready`; a write under an open lock is dropped
+and sets `host_write_refused`), the machine writer first in the bank's
+zif/zelif chain so a machine write is never lost, and one write chain per bank
+so synthesis still infers a memory. `host_write_refused` is declared only
+when the port is asked for: a plain `O3Machine` emit is BYTE-IDENTICAL before
+and after (24 files diffed), so the sim's build cache stayed warm.
+
+Decision: **`mrst` comes from an AXI GPIO** (1 bit, `C_DOUT_DEFAULT=1`: the
+design boots HELD in reset — the reference's core started running the moment
+the bitstream loaded). The bridge cannot drive `mrst`, it shares it. The
+protocol is hold → release (lock still closed, core inert) → write both
+images → START (`release_read_on` on both memories) → poll STATUS → read
+CYCLES / EXIT_CODE / the console. MAGIC, GEOMETRY (the sizes, encoded) and a
+SCRATCH round trip come first, so a bitstream built for other memory sizes is
+refused before a word is loaded.
+
+Decision: **the driver is written ONCE, async** (`bridge_driver.py`,
+`HostDriver` over two abstract classes `WordPort` / `ResetLine`), and runs
+three ways: under cocotb against the simulated bridge
+(`bridge_port_cocotb.py`, `examples/o3/core/cocotb_bridge_test.py` — the
+board in simulation, no probes, family-independent), under PYNQ on the KV260
+(`bridge_port_pynq.py`, `board/run_on_board.py`, `asyncio.run`), and against a
+Python fake in the unit tests. Async because cocotb must await edges; a wait
+is counted in POLLS (`timeout_s / poll_s`), so the same limit means the same
+thing in simulation and on the board. The stdlib files of the package are
+what the board receives (`board/deploy.py` stages exactly those plus the pynq
+port), so the board never sees kathryn or cocotb.
+
+CYCLES definition, pinned: the sim counts E1 as cycle 1 after depositing the
+lock and reads the exit store 1 ns after En, reporting n; the bridge counts
+`running & ~hit_exit` edges — the increment at En+1 is suppressed by the exit
+hit — and reads n. MEASURED through the simulated bridge with the board's own
+driver: hello.c 244, fib 3151, hanoi 11052 — each EQUAL to the plain sim's,
+console and exit code matching the host builds.
+
+MEASURED in Vivado 2023.2 (RV32IM, 2 lanes, 8 KB imem, 16 KB dmem, 4096
+console entries; the whole 13 MB emit): the core synthesizes out of context in
+455 s — 54,270 LUTs (47,742 logic + 6,528 as distributed RAM: the three
+memories, exactly as the async-read `mem_blk` arrays imply), 13,490 FFs,
+0 BRAM, 15 DSPs, no latches, the clock on a clean network. **At 50 MHz the
+post-synthesis WNS is −15.3 ns**: the worst path is 35 ns through 212 logic
+levels, 163 of them CARRY8 — the M extension's COMBINATIONAL DIVIDER
+(`riscv/exec_unit_muldiv.py`, the LIMIT that entry states), whose result goes
+through the bypass straight into another station's entry
+(`rsv3_exec0.data_src_1` → divide → `rsv1.data_src_2`). So the first board
+bitstream is built at **20 MHz** (`--clock-mhz 20`), the fmax knob the plan
+kept; cycle counts are frequency-independent, so the comparison stands. A
+sequential divider is what buys the clock back (`docs/open_items.md`).
+At 20 MHz the whole build (`python -m examples.fpga build --dmem 16384
+--clock-mhz 20`) takes 1540 s — synthesis 550 s, implementation 823 s — and
+MEETS TIMING with WNS +0.791 ns (the 35 ns path grew to ~49 ns in routing, so
+20 MHz is the ceiling for this core as it is), 58,343 LUTs, 18,604 FFs, a
+7.8 MB bitstream. **THE FIRST PROGRAM ON HARDWARE**: `python -m examples.fpga
+run hello.c --dmem 16384 --clock-mhz 20 --compare-sim` deployed it to
+`/root/jupyter_notebooks/calolyne_test/7ab58db19fbcc86c/` (bit, hwh, host
+map, the bridge package, `run_on_board.py`, `runs/hello_board/`), the KV260
+printed `hello from carolyne 0 1 4 9 16`, stopped on the exit door after
+**244 cycles** — the simulator's number — and `compare` reports MATCH on
+stop, exit code, cycles and console.
+
+THE BOARD SWEEP (`python -m examples.fpga.sweep --target rv32im --dmem 16384
+--clock-mhz 20 --compare-sim`: one bitstream, one ssh session, seventeen
+programs, the plain simulator beside each): **17 of 17 matched, and every
+cycle count on the KV260 EQUALS the simulator's** — riscv_temp 34, m4 44,
+rec 45, fwd 49, ldst 51, subword 61, hello 244, fib 3,151, stencil 4,896,
+sort_3 6,215, hanoi 11,052, acker 20,414, stirling 31,861, combinat 53,806,
+cprime 170,399, tarai 222,545, komachi 1,744,670 — delta 0 on all of them,
+the whole seventeen-program board session in 82–96 s. The first sweep, at 4096
+console entries, was 16/17: cprime prints 6,320 characters, the capture
+flagged CONSOLE_OVERFLOW and the board's console was an exact prefix of the
+sim's, cycles still equal — so the default depth is 8192
+(`DEFAULT_CONSOLE_DEPTH`, the same reason the sweep's `--dmem` default is
+16 KB), the sweep names a cut console `TRUNC` instead of `DIFFERS`, and the
+8192-entry bitstream still meets 20 MHz (WNS +0.30 ns, 61,670 LUTs, 9,952 as
+LUTRAM). This is the engine-adapts-itself claim on silicon: the same machine
+that matched 17/17 in simulation matches 17/17 on the FPGA, cycle for cycle.
+AND THE SECOND ISA, the same day: `build --target mips32` (the family's
+three-line `build_fpga_machine`, nothing else) meets 20 MHz too (WNS
++0.53 ns, 77,461 LUTs, 22,745 FFs, 17 DSPs — the r/hi/lo classes and 63
+µops), and `sweep --target mips32 --compare-sim` is **17 of 17 matched with
+every cycle count equal to the simulator's** and to the 2026-09-21 MIPS table:
+hello 264, fib 3,391, hanoi 9,854, acker 24,950, cprime 167,850, tarai
+247,744, komachi 1,709,313. Two ISAs, one engine, one flow, one board.
+
+Placement (Tanawin's pick): everything new under `examples/fpga/`; `carolyne/`
+stays engine-only but for the EasyMem port. The subpackage is **`bridge/`, not
+`host/`**: in this repo "host" already means the oracle PC
+(`examples/sim/host/`, `--expect host`, `compile_and_run_on_host`); the class
+names keep "host" where it means the controlling processor (`HostBridge`,
+`HostMap`, `HostDriver`). The board transport is **ssh/scp as subprocesses**
+(Tanawin's pick over the Jupyter REST API), the password through `sshpass -e`
+(the environment, never argv), the login in gitignored
+`examples/fpga/board/board.local.json` (`board.example.json` is the shape);
+the upload still lands under `/root/jupyter_notebooks/calolyne_test/` so a run
+is visible from Jupyter. **One bitstream serves every program**: the images
+are loaded at run time, so the build is keyed by the emitted RTL's digest
+(`kathryn.sim.rtl.sources_digest`) + board + clock + the templates
+(`backend/base.py::bitstream_key`), and a sweep builds once. NOT NOW
+(`docs/open_items.md`, "FPGA flow"): memory read-back by the PS (a mux on the
+fetch/load read index), byte enables, a streaming console, an idle watchdog,
+a second backend.
+
+**THE M EXTENSION IS TWO PIPELINED UNITS** (2026-09-28, Tanawin: "why 20 MHz?
+the kathryn in c++ version can achieve 50 MHz … could you optimize to 50 MHz?",
+then the pick "Split: 2-stage mul + 6-stage div"). The answer to "why" came
+from the timing of the 50 MHz out-of-context synthesis, path family by path
+family: everything outside the M unit met 20 ns with **+10.9 ns** to spare
+(worst 9.1 ns), the load/store address stage with **+10.1 ns** (10.0 ns; the
+29 ns it showed in the 20 MHz routed design was the placer spending a 50 ns
+budget), and the muldiv unit alone failed by **−15.0 ns**: a 35 ns path of 212
+logic levels, 163 of them CARRY8 — the combinational `/` and `%` — from the
+station's issued entry through the result bypass into every other station's
+entry. The C++ core met 50 MHz because RV32I has no divide and its multiplier
+was pipelined. So `MulDivExecUnit` is gone from both packages and each has:
+
+- **`MulExecUnit("mul")`, two stages** (`exec_unit_mul.py`): stage 0 computes
+  the products and REGISTERS them in a `MulResult` record (RISC-V: the low
+  word and the high word the µop asked for; MIPS: the hi/lo/rd results, the
+  accumulator moves mfhi/mflo/mthi/mtlo riding along), stage 1 writes back.
+  The register keeps the DSP cascade off the bypass.
+- **`DivExecUnit("div")`, six stages** (`exec_unit_div.py`): a restoring
+  divider — stage 0 takes magnitudes and records the signs, stages 1–4 run
+  **eight steps each**, stage 5 puts the signs back, answers a zero divisor
+  and writes back (RISC-V: rd; MIPS: LO = quotient, HI = remainder). One step
+  measured ~1.1 ns (21.6 ns of logic + 13.5 of routing over 32 steps), so
+  eight are ~9 ns of carry chain in a 20 ns stage. The state and the step are
+  SHARED: `isa/exec_unit_util.py` grew `DivState` (dividend, divisor, rem,
+  quot, a_raw, q_neg, r_neg, b_zero — the unit's own data; the machine's
+  fields come from `next_stage_fields`), `div_state_record`, `div_start`,
+  `div_steps(state, first_bit, count, width)` and `div_results`; a package's
+  div unit is forty lines that name its µops and slots. The step is a
+  2-bit-wider subtraction whose top bit is the borrow — `mux(borrow,
+  shifted, diff)` — so a zero divisor never borrows and the quotient comes
+  out all ones by itself; signed operands go through magnitudes, which also
+  gives INT_MIN / −1 = INT_MIN, remainder 0.
+
+Decision (Tanawin's pick over one six-stage unit): **two units on two
+in-order stations** — a divide's six stages never hold up a multiply, at the
+cost of a fifth station (`rsv_id` is 3 bits) and one more unit per package.
+`rv32im_stations` / `mips32_stations` take `mul_size=8, div_size=4`
+(`mul_rsv_size` / `div_rsv_size` on the config builders); the µop groups are
+`MULS` / `DIVS` with `MULDIVS` kept as their union. The ids did not move:
+RISC-V mul 37–40 and div 41–44 are one range each; MIPS mul is
+(54–55, 58–62) and div (56–57), which only an out-of-order station sharing
+units would ever compare. Thirteen tests that built a hand-written station
+list gained a `div` station beside the `mul` one — the same shape the 2026-09-15
+muldiv station forced on them.
+
+VERIFIED before any Vivado run, in the simulator against the host build:
+`tests/sim/programs/divtest.c` (eleven signed and eleven unsigned operand
+pairs through `/ % *` and the three high-word products, all volatile so GCC
+emits the instructions) matches the host on RV32IM (566 cycles) and MIPS32
+(712), and `divzero.c` matches `divzero.expected` (a zero divisor: quotient
+all ones, remainder the dividend; INT_MIN / −1 = INT_MIN, remainder 0 — cases
+a host build would trap on) on both. The programs live under `tests/sim/programs/`
+because the compile_tool submodule is its own repo.
+
+MEASURED, RV32IM at **50 MHz** (`build --dmem 16384 --clock-mhz 50`): timing
+MET, WNS +0.307 ns after routing — 66,066 LUTs (9,952 as LUTRAM), 19,921 FFs,
+21 DSPs, synthesis 445 s, implementation 668 s. The critical path is no longer
+arithmetic: 19.5 ns (7.3 logic, 12.2 route, 64 levels) from the branch
+station's issued operand through the compare, `declare_mis_pred` and the
+squash fan-out into a div stage register's enable — the one wire that
+reaches every register in the machine. That is the next fmax item, and it
+is the engine's, not an ISA's. ON THE BOARD at 50 MHz (`sweep --target rv32im
+--dmem 16384 --clock-mhz 50 --compare-sim`): **17 of 17 matched, every cycle
+count equal to the simulator's**, the session 116 s. Against the 20 MHz table
+only the three programs that multiply moved — cprime 170,399 → 170,743,
+stirling 31,861 → 32,134, komachi 1,744,670 → 1,744,749, the registered
+product's one cycle per multiply — and the other fourteen are identical, so
+the split cost nothing anywhere it is not used. MIPS32 at 50 MHz
+(`--jobs 4`: the 77K-LUT core's build needs the lower Vivado peak on a 15 GB
+machine): timing MET, WNS +0.135 ns, 77,427 LUTs, 24,128 FFs, 17 DSPs,
+synthesis 491 s, implementation 983 s, the same squash-fan-out critical path
+(19.6 ns). ON THE BOARD at 50 MHz: **17 of 17 matched, every cycle count equal
+to the simulator's** (session 104 s); against the 20 MHz table only komachi
+(1,709,313 → 1,709,329) and stirling (33,501 → 33,844) moved. Both ISAs now
+run at the clock the C++ core reached, on the same engine, with every
+program's cycle count predicted exactly by the simulator.
+
+**ONE MACHINE, MANY PROGRAMS IN THE SIM** (2026-09-29, Tanawin: "I want when it
+build machine one, I want it can run multiple program … feel like o3_sim.cpp
+`for (; _curTestCaseIdx < _testTypes.size(); _curTestCaseIdx++)`"). Until
+now every `examples.sim run` re-elaborated and re-emitted the machine, and the
+sweep spawned one PROCESS per program: the compiled simulator was cached by
+the RTL's digest, but each program still paid the emit, the Verilator load and
+the model rebuild for its probes — about 20 s of startup per program against
+a few seconds of cycles. The C++ simulator never did: one machine, one process,
+a loop over the test cases (reset, load the image, run, judge).
+
+Decision: **the split the FPGA flow already had, in the sim.** `SimMachine`
+(emitted ONCE: `build_o3_sim_machine`, under `generated/sim/machine/<label>/`),
+`SimProgram` (images + run spec in its own run dir: `build_o3_sim_program`) and
+`SimBatch` (the machine and every program one simulator process runs);
+`SimSystem` stays as the one-program form and is a batch of one
+(`as_batch`), so the runner has one path: `run_batch` compiles (or finds) the
+simulator once, writes `sim_batch.json` — each program's name, run dir and its
+OWN env, forwarded unread — and runs the cocotb test once. On the machine side
+`read_run_specs` reads every program's spec out of that batch (or the single
+`$CAROLYNE_RUN_SPEC`), and `run_o3_program` builds the model once, starts the
+clock once and loops: `reset_and_release` (mrst pulse, deposit THIS program's
+images, release the locks — the order the board flow proved works between
+programs), run to the exit door, write the program's console/events/result.
+A batch's specs must all name the same knobs — one compiled machine. The CLI
+gained `batch` (one file per program, `--suffix` names the run dirs,
+`_<target>_<opt>` by default); `run` keeps its shape (several files = ONE
+program). The sweep is one batch, no subprocess; the FPGA sweep's
+`--compare-sim` references run through ONE `examples.sim batch` subprocess
+(`run_plain_simulations`) — still a subprocess, because that process already
+emitted the bridged machine and Kathryn emits once per process.
+
+MEASURED, RV32IM, the 17-program sweep at -O2: **17/17 matched with every
+cycle count identical to the per-process runs, in 425 s in one simulator
+process** — komachi's 1.7M cycles are most of it; MIPS32 the same, 17/17 in
+487 s; the two-program batch `hello + fib` takes 19 s INCLUDING the emit,
+where each used to take about 20 s alone. The fast suite: 546 (9 new in
+`tests/test_by_ai/test_sim_batch.py`).
+NOT here: the emit itself. It still happens once per process (`MACHINE_ROOT`
+holds the last emit of each label) — reusing an emitted machine dir across
+processes would need the run-time model rebuild (`build_debug_model` in the
+cocotb process) to keep matching it, which the RTL digest does not guarantee
+alone.
+
 ## 5. Environment & workflow
 
 - Venv at `.venv/` (Python 3.13). `kathryn` is an **editable install from
@@ -3535,6 +3804,12 @@ compile) today.
   refuses — `env -u CONDA_PREFIX VIRTUAL_ENV=$PWD/.venv .venv/bin/maturin
   develop`); Python-side DSL changes are picked up automatically.
 - After a clone: `git submodule update --init` (`examples/compile_tool`).
+- The FPGA flow (`examples/fpga/`) needs Vivado — `/tools/Xilinx/Vivado/2023.2/bin/vivado`
+  by default, `$VIVADO` overrides — and, for the board, `ssh`/`scp`/`sshpass` plus
+  the board login in `examples/fpga/board/board.local.json` (gitignored; copy
+  `board.example.json`). The KV260 runs PYNQ 3.0.1 (Python 3.10) behind
+  `/etc/profile.d/pynq_venv.sh`; the board script imports only `examples/fpga/bridge/`'s
+  stdlib files, which `board/deploy.py` copies there.
 - `pip install -e ".[dev]"` for carolyne + pytest. Run tests:
   `.venv/bin/pytest tests -q -m "not slow"` (the cases are under
   `tests/test_by_ai/`; the `slow` marker is every test that builds a simulator:

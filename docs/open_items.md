@@ -494,3 +494,44 @@ suggested; the evidence is the cycle log each entry names.
       browser by the tool.** `tests/test_view_o3_page_js.py` and Kathryn2's
       `test_view_viewer_js.py` prove the data path; the look is checked by
       opening `trace.html`.
+
+## FPGA flow (examples/fpga, 2026-09-28)
+
+- [ ] **No memory read-back through the bridge.** The host writes both
+      memories through EasyMem's host write port but cannot read a word back:
+      a host READ port would put a mux on the fetch and load read indexes,
+      the likely critical path. The load path is proven by the program
+      running (and by the cocotb bridge test before any Vivado run).
+      *Where:* `examples/fpga/bridge/bridge_hardware.py`, `carolyne/uarch/mem/easy_mem.py`.
+      *Closes when:* a host read port served only while the lock is closed is
+      shown to cost nothing on the read path.
+- [ ] **Word writes only.** Any non-zero `host_we` is a whole word; PYNQ's
+      `MMIO.write` is always one, so nothing asks for a byte enable yet.
+      *Where:* `bridge_hardware.py` (`write_now`).
+- [ ] **The console is a capture buffer, not a stream.** `console_depth`
+      entries (8192 by default, a knob), then `CONSOLE_OVERFLOW`; a program
+      that prints more loses the rest and the sweep marks it `TRUNC`.
+      MEASURED: at 4096 the first board sweep truncated `cprime` (6320
+      entries) with every cycle count still equal; 8192 holds every test
+      program. Streaming would need back-pressure on the store port.
+      *Where:* `bridge_hardware.py`; `bridge_map.py` (`CONSOLE_*`).
+- [ ] **No idle watchdog on the board.** The sim stops on `idle_limit` cycles
+      without progress; the bridge has only `CYCLE_LIMIT`, so a hung program
+      runs to the limit.
+      *Where:* `bridge_hardware.py` (`cycle_limit_hit`).
+- [ ] **One backend and one board.** `backend/vivado` and `boards.json`'s
+      `kv260`; a second tool is a sub-package and a `BACKENDS` row, a second
+      board a `boards.json` row (part, board part, PS IP, the two base
+      addresses) — nothing else names either.
+      *Where:* `examples/fpga/backend/__init__.py`, `backend/vivado/boards.json`.
+- [x] **fmax was set by the combinational divider** — CLOSED 2026-09-28 by
+      the mul/div split (CLAUDE.md §4, THE M EXTENSION IS TWO PIPELINED UNITS).
+      Post-synthesis at 50 MHz the worst path was 35 ns (212 logic levels,
+      163 CARRY8) from the muldiv station's issued entry through `/` and `%`
+      and the bypass into another station's entry, and NOTHING else missed
+      20 ns (everything else had +10 ns of slack); the first board bitstreams
+      were built at 20 MHz. Now `div` is a six-stage restoring divider (eight
+      steps, ~9 ns, per stage) and `mul` registers its products; the 50 MHz
+      result is recorded in §4.
+      *Where:* `carolyne/isa/exec_unit_util.py` (`DivState`, `div_steps`),
+      `carolyne/isa/{riscv,mips}/exec_unit_div.py`, `exec_unit_mul.py`.
