@@ -4,30 +4,33 @@
 #   python -m examples.sim.sweep --target mips32 --opt=-O0 --opt=-O2 --dmem 16384
 #   python -m examples.sim.sweep --target rv32im --programs hello.c fib.c
 #
-# ONE SUBPROCESS PER PROGRAM: Kathryn's emitted names come from a
-# process-global counter, so a compiled simulator only serves an emit made
-# in the same build order — a second emit in one process would miss the
-# build cache and recompile for minutes. The runs go one after another for
-# the same reason: two at once would race the cache directory.
+# ONE MACHINE, ONE SIMULATOR PROCESS: the machine is emitted once, compiled
+# once (or found in the cache), and every program runs in the same cocotb
+# process — the test resets the machine between them. What used to be one
+# subprocess per program is one batch (examples/sim/runner.py).
 #
-# The verdict is the sim's own (`--expect host`): a run counts as matched
-# when the machine stopped on its exit door and its console equals the host
-# build's, byte for byte.
+# The verdict is the sim's own (`--expect host`): a run counts as matched when
+# the machine stopped on its exit door, exited 0, and its console equals the
+# host build's, byte for byte.
 
 from __future__ import annotations
 
 import argparse
-import json
 import os
 import pathlib
-import subprocess
 import sys
 import time
 from dataclasses import dataclass
 from typing import List, Sequence
 
 from examples.compile_tool.cli import parse_size
-from examples.sim.runner import SIM_ROOT
+from examples.compile_tool.layout import DEFAULT_IMEM_BYTES
+from examples.o3.core.system import build_o3_sim_program
+from examples.sim.cli import SYSTEMS
+from examples.sim.options import SimOptions
+from examples.sim.oracle import compare_console, compile_and_run_on_host
+from examples.sim.runner import SIM_ROOT, run_batch
+from examples.sim.system import SimBatch
 
 REPO     = pathlib.Path(__file__).resolve().parents[2]
 PROGRAMS = REPO / "examples" / "compile_tool" / "programs"
@@ -40,67 +43,42 @@ class SweepRow:
     program     : str
     target      : str
     opt         : str
-    stop_reason : str        # exit / watchdog / limit / (no result)
+    stop_reason : str
     cycles      : int
     exit_code   : int
-    cli_rc      : int        # the sim's own verdict: 0 is matched
-    seconds     : float
+    oracle_ok   : bool
 
     @property
-    def matched(self) -> bool: return self.cli_rc == 0 and self.stop_reason == "exit"
+    def matched(self) -> bool:
+        return self.stop_reason == "exit" and self.exit_code == 0 and self.oracle_ok
 
 
 def all_programs() -> List[str]:
     return sorted(str(p) for p in PROGRAMS.glob("*.c"))
 
 
-def run_one(program: str, target: str, opt: str, lanes: int, dmem: int,
-            sim: str, max_cycles: int) -> SweepRow:
-    """One program through `python -m examples.sim run`, in its own process."""
-    stem = pathlib.Path(program).stem
-    name = f"{stem}_{target}_{opt.lstrip('-').lower()}"
-    argv = [sys.executable, "-m", "examples.sim", "run", program,
-            "--target", target, f"--opt={opt}", "--lanes", str(lanes),
-            "--dmem", str(dmem), "--sim", sim, "--max-cycles", str(max_cycles),
-            "--no-log", "--expect", "host", "--name", name]
-    env = {**os.environ,
-           "PYTHONPATH": os.pathsep.join(p for p in (str(REPO), os.environ.get("PYTHONPATH", "")) if p)}
-    started = time.time()
-    done    = subprocess.run(argv, cwd=REPO, env=env, capture_output=True, text=True)
-    seconds = time.time() - started
-
-    result_path = SIM_ROOT / "run" / name / "result.json"
-    if result_path.is_file():
-        result = json.loads(result_path.read_text())
-        row = SweepRow(stem, target, opt, result["stop_reason"], result["cycles"],
-                       result["exit_code"], done.returncode, seconds)
-    else:
-        row = SweepRow(stem, target, opt, "(no result)", 0, -1, done.returncode, seconds)
-    if not row.matched:
-        sys.stderr.write(f"--- {name}: rc {done.returncode}\n{done.stdout[-2000:]}{done.stderr[-2000:]}\n")
-    return row
-
-
-def render(rows: Sequence[SweepRow]) -> str:
-    head = f"{'program':<12} {'target':<7} {'opt':<4} {'stop':<11} {'cycles':>9} {'exit':>4} {'sec':>7}  verdict"
+def render(rows: Sequence[SweepRow], seconds: float) -> str:
+    head = f"{'program':<12} {'target':<7} {'opt':<4} {'stop':<11} {'cycles':>9} {'exit':>4} {'oracle':<8} verdict"
     body = [f"{r.program:<12} {r.target:<7} {r.opt:<4} {r.stop_reason:<11} {r.cycles:>9} "
-            f"{r.exit_code:>4} {r.seconds:>7.1f}  {'matched' if r.matched else 'FAILED'}"
+            f"{r.exit_code:>4} {'same' if r.oracle_ok else 'DIFFERS':<8} {'matched' if r.matched else 'FAILED'}"
             for r in rows]
     matched = sum(r.matched for r in rows)
-    return "\n".join([head, *body, f"{matched}/{len(rows)} matched"])
+    return "\n".join([head, *body, f"{matched}/{len(rows)} matched in {seconds:.1f}s, one simulator process"])
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="sweep",
-                                     description="run every test program through the sim")
-    parser.add_argument("--target", default="rv32im")
+                                     description="run every test program through the sim, on one machine")
+    parser.add_argument("--target", default="rv32im", choices=sorted(SYSTEMS))
     parser.add_argument("--opt", action="append", default=None,
                         help="an optimisation level; repeat for several (default -O2)")
+    parser.add_argument("--imem", type=parse_size, default=DEFAULT_IMEM_BYTES)
     parser.add_argument("--lanes", type=int, default=2)
     parser.add_argument("--dmem", type=parse_size, default=16384,
                         help="the data memory, bytes: cprime needs 16K")
     parser.add_argument("--sim", default="verilator", choices=("verilator", "icarus"))
     parser.add_argument("--max-cycles", type=int, default=8_000_000)
+    parser.add_argument("--idle-limit", type=int, default=2_000)
     parser.add_argument("--programs", nargs="*", default=None,
                         help="program file names under programs/ (default: all)")
     return parser
@@ -109,18 +87,33 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv=None) -> int:
     args     = build_parser().parse_args(argv)
     opts     = args.opt or ["-O2"]
-    programs = (all_programs() if not args.programs
+    sources  = (all_programs() if not args.programs
                 else [str(PROGRAMS / p) if not os.path.isabs(p) else p for p in args.programs])
-    rows = []
+    started  = time.time()
+
+    machine  = SYSTEMS[args.target](imem_bytes=args.imem, dmem_bytes=args.dmem, lanes=args.lanes)
+    programs = []
     for opt in opts:
-        for program in programs:
-            row = run_one(program, args.target, opt, args.lanes, args.dmem, args.sim,
-                          args.max_cycles)
-            rows.append(row)
-            print(f"{row.program:<12} {opt:<4} {'matched' if row.matched else 'FAILED':<8} "
-                  f"{row.stop_reason:<11} {row.cycles:>9} cycles  {row.seconds:.1f}s", flush=True)
+        for source in sources:
+            name = f"{pathlib.Path(source).stem}_{args.target}_{opt.lstrip('-').lower()}"
+            programs.append(build_o3_sim_program(machine, [source], str(SIM_ROOT / "run" / name), name,
+                                                 opt=opt, log_enabled=False,
+                                                 max_cycles=args.max_cycles, idle_limit=args.idle_limit))
+    results = run_batch(SimBatch(machine, tuple(programs)), SimOptions(sim=args.sim, expect="host"))
+
+    rows = []
+    for program, opt in zip(programs, [opt for opt in opts for _ in sources]):
+        result = results[program.name]
+        oracle = compare_console(compile_and_run_on_host(program.c_sources), result.console)
+        row    = SweepRow(pathlib.Path(program.c_sources[0]).stem, args.target, opt,
+                          result.stop_reason, result.cycles, result.exit_code, oracle.ok)
+        rows.append(row)
+        print(f"{row.program:<12} {opt:<4} {'matched' if row.matched else 'FAILED':<8} "
+              f"{row.stop_reason:<11} {row.cycles:>9} cycles", flush=True)
+        if not row.matched:
+            sys.stderr.write(f"--- {program.name}: {oracle.describe()}\n")
     print()
-    print(render(rows))
+    print(render(rows, time.time() - started))
     return 0 if all(r.matched for r in rows) else 1
 
 

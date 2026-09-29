@@ -6,16 +6,18 @@ from __future__ import annotations
 
 from examples.sim.oracle import Verdict
 from examples.sim.result import RunResult
-from examples.sim.system import SimSystem
 
 EXIT_OK      = 0
 EXIT_HARNESS = 1
 EXIT_WRONG   = 2
 
 
-def describe(system: SimSystem, result: RunResult, verdict: Verdict) -> str:
-    """The summary a run prints: the console, then what happened to it."""
-    run_dir = system.run_dir
+def describe(run_dir: str, result: RunResult, verdict: Verdict) -> str:
+    """The summary a run prints: the console, then what happened to it.
+
+    - takes the run DIRECTORY, not a SimSystem: the FPGA flow prints the same
+      summary for a board run
+    """
     lines   = ["----- output -----", result.console.rstrip("\n"), "",
                f"stopped   : {result.stop_reason} after {result.cycles} cycles",
                f"exit code : {result.exit_code}",

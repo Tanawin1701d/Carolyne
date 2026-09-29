@@ -20,10 +20,11 @@ from .options import SimOptions
 from .oracle  import (Verdict, compare_console, compile_and_run_on_host,
                       read_expected_text)
 from .result  import RunResult, read_result
-from .runner  import run_system
-from .system  import SimSystem
+from .runner  import run_batch, run_system
+from .system  import SimBatch, SimMachine, SimProgram, SimSystem
 
-__all__ = ["SimSystem", "SimOptions", "run_system",
+__all__ = ["SimSystem", "SimMachine", "SimProgram", "SimBatch", "SimOptions",
+           "run_system", "run_batch",
            "RunResult", "read_result",
            "Verdict", "compare_console", "compile_and_run_on_host",
            "read_expected_text"]
