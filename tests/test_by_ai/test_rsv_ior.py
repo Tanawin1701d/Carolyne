@@ -35,7 +35,7 @@ def _cfg(fe_lanes=2):
                         rsv_specs=(O3_SPEC, IOR_SPEC, BR_SPEC, MD_SPEC, DIV_SPEC),
                         rob_depth=32, sptag_len=4, st_buf_depth=4,
                         instr_mem_idx_width=8, data_mem_idx_width=8,
-                        bp=FallThroughSpec())
+                        bp_spec=FallThroughSpec())
 
 
 def _drive(station_cls, spec, rsv_idx=0, fe_lanes=2):

@@ -24,9 +24,9 @@ if TYPE_CHECKING:
 
 def bp_field_widths(config: CPUO3_Config) -> Dict[str, int]:
     """The predictor's record as {field name: width}, every entry checked."""
-    where          = f"branch predictor {config.bp.label}"
+    where          = f"branch predictor {config.bp_spec.label}"
     width_by_field = {}
-    for entry in config.bp.meta_fields(config):
+    for entry in config.bp_spec.meta_fields(config):
         name, width = check_bp_field(entry, where)
         if name in width_by_field:
             raise ValueError(f"{where}: two fields named '{name}'")

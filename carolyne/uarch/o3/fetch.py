@@ -22,16 +22,16 @@
 
 from typing import Sequence
 
-from kathryn import *
+from kathryn           import *
 from carolyne.debug.sim import KarrayProbe, PipStatusProbe
 
 from carolyne.uarch.mem.common.mem_port import MemPortReadValid
-from carolyne.uarch.o3.bp.bp_base import BpBase, BpPrediction
-from carolyne.uarch.o3.bp.bp_helper import bp_field_names
-from carolyne.uarch.o3.common_field import INSTR, NPC, PC, VALID
-from carolyne.uarch.o3.config import CPUO3_Config
-from carolyne.uarch.o3.fetch_helper import build_fetch_table
-from carolyne.uarch.o3.priority import PRI_MIS_PRED
+from carolyne.uarch.o3.bp.bp_base       import BpBase, BpPrediction
+from carolyne.uarch.o3.bp.bp_helper     import bp_field_names
+from carolyne.uarch.o3.common_field     import INSTR, NPC, PC, VALID
+from carolyne.uarch.o3.config           import CPUO3_Config
+from carolyne.uarch.o3.fetch_helper     import build_fetch_table
+from carolyne.uarch.o3.priority         import PRI_MIS_PRED
 
 
 class Fetch(Module):
@@ -96,88 +96,85 @@ class Fetch(Module):
         # constant
         align = self.config.isa.pc_align
 
-        # The address takes NO grant: it follows the pc, so the word is already
-        # at the port when the transfer is granted instead of one gate behind
-        # it. Only the capture is an event. The prediction follows it too.
+        # step 1: address every port off the pc, no grant, so the word is ready when granted
         lane_pcs = [self.pc + (lane * align)
                     for lane in range(len(self.read_ports))]
         for lane, port in enumerate(self.read_ports):
             port.bind_byte_addr(lane_pcs[lane])
-        preds = self.predict_lanes(lane_pcs)
+        lane_predictions = self.predict_lanes(lane_pcs)
 
-        answered = [port.read_valid() for port in self.read_ports]
+        # step 2: keep the leading run of answered lanes, cut after a lane predicted taken
+        lane_read_valid = [port.read_valid() for port in self.read_ports]
         if self.bp.may_predict_taken:
-            kept = self.keep_until_taken(answered, preds)
+            kepts = self.keep_until_taken(lane_read_valid, lane_predictions)
         else:
-            kept = self.keep_leading_run(answered)
-        step    = sum_cnt(kept, width=self.config.isa.pc_width)
+            kepts = self.keep_leading_run(lane_read_valid)
+
+        # step 3: next pc = past the kept lanes, or the taken lane's predicted npc
+        step    = sum_cnt(kepts, width=self.config.isa.pc_width)
         next_pc = self.pc + (step << self.config.instr_byte_bits)
         if self.bp.may_predict_taken:
             # at most one lane is kept AND taken (the lane after it is cut),
             # so the order of the muxes does not matter
-            for lane, pred in enumerate(preds):
-                next_pc = mux(kept[lane] & pred.taken, pred.npc, next_pc)
+            for lane, prediction in enumerate(lane_predictions):
+                next_pc = mux(kepts[lane] & prediction.taken, prediction.npc, next_pc)
 
-        # transfer data
-        # EVERY arbiter must grant, not just one. A new group may be captured
-        # only when the memory answered AND decode took the previous group;
-        # the default `mode="any"` ORs the grants, so the memory alone would
-        # let fetch overwrite a group decode had not read.
+        # step 4: capture the group on EVERY grant (mode="any" would overwrite an unread group)
         pip_metas = [self.decode_meta,
                      *[port.pip_meta for port in self.read_ports]]
         with pip(self.fetch_meta, auto_req = True, auto_restart = True):
             with zync(pip_metas, mode = "all"):
                 for lane, port in enumerate(self.read_ports):
                     self.fetch[lane] |= {PC   : lane_pcs[lane],
-                                         NPC  : preds[lane].npc,
+                                         NPC  : lane_predictions[lane].npc,
                                          INSTR: port.read(),
-                                         VALID: kept[lane],
-                                         **preds[lane].meta}
+                                         VALID: kepts[lane],
+                                         **lane_predictions[lane].meta}
                 self.pc |= next_pc
 
     def predict_lanes(self, lane_pcs: Sequence) -> tuple:
         """The predictor's answer, one per lane, held to the record it declared."""
-        preds = tuple(self.bp.predict(lane_pcs))
+        lane_predictions = tuple(self.bp.predict(lane_pcs))
         names = set(bp_field_names(self.config))
-        if len(preds) != len(lane_pcs):
+        if len(lane_predictions) != len(lane_pcs):
             raise ValueError(
-                f"Fetch: {type(self.bp).__name__}.predict returned {len(preds)} "
+                f"Fetch: {type(self.bp).__name__}.predict returned {len(lane_predictions)} "
                 f"predictions for {len(lane_pcs)} lanes")
-        for lane, pred in enumerate(preds):
-            if not isinstance(pred, BpPrediction):
+        for lane, prediction in enumerate(lane_predictions):
+            if not isinstance(prediction, BpPrediction):
                 raise TypeError(
                     f"Fetch: {type(self.bp).__name__}.predict lane {lane} gave "
-                    f"{type(pred).__name__}, not a BpPrediction")
-            if set(pred.meta) != names:
+                    f"{type(prediction).__name__}, not a BpPrediction")
+            if set(prediction.meta) != names:
                 raise ValueError(
                     f"Fetch: {type(self.bp).__name__}.predict lane {lane} gave meta "
-                    f"{sorted(pred.meta)}, the spec declares {sorted(names)}")
-        return preds
+                    f"{sorted(prediction.meta)}, the spec declares {sorted(names)}")
+        return lane_predictions
 
     @staticmethod
-    def keep_until_taken(answered: Sequence, preds: Sequence):
+    def keep_until_taken(lane_read_valid: Sequence, lane_predictions: Sequence):
         """keep_leading_run, also cut after the first lane predicted taken.
 
         - the lanes after a taken branch are on the wrong path; the pc goes
           to the branch's predicted npc instead
         """
         run, so_far = [], None
-        for ok, pred in zip(answered, preds):
-            so_far = ok if so_far is None else so_far & ok
+        for read_valid, prediction in zip(lane_read_valid, lane_predictions):
+            so_far = read_valid if so_far is None else so_far & read_valid
             run.append(so_far)
-            so_far = so_far & ~pred.taken
+            so_far = so_far & ~prediction.taken
         return run
 
     @staticmethod
-    def keep_leading_run(answered: Sequence):
+    def keep_leading_run(lane_read_valid: Sequence):
         """Keep a lane only if it and every lower lane answered.
 
         The pc advances by what is kept, so a gap costs bandwidth rather than
         skipping the instructions behind it.
         """
         run, so_far = [], None
-        for ok in answered:
-            so_far = ok if so_far is None else so_far & ok
+        for read_valid in lane_read_valid:
+            so_far = read_valid if so_far is None else so_far & read_valid
             run.append(so_far)
         return run
 

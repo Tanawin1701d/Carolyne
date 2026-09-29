@@ -68,6 +68,9 @@ class MemPortBase:
         The regions stack straight onto the zero part, so each is a plain
         part-select: a caller states an address once instead of cutting it up.
         """
+        # byte_addr  | region 0 (high) | ... | region N-1 (low) | zero |
+        #            ^ cut last                ^ cut first        ^ dropped
+        # walked low region first so `low` climbs; reversed back for bind_addr
         low, parts = self.addr_meta.zero_width, []
         for width in reversed(self.addr_meta.var_widths):
             parts.append(byte_addr[low + width - 1, low])

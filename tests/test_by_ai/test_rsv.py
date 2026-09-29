@@ -39,7 +39,7 @@ def _cfg(**overrides):
                   rsv_specs=STATIONS,
                   rob_depth=32, sptag_len=8, st_buf_depth=4,
                   instr_mem_idx_width=8, data_mem_idx_width=8,
-                  bp=FallThroughSpec())
+                  bp_spec=FallThroughSpec())
     kwargs.update(overrides)
     return CPUO3_Config(**kwargs)
 

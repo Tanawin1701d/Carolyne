@@ -99,7 +99,7 @@ def tiny_config() -> CPUO3_Config:
                                    RsvSpec(False, 4, (isa.unit("control"),), RsvType.RSV_BRANCH)),
                         rob_depth=8, sptag_len=3, st_buf_depth=4,
                         instr_mem_idx_width=6, data_mem_idx_width=6,
-                        bp=FallThroughSpec())
+                        bp_spec=FallThroughSpec())
 
 
 def test_a_machine_with_a_renamed_one_register_class_elaborates():

@@ -83,7 +83,7 @@ def gen_o3_mips32_config(fe_lanes            : int = 2,
                         st_buf_depth        = st_buf_depth,
                         instr_mem_idx_width = instr_mem_idx_width,
                         data_mem_idx_width  = data_mem_idx_width,
-                        bp                  = FallThroughSpec())   # not a knob: config_kwargs
+                        bp_spec             = FallThroughSpec())   # not a knob: config_kwargs
                                                                    # crosses to the sim as JSON
 
 

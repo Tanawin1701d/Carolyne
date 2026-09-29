@@ -59,19 +59,19 @@ class ProbeBpSpec(BpSpec):
 
 
 def probe_config(**bp_knobs):
-    return dataclasses.replace(gen_o3_rv32im_config(), bp=ProbeBpSpec(**bp_knobs))
+    return dataclasses.replace(gen_o3_rv32im_config(), bp_spec=ProbeBpSpec(**bp_knobs))
 
 
 # ---- the config ---------------------------------------------------------------
 
 def test_the_config_requires_a_predictor_spec():
-    with pytest.raises(TypeError, match="bp must be a BpSpec"):
-        dataclasses.replace(gen_o3_rv32im_config(), bp=None)
+    with pytest.raises(TypeError, match="bp_spec must be a BpSpec"):
+        dataclasses.replace(gen_o3_rv32im_config(), bp_spec=None)
 
 
 def test_both_example_machines_use_fall_through():
-    assert isinstance(gen_o3_rv32im_config().bp, FallThroughSpec)
-    assert isinstance(gen_o3_mips32_config().bp, FallThroughSpec)
+    assert isinstance(gen_o3_rv32im_config().bp_spec, FallThroughSpec)
+    assert isinstance(gen_o3_mips32_config().bp_spec, FallThroughSpec)
 
 
 @pytest.mark.parametrize("meta, message", [
@@ -139,6 +139,6 @@ def test_fetch_refuses_a_prediction_whose_record_differs_from_the_spec():
         def build(self, config): return WrongMetaBp(config, self)
 
     reset()
-    config = dataclasses.replace(gen_o3_rv32im_config(), bp=WrongMetaSpec())
+    config = dataclasses.replace(gen_o3_rv32im_config(), bp_spec=WrongMetaSpec())
     with pytest.raises(ValueError, match="the spec declares"):
         build_model(build_machine(config), debug=True)

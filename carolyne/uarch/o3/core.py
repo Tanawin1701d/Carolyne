@@ -9,7 +9,7 @@
 #                        station and one exec complex per unit the station
 #                        feeds (the spec's own issue_o3 picks RsvO3/RsvIOR,
 #                        its POSITION is the rsv_id a dispatch lane names)
-#   _build_front_end()   the branch predictor (config.bp), Fetch -> Decode ->
+#   _build_front_end()   the branch predictor (config.bp_spec), Fetch -> Decode ->
 #                        Dispatch, and backend_meta
 #   _wire_stages()       every connect slot, filled HERE and nowhere else
 #
@@ -84,7 +84,7 @@ class CoreO3(Module):
         granted transfer runs against; no pip masters it (`no_pip_master`),
         so dispatch's zync is granted the moment it wins arbitration —
         acceptance is `ready_to_go`'s AND, already bound on the zync."""
-        self.bp           = self.config.bp.build(self.config)
+        self.bp           = self.config.bp_spec.build(self.config)
         self.fetch        = Fetch(self.config, self.instr_read_ports)
         self.decode       = Decode(self.config)
         self.dispatch     = Dispatch(self.config)

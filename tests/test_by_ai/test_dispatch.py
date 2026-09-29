@@ -41,7 +41,7 @@ def _cfg(**overrides):
                   rsv_specs=STATIONS,
                   rob_depth=32, sptag_len=4, st_buf_depth=4,
                   instr_mem_idx_width=8, data_mem_idx_width=8,
-                  bp=FallThroughSpec())
+                  bp_spec=FallThroughSpec())
     kwargs.update(overrides)
     return CPUO3_Config(**kwargs)
 
@@ -219,7 +219,7 @@ def test_a_one_register_class_has_no_architectural_index_to_store():
                        rsv_specs=(RsvSpec(True, 4, (unit,), RsvType.RSV_EXEC),),
                        rob_depth=8, sptag_len=4, st_buf_depth=4,
                        instr_mem_idx_width=8, data_mem_idx_width=8,
-                       bp=FallThroughSpec())
+                       bp_spec=FallThroughSpec())
 
     fields = operand_fields(cfg, core, dispatch_operand_kinds(core), "dispatch")
     assert "ar_idx_flags_out" not in fields

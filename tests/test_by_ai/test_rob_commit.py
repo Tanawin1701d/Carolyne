@@ -43,7 +43,7 @@ def _cfg(**overrides):
                   rsv_specs=STATIONS,
                   rob_depth=8, sptag_len=4, st_buf_depth=4,
                   instr_mem_idx_width=8, data_mem_idx_width=8,
-                  bp=FallThroughSpec())
+                  bp_spec=FallThroughSpec())
     kwargs.update(overrides)
     return CPUO3_Config(**kwargs)
 
@@ -164,6 +164,6 @@ def test_a_rename_table_elaborates_when_the_widths_differ():
     # differ, as they do here (2 rename ports, 4 tag bits).
     cfg = _cfg(fe_lanes=2, sptag_len=4, st_buf_depth=4,
     instr_mem_idx_width=8, data_mem_idx_width=8,
-    bp=FallThroughSpec())
+    bp_spec=FallThroughSpec())
     assert cfg.fe_lanes != cfg.sptag_len
     _drive(cfg)                                  # elaborating IS the assertion

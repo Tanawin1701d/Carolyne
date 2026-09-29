@@ -3484,7 +3484,7 @@ license). Edit the tool in its own repo, then bump the submodule here.
 carolyne/uarch/o3 support the branch predictor … configurable, have standard
 for future upgrade … fall through first … a data structure that need to send
 via pipeline like bhr … *_helper.py and branch rsv ready to gather it") —
-`carolyne/uarch/o3/bp/`. `CPUO3_Config.bp` is a **`BpSpec`** (frozen data,
+`carolyne/uarch/o3/bp/`. `CPUO3_Config.bp_spec` is a **`BpSpec`** (frozen data,
 Kathryn-free, like `RsvSpec`): `meta_fields(config)` states the per-branch
 record and `build(config)` makes the **`BpBase`** module `CoreO3` holds as
 `core.bp`. Three decisions, all Tanawin's picks:
