@@ -31,13 +31,14 @@ def test_the_stations_route_every_kind():
     config = gen_o3_mips32_config()
     isa    = config.isa
     assert [spec.rsv_type.name for spec in config.rsv_specs] == [
-        "RSV_EXEC", "RSV_LD_ST", "RSV_BRANCH", "RSV_EXEC"]
+        "RSV_EXEC", "RSV_LD_ST", "RSV_BRANCH", "RSV_EXEC", "RSV_EXEC"]
     assert config.rsv_ids_for(U.UOP_MULT) == config.rsv_ids_for(U.UOP_MFHI) == (3,)
+    assert config.rsv_ids_for(U.UOP_DIV)  == config.rsv_ids_for(U.UOP_DIVU) == (4,)
     assert config.rsv_ids_for(U.UOP_BEQ)  == config.rsv_ids_for(U.UOP_JR)   == (2,)
     assert config.rsv_ids_for(U.UOP_SW)   == (1,)
     assert config.rsv_ids_for(U.UOP_ADDU) == (0,)
     assert len(config.rsv_specs[0].exec_unit) == 2       # two ALUs, one unit
-    assert isa.unit("muldiv").covers(isa.unit("muldiv").src_operands[2])
+    assert isa.unit("mul").covers(isa.unit("mul").src_operands[2])
 
 
 def test_the_sized_config_rebuilds_from_its_own_knobs():
@@ -54,7 +55,7 @@ def test_the_whole_machine_elaborates_with_its_probes():
     machine = build_model(build_machine(gen_o3_mips32_config(fe_lanes=2, commit_lanes=2)),
                           debug=True)
     assert set(machine.core.dbg_reg_arch) == {"r", "hi", "lo"}
-    assert len(machine.core.issue_lanes) == 4
+    assert len(machine.core.issue_lanes) == 5          # alu, mem, control, mul, div
 
 
 @pytest.mark.skipif(shutil.which("iverilog") is None, reason="no iverilog on PATH")

@@ -32,7 +32,8 @@ ALL_KINDS = ("active", "valid", "wb_required", "data", "pr_idx", "ar_idx")
 STATIONS = (RsvSpec(False, 4, (ISA.unit("alu"),),     RsvType.RSV_EXEC),
             RsvSpec(False, 4, (ISA.unit("mem"),),     RsvType.RSV_LD_ST),
             RsvSpec(False, 4, (ISA.unit("control"),), RsvType.RSV_BRANCH),
-            RsvSpec(False, 4, (ISA.unit("muldiv"),),  RsvType.RSV_EXEC))
+            RsvSpec(False, 4, (ISA.unit("mul"),),  RsvType.RSV_EXEC),
+            RsvSpec(False, 4, (ISA.unit("div"),),  RsvType.RSV_EXEC))
 
 
 def _cfg(**overrides):

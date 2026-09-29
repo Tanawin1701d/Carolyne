@@ -80,7 +80,8 @@ def test_uop_ids_are_one_contiguous_run_per_unit():
     # per µop (ExecUnitBase.uop_idx_ranges).
     isa = Mips32()
     assert {u.name: u.uop_idx_ranges() for u in isa.exec_units} == {
-        "alu": ((0, 33),), "mem": ((34, 41),), "control": ((42, 53),), "muldiv": ((54, 62),)}
+        "alu": ((0, 33),), "mem": ((34, 41),), "control": ((42, 53),),
+        "mul": ((54, 55), (58, 62)), "div": ((56, 57),)}
     assert sorted(u.uop_idx for u in isa.uops) == list(range(63))
 
 
@@ -91,8 +92,9 @@ def test_unit_routing_covers_every_uop():
     assert [u.name for u in isa.units_for(U.UOP_LW)]   == ["mem"]
     assert [u.name for u in isa.units_for(U.UOP_BEQ)]  == ["control"]
     assert [u.name for u in isa.units_for(U.UOP_JR)]   == ["control"]
-    assert [u.name for u in isa.units_for(U.UOP_MFHI)] == ["muldiv"]
-    assert [u.name for u in isa.units_for(U.UOP_MUL)]  == ["muldiv"]
+    assert [u.name for u in isa.units_for(U.UOP_MFHI)] == ["mul"]
+    assert [u.name for u in isa.units_for(U.UOP_MUL)]  == ["mul"]
+    assert [u.name for u in isa.units_for(U.UOP_DIV)]  == ["div"]
     assert [u.name for u in isa.units_for(U.UOP_LUI)]  == ["alu"]
 
 
@@ -206,7 +208,7 @@ def test_the_package_is_description_data_only():
     import ast, pathlib
 
     SEMANTICS = {"exec_unit_alu.py", "exec_unit_br.py", "exec_unit_ls.py",
-                 "exec_unit_muldiv.py"}
+                 "exec_unit_mul.py", "exec_unit_div.py"}
 
     pkg = pathlib.Path(__file__).resolve().parents[2] / "carolyne" / "isa" / "mips"
     for source in sorted(pkg.glob("*.py")):

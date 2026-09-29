@@ -34,7 +34,8 @@ def _store_buf(cfg):
 STATIONS = (RsvSpec(False, 8, (ISA.unit("alu"),),     RsvType.RSV_EXEC),
             RsvSpec(False, 8, (ISA.unit("mem"),),     RsvType.RSV_LD_ST),
             RsvSpec(False, 8, (ISA.unit("control"),), RsvType.RSV_BRANCH),
-            RsvSpec(False, 8, (ISA.unit("muldiv"),),  RsvType.RSV_EXEC))
+            RsvSpec(False, 8, (ISA.unit("mul"),),  RsvType.RSV_EXEC),
+            RsvSpec(False, 8, (ISA.unit("div"),),  RsvType.RSV_EXEC))
 
 
 def _cfg(**overrides):

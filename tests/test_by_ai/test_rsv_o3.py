@@ -26,10 +26,11 @@ O3_SPEC  = RsvSpec(True,  4, (ISA.unit("alu"),), RsvType.RSV_EXEC)
 IOR_SPEC = RsvSpec(False, 4, (ISA.unit("mem"),), RsvType.RSV_LD_ST)
 # a branch resolves in order, so its station must be in-order too
 BR_SPEC  = RsvSpec(False, 4, (ISA.unit("control"),), RsvType.RSV_BRANCH)
-MD_SPEC  = RsvSpec(False, 4, (ISA.unit("muldiv"),), RsvType.RSV_EXEC)
+MD_SPEC  = RsvSpec(False, 4, (ISA.unit("mul"),),    RsvType.RSV_EXEC)
+DIV_SPEC = RsvSpec(False, 4, (ISA.unit("div"),),    RsvType.RSV_EXEC)
 # Only an out-of-order station may feed several units (RsvSpec), and each of
 # them gets an issue path of its own.
-TWO_SPEC = RsvSpec(True,  4, (ISA.unit("alu"), ISA.unit("muldiv")),
+TWO_SPEC = RsvSpec(True,  4, (ISA.unit("alu"), ISA.unit("mul")),
                    RsvType.RSV_EXEC)
 # Two pipes running one description: a unit may be listed TWICE, since how
 # many ALUs a machine has is its own choice and not the ISA's.
@@ -40,7 +41,7 @@ DUAL_ALU = RsvSpec(True,  4, (ISA.unit("alu"), ISA.unit("alu")),
 def _cfg(fe_lanes=2):
     return CPUO3_Config(isa=ISA, fe_lanes=fe_lanes, commit_lanes=2,
                         phy_specs=((X, 64),),
-                        rsv_specs=(O3_SPEC, IOR_SPEC, BR_SPEC, MD_SPEC),
+                        rsv_specs=(O3_SPEC, IOR_SPEC, BR_SPEC, MD_SPEC, DIV_SPEC),
                         rob_depth=32, sptag_len=4, st_buf_depth=4,
                         instr_mem_idx_width=8, data_mem_idx_width=8,
                         bp=FallThroughSpec())
@@ -112,7 +113,7 @@ def test_the_dispatch_bus_says_which_station_a_lane_is_for():
     # rsv id and every station checks it. It is an ADDED field: the station
     # answers it on the way in and stores nothing.
     cfg = _cfg()
-    assert rsv_id_width(cfg) == 2            # four stations: alu, mem, control, muldiv
+    assert rsv_id_width(cfg) == 3            # five stations: alu, mem, control, mul, div
     host = _drive(RsvO3, O3_SPEC, rsv_idx=0)
     assert host.station.rsv_idx == 0
 

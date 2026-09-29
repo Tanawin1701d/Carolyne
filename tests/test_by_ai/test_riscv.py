@@ -286,7 +286,7 @@ def test_the_package_is_description_data_only():
     import ast, pathlib
 
     SEMANTICS = {"exec_unit_alu.py", "exec_unit_br.py", "exec_unit_ls.py",
-                 "exec_unit_muldiv.py"}
+                 "exec_unit_mul.py", "exec_unit_div.py"}
 
     pkg = pathlib.Path(__file__).resolve().parents[2] / "carolyne" / "isa" / "riscv"
     for source in sorted(pkg.glob("*.py")):

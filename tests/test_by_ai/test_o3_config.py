@@ -17,7 +17,8 @@ ALU   = (ISA.unit("alu"),)                  # one unit: all an in-order station 
 STATIONS = (RsvSpec(False, 16, ALU,                      RsvType.RSV_EXEC),
             RsvSpec(False, 16, (ISA.unit("mem"),),       RsvType.RSV_LD_ST),
             RsvSpec(False, 16, (ISA.unit("control"),),   RsvType.RSV_BRANCH),
-            RsvSpec(False, 16, (ISA.unit("muldiv"),),    RsvType.RSV_EXEC))
+            RsvSpec(False, 16, (ISA.unit("mul"),),    RsvType.RSV_EXEC),
+            RsvSpec(False, 16, (ISA.unit("div"),),    RsvType.RSV_EXEC))
 
 
 def _cfg(**overrides):
@@ -112,11 +113,11 @@ def test_a_station_holds_its_unit_set_to_its_issue_policy():
     # An IN-ORDER station promises entries LEAVE in the order they arrived.
     # One stage chain keeps that order; two chains of their own depth and
     # their own stalls do not, so in-order feeds exactly ONE unit.
-    with pytest.raises(ValueError, match="IN-ORDER station feeds 4"):
+    with pytest.raises(ValueError, match=f"IN-ORDER station feeds {len(UNITS)}"):
         RsvSpec(False, 16, UNITS, RsvType.RSV_BRANCH)
     # Out of order there is no order to keep, so several units are legal.
-    o3 = RsvSpec(True, 16, (ISA.unit("alu"), ISA.unit("muldiv")), RsvType.RSV_EXEC)
-    assert o3.label == "alu/muldiv"
+    o3 = RsvSpec(True, 16, (ISA.unit("alu"), ISA.unit("mul")), RsvType.RSV_EXEC)
+    assert o3.label == "alu/mul"
     # Two units need the order for themselves: a branch returns its tag in
     # order, and the store buffer forwards the newest OLDER store.
     with pytest.raises(ValueError, match="branch on an OUT-OF-ORDER station"):

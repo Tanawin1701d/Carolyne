@@ -30,7 +30,8 @@ MEM     = ISA.unit("mem")           # the unit whose µops read the immediate
 STATIONS = (RsvSpec(False, 16, (ISA.unit("alu"),),     RsvType.RSV_EXEC),
             RsvSpec(False, 16, (ISA.unit("mem"),),     RsvType.RSV_LD_ST),
             RsvSpec(False, 16, (ISA.unit("control"),), RsvType.RSV_BRANCH),
-            RsvSpec(False, 16, (ISA.unit("muldiv"),),  RsvType.RSV_EXEC))
+            RsvSpec(False, 16, (ISA.unit("mul"),),  RsvType.RSV_EXEC),
+            RsvSpec(False, 16, (ISA.unit("div"),),  RsvType.RSV_EXEC))
 
 
 def _cfg(**overrides):

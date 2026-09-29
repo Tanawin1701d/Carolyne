@@ -92,7 +92,8 @@ def test_a_unit_states_its_uop_ids_as_runs():
     isa = Rv32im()
     assert isa.unit("alu").uop_idx_ranges()     == ((0, 1), (18, 36))
     assert isa.unit("mem").uop_idx_ranges()     == ((10, 17),)
-    assert isa.unit("muldiv").uop_idx_ranges()  == ((37, 44),)
+    assert isa.unit("mul").uop_idx_ranges()     == ((37, 40),)
+    assert isa.unit("div").uop_idx_ranges()     == ((41, 44),)
     assert isa.unit("control").uop_idx_ranges() == ((2, 9),)
 
 
