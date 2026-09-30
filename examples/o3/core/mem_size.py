@@ -1,7 +1,6 @@
 # The machine's memory SIZING facts, both directions: bytes to the INDEX
-# WIDTH a memory of that size needs (idx_width_for), a config to the
-# whole-machine MachineMem the compile tool takes (machine_mem_of), and a
-# config to the HostMap a board reaches the memories through (host_map_of).
+# WIDTH a memory of that size needs (bank_idx_width_for), and a config to the
+# whole-machine MachineMem the compile tool takes (machine_mem_of).
 #
 # NOT here: kathryn. A config builder imports this before any hardware exists.
 
@@ -11,14 +10,13 @@ from typing import TYPE_CHECKING
 
 from carolyne.util import is_power_of_two
 
-from examples.compile_tool.layout import DMEM_BASE, MachineMem, MemoryLayout
-from examples.fpga.bridge import HostMap
+from examples.compile_tool.layout import DMEM_BASE, MachineMem
 
 if TYPE_CHECKING:
     from carolyne.uarch.o3.config import CPUO3_Config
 
 
-def idx_width_for(total_bytes: int, banks: int, word_bytes: int) -> int:
+def bank_idx_width_for(total_bytes: int, banks: int, word_bytes: int) -> int:
     """The index width one bank needs for a memory of this many bytes.
 
     A memory holds `banks * 2**index_width * word_bytes` bytes, so the width
@@ -28,13 +26,13 @@ def idx_width_for(total_bytes: int, banks: int, word_bytes: int) -> int:
                         ("word_bytes", word_bytes)):
         if not is_power_of_two(value):
             raise ValueError(
-                f"idx_width_for: {what} must be a power of two — the address "
+                f"bank_idx_width_for: {what} must be a power of two — the address "
                 f"is a part-select, not a compare — got {value}")
 
     words_per_bank, remainder = divmod(total_bytes, banks * word_bytes)
     if remainder or words_per_bank < 1:
         raise ValueError(
-            f"idx_width_for: {total_bytes} bytes does not divide into {banks} "
+            f"bank_idx_width_for: {total_bytes} bytes does not divide into {banks} "
             f"bank(s) of {word_bytes}-byte words")
     return words_per_bank.bit_length() - 1
 
@@ -55,20 +53,3 @@ def machine_mem_of(config: CPUO3_Config, dmem_base: int = DMEM_BASE) -> MachineM
                       dmem_bytes = data.size_bytes,
                       word_bytes = data.data_bus_bytes)
 
-
-def host_map_of(config: CPUO3_Config, console_depth: int) -> HostMap:
-    """The HostBridge window for this machine, DERIVED from the same specs the
-    hardware and the images are sized from.
-
-    - the doors are the layout's MMIO words as data-memory WORD indices — what
-      the store port reports, which is what the bridge compares against
-    """
-    machine_mem = machine_mem_of(config)
-    layout      = MemoryLayout.from_spec(machine_mem)
-    doors       = {name: layout.data_index(addr) for name, addr in layout.mmio_addrs.items()}
-    return HostMap(imem_bytes    = machine_mem.imem_bytes,
-                   imem_banks    = machine_mem.imem_banks,
-                   dmem_bytes    = machine_mem.dmem_bytes,
-                   console_depth = console_depth,
-                   doors         = doors,
-                   word_bytes    = machine_mem.word_bytes)

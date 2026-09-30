@@ -5,7 +5,7 @@
 # The machine and the program are built APART: one bitstream runs every
 # program, since the images are loaded at run time through the bridge. A
 # family binds `build_o3_fpga_machine` to its own config builder and target
-# (examples/o3/rv32im/system.py); the program side is family-blind.
+# (examples/o3/rv32im/fpga.py); the program side is family-blind.
 
 from __future__ import annotations
 
@@ -18,14 +18,14 @@ from kathryn.sim.rtl import read_manifest
 
 from carolyne.uarch.o3.config import CPUO3_Config
 from examples.compile_tool import build_program, target_named
-from examples.compile_tool.layout import DEFAULT_DMEM_BYTES, DEFAULT_IMEM_BYTES
+from examples.compile_tool.layout import DEFAULT_DMEM_BYTES, DEFAULT_IMEM_BYTES, MemoryLayout
 from examples.fpga.bridge import SPEC_FILE, BridgeRunSpec, HostMap, write_bridge_run_spec
 from examples.fpga.bridge.bridge_hardware import HostBridge
-from examples.fpga.system import FpgaMachine, FpgaProgram, FpgaSystem
+from examples.fpga.system import FpgaMachine, FpgaProgram
 from examples.o3.core.build import BridgeBuilder, build_debug_model
-from examples.o3.core.mem_size import host_map_of, machine_mem_of
+from examples.o3.core.mem_size import machine_mem_of
 
-ConfigForSizes = Callable[..., Tuple[CPUO3_Config, Dict[str, int]]]
+GenConfigForSizes = Callable[..., Tuple[CPUO3_Config, Dict[str, int]]]
 
 REPO          = pathlib.Path(__file__).resolve().parents[3]
 MACHINE_ROOT  = REPO / "generated" / "fpga" / "machine"
@@ -36,23 +36,41 @@ DEFAULT_CYCLE_LIMIT   = 8_000_000
 DEFAULT_TIMEOUT_S     = 60.0
 
 
+def host_map_of(config: CPUO3_Config, console_depth: int) -> HostMap:
+    """The HostBridge window for this machine, DERIVED from the same specs the
+    hardware and the images are sized from.
+
+    - the doors are the layout's MMIO words as data-memory WORD indices — what
+      the store port reports, which is what the bridge compares against
+    """
+    machine_mem = machine_mem_of(config)
+    layout      = MemoryLayout.from_spec(machine_mem)
+    doors       = {name: layout.data_index(addr) for name, addr in layout.mmio_addrs.items()}
+    return HostMap(imem_bytes    = machine_mem.imem_bytes,
+                   imem_banks    = machine_mem.imem_banks,
+                   dmem_bytes    = machine_mem.dmem_bytes,
+                   console_depth = console_depth,
+                   doors         = doors,
+                   word_bytes    = machine_mem.word_bytes)
+
+
 def machine_label(target: str, lanes: int, imem_bytes: int, dmem_bytes: int, console_depth: int) -> str:
     return f"{target}_l{lanes}_i{imem_bytes}_d{dmem_bytes}_c{console_depth}"
 
 
-def build_o3_fpga_machine(config_for_sizes : ConfigForSizes,
-                          target           : str,
-                          imem_bytes       : int = DEFAULT_IMEM_BYTES,
-                          dmem_bytes       : int = DEFAULT_DMEM_BYTES,
-                          lanes            : int = 2,
-                          console_depth    : int = DEFAULT_CONSOLE_DEPTH,
-                          machine_dir      : str = "") -> FpgaMachine:
+def build_o3_fpga_machine(gen_config_for_sizes : GenConfigForSizes,
+                          target               : str,
+                          imem_bytes           : int = DEFAULT_IMEM_BYTES,
+                          dmem_bytes           : int = DEFAULT_DMEM_BYTES,
+                          lanes                : int = 2,
+                          console_depth        : int = DEFAULT_CONSOLE_DEPTH,
+                          machine_dir          : str = "") -> FpgaMachine:
     """The machine with its bridge, emitted: what a bitstream is built from.
 
-    - `config_for_sizes(imem_bytes, dmem_bytes, fe_lanes=lanes)` returns the
+    - `gen_config_for_sizes(imem_bytes, dmem_bytes, fe_lanes=lanes)` returns the
       config AND the knobs that rebuild it (the sim's recipe, reused)
     """
-    config, knobs = config_for_sizes(imem_bytes, dmem_bytes, fe_lanes=lanes)
+    config, knobs = gen_config_for_sizes(imem_bytes, dmem_bytes, fe_lanes=lanes)
     label         = machine_label(target, lanes, imem_bytes, dmem_bytes, console_depth)
     machine_dir   = machine_dir or str(MACHINE_ROOT / label)
     rtl_dir       = os.path.join(machine_dir, "rtl")
@@ -100,24 +118,6 @@ def build_o3_fpga_program(machine     : FpgaMachine,
                        c_sources = tuple(c_sources),
                        instr_hex = instr_hex,
                        data_hex  = data_hex)
-
-
-def build_o3_fpga_system(config_for_sizes : ConfigForSizes,
-                         target           : str,
-                         c_sources        : Sequence[str],
-                         run_dir          : str,
-                         name             : str,
-                         imem_bytes       : int   = DEFAULT_IMEM_BYTES,
-                         dmem_bytes       : int   = DEFAULT_DMEM_BYTES,
-                         lanes            : int   = 2,
-                         console_depth    : int   = DEFAULT_CONSOLE_DEPTH,
-                         opt              : str   = "-O2",
-                         cycle_limit      : int   = DEFAULT_CYCLE_LIMIT,
-                         timeout_s        : float = DEFAULT_TIMEOUT_S) -> FpgaSystem:
-    """Machine and program together: one run of the flow."""
-    machine = build_o3_fpga_machine(config_for_sizes, target, imem_bytes, dmem_bytes, lanes, console_depth)
-    program = build_o3_fpga_program(machine, c_sources, run_dir, name, opt, cycle_limit, timeout_s)
-    return FpgaSystem(machine, program)
 
 
 def bridge_builder_for(host_map: HostMap) -> BridgeBuilder:

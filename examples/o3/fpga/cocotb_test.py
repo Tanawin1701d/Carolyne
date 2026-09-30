@@ -3,8 +3,9 @@
 # top's host_* ports instead of PYNQ's MMIO. No probes, no model rebuild, so it
 # serves every machine family.
 #
-# It reads the bridge run spec $CAROLYNE_BRIDGE_RUN_SPEC names and writes the
-# RunResult into $CAROLYNE_BRIDGE_OUT_DIR (default: the spec's own directory).
+# It runs every program the sim batch names (each program's env carries its
+# $CAROLYNE_BRIDGE_RUN_SPEC), or the one its own environment names, and writes
+# each RunResult into $CAROLYNE_BRIDGE_OUT_DIR (default: the spec's own dir).
 #
 # The host's wait is bounded in CLOCK EDGES here: the spec's cycle_limit is
 # also the hardware's CYCLE_LIMIT, so FINISHED comes within that many cycles
@@ -29,6 +30,7 @@ from examples.fpga.bridge.bridge_port_cocotb import (CocotbResetLine, CocotbWord
                                                      start_clock)
 from examples.fpga.result import run_result_of_outcome                                        # noqa: E402
 from examples.sim.result import RESULT_FILE, write_result                                     # noqa: E402
+from examples.sim.system import read_sim_batch                                                # noqa: E402
 
 POLL_CYCLES  = 64
 POLL_S       = 1e-3          # the driver's unit of waiting; a poll here is POLL_CYCLES edges
@@ -42,14 +44,27 @@ def polls_for(cycle_limit: int, timeout_s: float) -> float:
     return (math.ceil(cycle_limit / POLL_CYCLES) + SPARE_POLLS) * POLL_S
 
 
-@cocotb.test()
-async def run_program(dut):
-    """Load, start and run one program through the bridge until it stops."""
-    spec     = read_bridge_run_spec()
-    host_map = HostMap.from_dict(spec.host_map)
-    out_dir  = os.environ.get(OUT_DIR_ENV) or os.path.dirname(os.path.abspath(os.environ[SPEC_ENV]))
+def program_envs() -> list:
+    """One env per program this process runs: the batch's, else its own.
 
-    start_clock(dut)
+    - a batch ($CAROLYNE_SIM_BATCH) carries each program's env unread by the
+      sim; without one the process environment names the single program
+    """
+    programs = read_sim_batch()
+    if programs is None:
+        return [dict(os.environ)]
+    for program in programs:
+        if not program["env"].get(SPEC_ENV):
+            raise RuntimeError(f"batch program '{program['name']}' names no ${SPEC_ENV} in its env")
+    return [program["env"] for program in programs]
+
+
+async def run_one(dut, env: dict):
+    """Load, start and run the program `env` names; its result lands in its out dir."""
+    spec     = read_bridge_run_spec(env.get(SPEC_ENV))
+    host_map = HostMap.from_dict(spec.host_map)
+    out_dir  = env.get(OUT_DIR_ENV) or os.path.dirname(os.path.abspath(env[SPEC_ENV]))
+
     driver  = HostDriver(CocotbWordPort(dut, POLL_CYCLES), CocotbResetLine(dut), host_map)
     outcome = await driver.run_program([read_hex_words(path) for path in spec.instr_hex],
                                        read_hex_words(spec.data_hex),
@@ -59,8 +74,20 @@ async def run_program(dut):
 
     result = run_result_of_outcome(outcome, out_dir)
     write_result(os.path.join(out_dir, RESULT_FILE), result)
-    dut._log.info(f"stopped: {result.stop_reason} after {result.cycles} cycles, exit {result.exit_code}")
+    dut._log.info(f"{spec.name}: stopped {result.stop_reason} after {result.cycles} cycles, "
+                  f"exit {result.exit_code}")
     dut._log.info("console: " + repr(result.console))
-    assert result.stop_reason == "exit", (
-        f"the program did not reach its exit door: stopped on {result.stop_reason} after "
-        f"{result.cycles} cycles; console so far {result.console!r}")
+    return spec.name, result
+
+
+@cocotb.test()
+async def run_program(dut):
+    """Every program of the batch through the bridge, each run to its stop."""
+    start_clock(dut)                      # once; the driver resets the machine per program
+    failures = []
+    for env in program_envs():
+        name, result = await run_one(dut, env)
+        if result.stop_reason != "exit":
+            failures.append(f"{name}: stopped on {result.stop_reason} after {result.cycles} "
+                            f"cycles; console so far {result.console!r}")
+    assert not failures, "a program did not reach its exit door:\n" + "\n".join(failures)

@@ -36,7 +36,7 @@ from examples.compile_tool.cheader import render_c_header
 from examples.compile_tool.image import build_image
 from examples.compile_tool.layout import DMEM_BASE, MMIO_BYTES, MemoryLayout, MachineMem
 from examples.compile_tool.ldscript import render_linker_script
-from examples.o3.core.mem_size import idx_width_for, machine_mem_of
+from examples.o3.core.mem_size import bank_idx_width_for, machine_mem_of
 from examples.compile_tool.verify import decode_hits, verify_program
 
 ISA      = Rv32im()
@@ -196,19 +196,19 @@ def test_a_region_base_that_the_hardware_would_not_truncate_away_is_refused():
     (4096, 1, 4, 10),
 ])
 def test_a_byte_size_becomes_the_index_width_one_bank_needs(total, banks, word, want):
-    assert idx_width_for(total, banks, word) == want
+    assert bank_idx_width_for(total, banks, word) == want
 
 
 def test_a_size_that_does_not_divide_into_the_banks_is_refused():
     with pytest.raises(ValueError, match="power of two"):
-        idx_width_for(8192 + 4, 2, 4)
+        bank_idx_width_for(8192 + 4, 2, 4)
 
 
 def test_the_layout_derives_the_same_widths_as_the_machine_side():
-    """from_spec's private twin and examples/o3's idx_width_for may not drift."""
+    """from_spec's private twin and examples/o3's bank_idx_width_for may not drift."""
     layout = _layout(8192, 4096)
-    assert layout.imem_idx_width == idx_width_for(8192, layout.imem_banks, 4)
-    assert layout.dmem_idx_width == idx_width_for(4096, 1, 4)
+    assert layout.imem_idx_width == bank_idx_width_for(8192, layout.imem_banks, 4)
+    assert layout.dmem_idx_width == bank_idx_width_for(4096, 1, 4)
 
 
 # --- the bank interleave ------------------------------------------------------

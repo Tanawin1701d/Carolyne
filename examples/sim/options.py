@@ -1,5 +1,5 @@
 # What the SIM varies about a run. Machine and program knobs are not here —
-# they are arguments of the system builder (examples/o3/core/system.py).
+# they are arguments of the system builder (examples/o3/sim/system.py).
 
 from __future__ import annotations
 

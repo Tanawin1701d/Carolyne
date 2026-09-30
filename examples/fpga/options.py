@@ -1,5 +1,5 @@
 # What the FLOW varies about a run. Machine and program knobs are not here —
-# they are arguments of the machine-side builders (examples/o3/core/fpga_system.py).
+# they are arguments of the machine-side builders (examples/o3/fpga/system.py).
 
 from __future__ import annotations
 

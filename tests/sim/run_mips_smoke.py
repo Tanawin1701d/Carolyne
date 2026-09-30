@@ -26,10 +26,10 @@ from examples.compile_tool.elf32 import Elf32, Section                        # 
 from examples.compile_tool.image import build_image                           # noqa: E402
 from examples.compile_tool.layout import MemoryLayout                         # noqa: E402
 from examples.o3.core.mem_size import machine_mem_of                          # noqa: E402
-from examples.o3.core.run_spec import SPEC_ENV, SPEC_FILE, build_run_spec, write_run_spec  # noqa: E402
-from examples.o3.core.system import emit_machine                              # noqa: E402
-from examples.o3.mips32.config import gen_o3_mips32_config_for_sizes          # noqa: E402
-from examples.o3.mips32.system import TARGET, TEST_CASE, TEST_MODULE          # noqa: E402
+from examples.o3.sim.run_spec import SPEC_ENV, SPEC_FILE, build_run_spec, write_run_spec  # noqa: E402
+from examples.o3.sim.system import emit_machine                              # noqa: E402
+from examples.o3.mips32.config import TARGET, gen_o3_mips32_config_for_sizes  # noqa: E402
+from examples.o3.mips32.sim import TEST_CASE, TEST_MODULE                    # noqa: E402
 from examples.sim.options import SimOptions                                   # noqa: E402
 from examples.sim.runner import SIM_ROOT, run_system                          # noqa: E402
 from examples.sim.system import SimSystem                                     # noqa: E402

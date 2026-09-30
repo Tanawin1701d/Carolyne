@@ -19,10 +19,10 @@ from examples.fpga.result import describe_flags, read_board_outcome
 from examples.fpga.runner import (FPGA_ROOT, build_bitstream, describe_bitstream, run_in_simulation,
                                   run_on_board, run_plain_simulation)
 from examples.fpga.system import FpgaSystem
-from examples.o3.core.fpga_system import (DEFAULT_CONSOLE_DEPTH, DEFAULT_CYCLE_LIMIT,
+from examples.o3.fpga.system import (DEFAULT_CONSOLE_DEPTH, DEFAULT_CYCLE_LIMIT,
                                           DEFAULT_TIMEOUT_S, build_o3_fpga_program)
-from examples.o3.mips32.system import build_fpga_machine as build_mips32_machine
-from examples.o3.rv32im.system import build_fpga_machine as build_rv32im_machine
+from examples.o3.mips32.fpga import build_fpga_machine as build_mips32_machine
+from examples.o3.rv32im.fpga import build_fpga_machine as build_rv32im_machine
 from examples.sim.options import SimOptions
 from examples.sim.oracle import compare_console, read_expected_text
 from examples.sim.report import EXIT_HARNESS, describe, exit_code_for

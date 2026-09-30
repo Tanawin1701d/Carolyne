@@ -15,8 +15,7 @@ from kathryn.signal import to_ref
 from examples.fpga.bridge import HOST_ADDR, HOST_EN, HOST_PORT_NAMES, HOST_RDATA, HostMap
 from examples.fpga.bridge.bridge_hardware import HostBridge
 from examples.o3.core.build import build_machine
-from examples.o3.core.fpga_system import HOST_MAP_FILE, bridge_builder_for, emit_machine_with_bridge
-from examples.o3.core.mem_size import host_map_of
+from examples.o3.fpga.system import HOST_MAP_FILE, bridge_builder_for, emit_machine_with_bridge, host_map_of
 from examples.o3.mips32.config import gen_o3_mips32_config
 from examples.o3.rv32im.config import gen_o3_rv32im_config
 

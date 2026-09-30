@@ -20,9 +20,9 @@ from typing import Dict, List
 
 from examples.compile_tool.cli import parse_size
 from examples.compile_tool.layout import DEFAULT_DMEM_BYTES, DEFAULT_IMEM_BYTES
-from examples.o3.core.system import build_o3_sim_program
-from examples.o3.mips32.system import build_sim_machine as build_mips32_machine
-from examples.o3.rv32im.system import build_sim_machine as build_rv32im_machine
+from examples.o3.sim.system import build_o3_sim_program
+from examples.o3.mips32.sim import build_sim_machine as build_mips32_machine
+from examples.o3.rv32im.sim import build_sim_machine as build_rv32im_machine
 from examples.sim.options import SimOptions
 from examples.sim.oracle import Verdict, compare_console, read_expected_text
 from examples.sim.report import EXIT_HARNESS, EXIT_OK, describe, exit_code_for

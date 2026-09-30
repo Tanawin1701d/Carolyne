@@ -63,16 +63,16 @@ contract bug — fix the contract, not the engine.
 | `carolyne/debug/sim/`         | debug probes: `kathryn.DebugProbe` subclasses for pipeline status, Karray tables, memory ports and a declared branch resolution |
 | `carolyne/debug/log/`         | turning a run into something readable: the slot table, the console, cycle events, the O3 row |
 | `examples/sim/`               | the universal simulator: run a BUILT machine's programs (kathryn sim + report only); since 2026-09-29 a `SimMachine` is emitted and compiled ONCE and a `SimBatch` runs many `SimProgram`s in one simulator process (`run batch`, the sweep); was `examples/sim/rv_sim/` until 2026-09-18 |
-| `examples/o3/core/system.py`  | `build_o3_system(config_for_sizes, target, test_module, ...)`: the ONE recipe every family runs — config, images, emitted Verilog, the run spec; `run_spec.py` and `cocotb_run.py` beside it |
-| `examples/o3/rv32im/system.py`| the RV32IM family: a few-line binding of the core recipe to `gen_o3_rv32im_config_for_sizes`; `cocotb_test.py` likewise (was the whole recipe until 2026-09-21) |
-| `examples/o3/mips32/`         | the MIPS32 family: `config.py` (`gen_o3_mips32_config`, r/hi/lo `phy_specs`), the same thin `system.py` / `cocotb_test.py` |
+| `examples/o3/sim/`            | the O3 side of the SIM flow (2026-09-30): `system.py` (`build_o3_sim_machine` / `build_o3_sim_program`, the ONE recipe every family runs), `run_spec.py` (the per-program handoff JSON the cocotb body reads), `cocotb_run.py` (the cocotb body); was `examples/o3/core/{system,run_spec,cocotb_run}.py` |
+| `examples/o3/rv32im/`         | the RV32IM family: `config.py` (ISA + config + `TARGET`), `sim.py` (`build_sim_machine`, `TEST_MODULE`), `fpga.py` (`build_fpga_machine`), `sim_cocotb_test.py` (the cocotb entry) — one file per flow, each a few-line binding of the shared recipe (was one mixed `system.py` until 2026-09-30) |
+| `examples/o3/mips32/`         | the MIPS32 family: `config.py` (`gen_o3_mips32_config`, r/hi/lo `phy_specs`, `TARGET`), the same `sim.py` / `fpga.py` / `sim_cocotb_test.py` |
 | `examples/sim/sweep.py`       | every test program through the sim for one target, one subprocess each, a table at the end |
 | `examples/fpga/`              | the FPGA flow: a BUILT machine to a bitstream (`backend/`, Vivado today), the bitstream to the board (`board/`, ssh + PYNQ), the board's run compared with the sim's (`compare.py`); `system.py` is the contract, `cli.py` the one table naming families (2026-09-28) |
 | `examples/fpga/bridge/`       | the HostBridge: the window a host sees (`bridge_map.py`), the driver protocol written once for cocotb, PYNQ and tests (`bridge_driver.py`), the Kathryn module (`bridge_hardware.py`); the stdlib files are what the board receives |
-| `examples/o3/core/fpga_system.py` | the machine-side FPGA recipe: `build_o3_fpga_machine` (emit WITH the bridge, once per config), `build_o3_fpga_program` (images + `bridge_run_spec.json`, per program); `cocotb_bridge_test.py` beside it is the board-in-simulation test |
+| `examples/o3/fpga/`           | the O3 side of the FPGA flow (2026-09-30): `system.py` (`build_o3_fpga_machine` — emit WITH the bridge, once per config; `build_o3_fpga_program` — images + `bridge_run_spec.json`; `host_map_of`), `cocotb_test.py` (the board-in-simulation test); was `examples/o3/core/{fpga_system,cocotb_bridge_test}.py` |
 | `carolyne/debugger/o3/`       | SUPERSEDED 2026-09-14 — deleted; see §4 THE OBSERVE / VIEW DELETION |
 | `carolyne/view/o3/`           | SUPERSEDED 2026-09-14 — deleted; see §4 THE OBSERVE / VIEW DELETION |
-| `examples/o3/core/build.py`   | `O3Machine(config)`: memories + ports + CoreO3, for ANY CPUO3_Config |
+| `examples/o3/core/`           | the machine only, flow-neutral: `build.py` (`O3Machine(config)`: memories + ports + CoreO3, for ANY CPUO3_Config), `mem_size.py` (`bank_idx_width_for`, `machine_mem_of`) |
 | `examples/o3/rv32im/config.py`| the RV32IM description + config (`rv32im_isa` / `rv32im_stations` / `rv32im_config`) |
 | `examples/o3_riscv32/`        | SUPERSEDED 2026-09-15 — moved to `examples/o3/`; its `sim/` was deleted 2026-09-14 |
 | `examples/compile_tool/`      | SUBMODULE (github.com/Tanawin1701d/compile_tool, since 2026-09-28): C to memory images for any target (rv32im, mips32); was `examples/o3_riscv32/compile_tool/` until 2026-09-15; `census.py` surveys what a compiler emits |
@@ -3794,6 +3794,48 @@ holds the last emit of each label) — reusing an emitted machine dir across
 processes would need the run-time model rebuild (`build_debug_model` in the
 cocotb process) to keep matching it, which the RTL digest does not guarantee
 alone.
+
+**EXAMPLES/O3 IS SPLIT BY FLOW** (2026-09-30, Tanawin: "examples/o3 is
+quite complex because it mixes both simulation and fpga together, I don't
+know which file is for sim or gen to fpga … run_spec.py I don't know if it is
+for sim or fpga or what"). Until now `examples/o3/core/` held three kinds of
+file with nothing in the name saying which: the machine (`build.py`,
+`mem_size.py`), the sim side (`system.py`, `run_spec.py`, `cocotb_run.py`)
+and the FPGA side (`fpga_system.py`, `cocotb_bridge_test.py`), and each
+family's `system.py` held BOTH `build_sim_machine` and `build_fpga_machine`.
+Decision (Tanawin's pick over prefixing the files in place): **one package
+per flow, mirroring the flows themselves** — `examples/o3/core/` is the
+machine only, `examples/o3/sim/` is the O3 side of `examples/sim`
+(`system.py`, `run_spec.py`, `cocotb_run.py`), `examples/o3/fpga/` the O3
+side of `examples/fpga` (`system.py`, `cocotb_test.py`), and a family is
+`config.py` + `sim.py` + `fpga.py` + `sim_cocotb_test.py`, so a directory
+listing answers the question the file names could not. Moved by `git mv`,
+history kept. Two leaks went with it: `host_map_of` left `mem_size.py` for
+`fpga/system.py`, so the machine's sizing module no longer imports
+`examples.fpga` (it needs neither kathryn nor a flow now), and **`TARGET`
+moved to each family's `config.py`** — both flows read it, so it is a family
+fact beside the config builders rather than a line in one flow's binding.
+COST, accepted: `examples/o3/sim/system.py` and `examples/sim/system.py`
+share a basename (the machine side of a flow and the flow itself); the
+package path tells them apart. The cocotb module strings follow
+(`examples.o3.rv32im.sim_cocotb_test`, `examples.o3.fpga.cocotb_test`), and
+the tests that open family files by path name the new ones. FOUND ON THE
+WAY, by running `simrun` on the new layout: **the board-in-simulation path
+had been broken since the batch commit** (072aeaa, 2026-09-29). `run_batch`
+writes each program's env into `sim_batch.json` and exports ONLY
+`$CAROLYNE_SIM_BATCH`; the O3 sim body reads its specs back through
+`read_run_specs`, but the bridge test still read `$CAROLYNE_BRIDGE_RUN_SPEC`
+off the bare environment and found nothing. Only the slow e2e covered it.
+`examples/o3/fpga/cocotb_test.py` now takes each program's env from the
+batch the way `read_run_specs` does (`program_envs`), and runs every program
+of the batch in one process — the clock started once, the driver's own
+reset per program — so a bridged machine can run a batch too. Pinned fast
+in `test_sim_batch.py`. MEASURED after: `simrun hello.c` 244 cycles, console
+matching the host, as before the batch commit. REMOVED with it (Tanawin:
+"build_system who call this" — nobody): the one-program-whole builders the
+split had left behind, `build_o3_system`, both families' `build_system` and
+`build_o3_fpga_system`; the CLIs build the machine and the program apart
+(`run` is a batch of one), and the FPGA CLI composes its own.
 
 ## 5. Environment & workflow
 

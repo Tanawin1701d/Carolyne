@@ -26,7 +26,7 @@ from examples.fpga.runner import (FPGA_ROOT, build_bitstream, describe_bitstream
                                   run_plain_simulations)
 from examples.fpga.board import read_board_link
 from examples.fpga.result import read_board_outcome
-from examples.o3.core.fpga_system import DEFAULT_CONSOLE_DEPTH, DEFAULT_CYCLE_LIMIT, build_o3_fpga_program
+from examples.o3.fpga.system import DEFAULT_CONSOLE_DEPTH, DEFAULT_CYCLE_LIMIT, build_o3_fpga_program
 from examples.sim.oracle import compare_console, compile_and_run_on_host
 
 REPO     = pathlib.Path(__file__).resolve().parents[2]

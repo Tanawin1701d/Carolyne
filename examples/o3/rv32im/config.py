@@ -19,7 +19,9 @@ from carolyne.uarch.o3.bp import FallThroughSpec
 from carolyne.uarch.o3.config import CPUO3_Config, RsvSpec, RsvType
 
 from examples.compile_tool.layout import DEFAULT_DMEM_BYTES, DEFAULT_IMEM_BYTES
-from examples.o3.core.mem_size import idx_width_for
+from examples.o3.core.mem_size import bank_idx_width_for
+
+TARGET = "rv32im"           # the compile_tool target both flows compile for
 
 
 def rv32im_isa() -> Rv32im:
@@ -98,6 +100,6 @@ def gen_o3_rv32im_config_for_sizes(imem_bytes : int = DEFAULT_IMEM_BYTES,
     isa    = rv32im_isa()
     lanes  = knobs.get("fe_lanes", 2)
     kwargs = dict(knobs,
-                  instr_mem_idx_width = idx_width_for(imem_bytes, lanes, isa.ilen_bytes),
-                  data_mem_idx_width  = idx_width_for(dmem_bytes, 1, isa.dlen_bytes))
+                  instr_mem_idx_width = bank_idx_width_for(imem_bytes, lanes, isa.ilen_bytes),
+                  data_mem_idx_width  = bank_idx_width_for(dmem_bytes, 1, isa.dlen_bytes))
     return gen_o3_rv32im_config(**kwargs), kwargs

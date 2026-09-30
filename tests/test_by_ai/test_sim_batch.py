@@ -9,10 +9,10 @@ import shutil
 
 import pytest
 
-from examples.o3.core.run_spec import SPEC_ENV, SPEC_FILE, read_run_spec, read_run_specs, write_run_spec
-from examples.o3.core.system import build_o3_sim_program, machine_label
-from examples.o3.rv32im.config import gen_o3_rv32im_config_for_sizes
-from examples.o3.rv32im.system import TARGET, TEST_CASE, TEST_MODULE
+from examples.o3.sim.run_spec import SPEC_ENV, SPEC_FILE, read_run_spec, read_run_specs, write_run_spec
+from examples.o3.sim.system import build_o3_sim_program, machine_label
+from examples.o3.rv32im.config import TARGET, gen_o3_rv32im_config_for_sizes
+from examples.o3.rv32im.sim import TEST_CASE, TEST_MODULE
 from examples.sim.cli import build_parser
 from examples.sim.system import (BATCH_ENV, SimBatch, SimMachine, SimProgram, SimSystem, read_sim_batch,
                                  write_sim_batch)
@@ -69,6 +69,32 @@ def test_a_batch_program_without_a_spec_is_refused(tmp_path, monkeypatch):
     monkeypatch.setenv(BATCH_ENV, str(batch_path))
     with pytest.raises(RuntimeError, match="names no"):
         read_run_specs()
+
+
+def test_the_bridge_test_reads_its_programs_out_of_the_batch_too(tmp_path, monkeypatch):
+    # the sim exports ONLY the batch file, so a test that reads the bare
+    # environment sees no spec; the bridge test must take each program's env
+    # from the batch the way read_run_specs does
+    from examples.fpga.bridge import OUT_DIR_ENV, SPEC_ENV as BRIDGE_SPEC_ENV
+    from examples.o3.fpga.cocotb_test import program_envs
+
+    programs = tuple(SimProgram(f"p{i}", str(tmp_path / f"p{i}"),
+                                {BRIDGE_SPEC_ENV: f"/x/p{i}/spec.json", OUT_DIR_ENV: f"/x/p{i}/sim"}, ())
+                     for i in range(2))
+    batch_path = tmp_path / "sim_batch.json"
+    write_sim_batch(str(batch_path), SimBatch(a_machine(tmp_path), programs))
+    monkeypatch.setenv(BATCH_ENV, str(batch_path))
+    monkeypatch.delenv(BRIDGE_SPEC_ENV, raising=False)
+    assert [env[BRIDGE_SPEC_ENV] for env in program_envs()] == ["/x/p0/spec.json", "/x/p1/spec.json"]
+
+    monkeypatch.delenv(BATCH_ENV)                          # no batch: the process env is the one program
+    monkeypatch.setenv(BRIDGE_SPEC_ENV, "/y/spec.json")
+    assert [env[BRIDGE_SPEC_ENV] for env in program_envs()] == ["/y/spec.json"]
+
+    write_sim_batch(str(batch_path), SimBatch(a_machine(tmp_path), (SimProgram("bare", str(tmp_path), {}, ()),)))
+    monkeypatch.setenv(BATCH_ENV, str(batch_path))
+    with pytest.raises(RuntimeError, match="names no"):
+        program_envs()
 
 
 def test_a_system_is_a_batch_of_one():

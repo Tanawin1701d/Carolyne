@@ -1,6 +1,6 @@
 # The FPGA flow: a BUILT machine to a bitstream, the bitstream to a board, and
 # the board's answer compared with the simulator's. Nothing here is machine
-# model — the O3 side (examples/o3/core/fpga_system.py) builds the machine with
+# model — the O3 side (examples/o3/fpga/system.py) builds the machine with
 # its HostBridge and hands this package the result.
 #
 #   bridge/      the HostBridge: the window a host sees, the driver protocol, the hardware

@@ -6,8 +6,8 @@ from __future__ import annotations
 from importlib import import_module
 
 from examples.compile_tool import MemoryLayout, target_named
-from examples.o3.mips32.config import gen_o3_mips32_config, gen_o3_mips32_config_for_sizes
-from examples.o3.mips32.system import TARGET, TEST_CASE, TEST_MODULE
+from examples.o3.mips32.config import TARGET, gen_o3_mips32_config, gen_o3_mips32_config_for_sizes
+from examples.o3.mips32.sim import TEST_CASE, TEST_MODULE
 from examples.o3.core.mem_size import machine_mem_of
 from examples.sim.cli import SYSTEMS
 
@@ -25,9 +25,9 @@ def test_the_cocotb_test_the_system_names_exists():
 def test_the_family_files_are_thin_bindings_over_the_shared_recipe():
     # a family names its builder, its target and its test; the recipe is one,
     # and the simulator-side entry imports no toolchain
-    system = open("examples/o3/mips32/system.py",      encoding="utf-8").read()
-    cocotb = open("examples/o3/mips32/cocotb_test.py", encoding="utf-8").read()
-    assert "build_o3_system(" in system and "build_model(" not in system
+    system = open("examples/o3/mips32/sim.py",             encoding="utf-8").read()
+    cocotb = open("examples/o3/mips32/sim_cocotb_test.py", encoding="utf-8").read()
+    assert "build_o3_sim_machine(" in system and "build_model(" not in system
     assert "run_o3_program(" in cocotb and "build_model(" not in cocotb
     assert "compile_tool" not in cocotb
 

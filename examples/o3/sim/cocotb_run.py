@@ -1,6 +1,6 @@
 # THE SIMULATION ITSELF — the one cocotb body every O3 family runs: for every
 # program of the batch, reset the machine, load the images, release the
-# memories and run until the program stops. A family's cocotb_test.py is the
+# memories and run until the program stops. A family's sim_cocotb_test.py is the
 # `@cocotb.test()` entry that calls `run_o3_program` with its own config builder.
 #
 # It runs in the SIMULATOR's process, so it rebuilds the model ONCE: a probe's
@@ -39,7 +39,7 @@ from carolyne.debug.log.slot_writer import ChunkedWriter, WindowWriter
 from carolyne.debug.sim             import read_value
 from carolyne.uarch.o3.config       import CPUO3_Config
 from examples.o3.core.build         import build_debug_model
-from examples.o3.core.run_spec      import RunSpec, read_hex_words, read_run_specs
+from examples.o3.sim.run_spec      import RunSpec, read_hex_words, read_run_specs
 from examples.sim.result            import RESULT_FILE, RunResult, write_result
 
 CLOCK_NS = 10

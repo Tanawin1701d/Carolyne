@@ -1,6 +1,7 @@
-# The RV32IM cocotb entry: the shared simulation body (examples/o3/core/
-# cocotb_run.py) over this family's own config builder. cocotb imports this
-# module inside the simulator, where the repo is not on sys.path.
+# The RV32IM cocotb entry of the sim flow: the shared simulation body
+# (examples/o3/sim/cocotb_run.py) over this family's own config builder.
+# cocotb imports this module inside the simulator, where the repo is not on
+# sys.path.
 
 from __future__ import annotations
 
@@ -13,7 +14,7 @@ REPO = pathlib.Path(__file__).resolve().parents[3]
 if str(REPO) not in sys.path:
     sys.path.insert(0, str(REPO))
 
-from examples.o3.core.cocotb_run import run_o3_program        # noqa: E402
+from examples.o3.sim.cocotb_run import run_o3_program        # noqa: E402
 from examples.o3.rv32im.config   import gen_o3_rv32im_config  # noqa: E402
 
 

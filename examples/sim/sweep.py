@@ -25,7 +25,7 @@ from typing import List, Sequence
 
 from examples.compile_tool.cli import parse_size
 from examples.compile_tool.layout import DEFAULT_IMEM_BYTES
-from examples.o3.core.system import build_o3_sim_program
+from examples.o3.sim.system import build_o3_sim_program
 from examples.sim.cli import SYSTEMS
 from examples.sim.options import SimOptions
 from examples.sim.oracle import compare_console, compile_and_run_on_host

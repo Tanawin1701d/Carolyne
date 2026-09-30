@@ -36,7 +36,7 @@ REPO      = pathlib.Path(__file__).resolve().parents[2]
 FPGA_ROOT = REPO / "generated" / "fpga"
 OK_MARKER = "ok"
 
-BRIDGE_TEST_MODULE = "examples.o3.core.cocotb_bridge_test"
+BRIDGE_TEST_MODULE = "examples.o3.fpga.cocotb_test"
 BRIDGE_TEST_CASE   = "run_program"
 
 BOARD_LOG          = "board.log"
