@@ -83,6 +83,7 @@ class VivadoBackend(FpgaBackend):
 
     def build(self, request: BitstreamRequest, build_dir: pathlib.Path,
               log_path: Optional[pathlib.Path] = None) -> Bitstream:
+        # step 1: make the build dir and export/, refuse early when vivado is missing
         build_dir  = pathlib.Path(build_dir)
         export_dir = build_dir / EXPORT_DIR
         build_dir.mkdir(parents=True, exist_ok=True)
@@ -91,10 +92,12 @@ class VivadoBackend(FpgaBackend):
             raise RuntimeError(
                 f"vivado not found at {self.vivado_bin} — set ${VIVADO_ENV} to the binary")
 
+        # step 2: write the filled templates and the host map, then run the flow
         self.write_inputs(request, build_dir)
         request.host_map.write_json(str(export_dir / HOST_MAP_FILE))
         self.run_vivado(build_dir, log_path or build_dir / "vivado_stdout.log")
 
+        # step 3: read the summary the tcl wrote; a --synth-only build has no .bit
         summary = export_dir / SUMMARY_FILE
         report  = parse_build_summary(summary) if summary.is_file() else {}
         bit     = export_dir / f"{request.name}.bit"
@@ -102,6 +105,8 @@ class VivadoBackend(FpgaBackend):
         if not request.synth_only and not (bit.is_file() and hwh.is_file()):
             raise RuntimeError(
                 f"vivado finished but export/ holds no {bit.name} + {hwh.name} — see {build_dir}")
+
+        # step 4: report what was built
         return Bitstream(bit_path      = str(bit),
                          hwh_path      = str(hwh),
                          host_map_path = str(export_dir / HOST_MAP_FILE),
