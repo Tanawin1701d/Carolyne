@@ -11,7 +11,7 @@ import cocotb
 from cocotb.clock import Clock
 from cocotb.triggers import RisingEdge, Timer
 
-from .bridge_driver import ResetLine, WordPort
+from .bridge_driver_base import ResetLine, WordPort
 from .bridge_map import HOST_ADDR, HOST_EN, HOST_RDATA, HOST_WDATA, HOST_WE
 
 CLOCK_NS    = 10

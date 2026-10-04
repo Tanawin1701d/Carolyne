@@ -29,12 +29,16 @@ from kathryn import Module, flow, init, mem_blk, mem_ele, mux, reg, val, wire, z
 from carolyne.uarch.mem.common.mem_port import MemPortWrite
 from carolyne.uarch.mem.easy_mem import EasyMem
 
-from .bridge_map import (CONSOLE_TAGS, CONSOLE_WORDS, CTRL_START, DMEM, HOST_ADDR, HOST_EN,
-                         HOST_RDATA, HOST_WDATA, HOST_WE, IMEM, MAGIC_WORD, REG_CONSOLE_COUNT,
-                         REG_CTRL, REG_CYCLE_LIMIT, REG_CYCLES, REG_EXIT_CODE, REG_GEOMETRY,
-                         REG_MAGIC, REG_SCRATCH, REG_STATUS, REGS, STATUS_CONSOLE_OVERFLOW,
-                         STATUS_CYCLE_LIMIT_HIT, STATUS_EXIT_SEEN, STATUS_FINISHED,
-                         STATUS_HOST_WRITE_REFUSED, STATUS_STARTED, HostMap, log2_exact)
+from .bridge_map import (CONSOLE_TAGS           , CONSOLE_WORDS            , CTRL_START       ,
+                         DMEM                   , HOST_ADDR                , HOST_EN          ,
+                         HOST_RDATA             , HOST_WDATA               , HOST_WE          ,
+                         IMEM                   , MAGIC_WORD               , REG_CONSOLE_COUNT,
+                         REG_CTRL               , REG_CYCLE_LIMIT          , REG_CYCLES       ,
+                         REG_EXIT_CODE          , REG_GEOMETRY             , REG_MAGIC        ,
+                         REG_SCRATCH            , REG_STATUS               , REGS             ,
+                         STATUS_CONSOLE_OVERFLOW, STATUS_CYCLE_LIMIT_HIT   , STATUS_EXIT_SEEN ,
+                         STATUS_FINISHED        , STATUS_HOST_WRITE_REFUSED, STATUS_STARTED   ,
+                         HostMap                , log2_exact)
 
 WORD_BITS  = 32
 REG_IDX_HI = 7            # register index = host_addr[7:2]: 64 word slots, 9 used

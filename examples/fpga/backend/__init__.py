@@ -1,17 +1,19 @@
 # The synthesis backends, behind one registry: a caller names a backend and
 # gets its class; a new tool is a new sub-package and one row in BACKENDS.
 #
-#   base.py       the contract (FpgaBackend, BoardInfo, BitstreamRequest, Bitstream) and the cache key
-#   template.py   fill_template: token and marker substitution, backend-neutral
-#   vivado/       AMD Vivado: a block design around the emitted top, to a bitstream + hwh
+#   base.py          the records (BoardInfo, BitstreamRequest, Bitstream) and the cache key
+#   fpga_backend.py  FpgaBackend, the ABC every backend implements
+#   template.py      fill_template: token and marker substitution, backend-neutral
+#   vivado/          AMD Vivado: a block design around the emitted top, to a bitstream + hwh
 
 from __future__ import annotations
 
 from typing import Dict, Type
 
-from .base     import Bitstream, BitstreamRequest, BoardInfo, FpgaBackend, bitstream_key
-from .template import fill_template, fill_text
-from .vivado   import VivadoBackend
+from .base         import Bitstream, BitstreamRequest, BoardInfo, bitstream_key
+from .fpga_backend import FpgaBackend
+from .template     import fill_template, fill_text
+from .vivado       import VivadoBackend
 
 BACKENDS: Dict[str, Type[FpgaBackend]] = {"vivado": VivadoBackend}
 

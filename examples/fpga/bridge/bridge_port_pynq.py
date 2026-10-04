@@ -12,7 +12,7 @@ import asyncio
 
 from pynq import MMIO, Overlay
 
-from .bridge_driver import ResetLine, WordPort
+from .bridge_driver_base import ResetLine, WordPort
 from .bridge_map import HOST_BRAM_CELL, RESET_GPIO_CELL, HostMap
 
 SETTLE_S = 1e-3            # after a reset edge, before the next access

@@ -25,7 +25,7 @@ from examples.fpga.system import FpgaProgram
 HERE                = pathlib.Path(__file__).resolve().parent
 BRIDGE_SRC          = HERE.parent / "bridge"
 BRIDGE_DIR_NAME     = "bridge"
-BOARD_PACKAGE_FILES = ("__init__.py", "bridge_map.py", "bridge_driver.py",
+BOARD_PACKAGE_FILES = ("__init__.py", "bridge_map.py", "bridge_driver.py", "bridge_driver_base.py",
                        "bridge_run_spec.py", "bridge_port_pynq.py")
 RUN_SCRIPT          = "run_on_board.py"
 RUNS_DIR            = "runs"

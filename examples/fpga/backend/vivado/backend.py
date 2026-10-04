@@ -22,8 +22,9 @@ import shutil
 import subprocess
 from typing import Dict, Optional, Sequence
 
-from examples.fpga.backend.base import (Bitstream, BitstreamRequest, BoardInfo, FpgaBackend)
-from examples.fpga.backend.template import fill_template
+from examples.fpga.backend.base          import Bitstream, BitstreamRequest, BoardInfo
+from examples.fpga.backend.fpga_backend  import FpgaBackend
+from examples.fpga.backend.template      import fill_template
 from examples.fpga.backend.vivado.report import SUMMARY_FILE, parse_build_summary
 from examples.fpga.bridge import HOST_BRAM_CELL, RESET_GPIO_CELL
 
@@ -86,7 +87,7 @@ class VivadoBackend(FpgaBackend):
         # step 1: make the build dir and export/, refuse early when vivado is missing
         build_dir  = pathlib.Path(build_dir)
         export_dir = build_dir / EXPORT_DIR
-        build_dir.mkdir(parents=True, exist_ok=True)
+        build_dir .mkdir(parents=True, exist_ok=True)
         export_dir.mkdir(exist_ok=True)
         if not self.is_available():
             raise RuntimeError(
