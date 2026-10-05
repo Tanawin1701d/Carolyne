@@ -48,9 +48,11 @@ BOARD_SESSION_SLACK_S = 120.0       # over the programs' own timeouts: overlay l
 def build_bitstream(machine: FpgaMachine, options: FpgaOptions = FpgaOptions()) -> Bitstream:
     """The machine's bitstream, built only when the cache has no bitstream for
     this RTL + board + clock (bitstream_key); a finished build leaves an `ok` marker."""
+    # 1. resolve the backend, the board and the emitted rtl
     backend = get_backend(options.backend)
     board   = backend.board(options.board)
     rtl     = open_rtl(pathlib.Path(machine.rtl_dir))
+    # 2. state the request, then name it and its build dir by the cache key
     request = BitstreamRequest(rtl_dir    = machine.rtl_dir,
                                top_module = machine.top_module,
                                host_map   = machine.host_map,
@@ -63,6 +65,7 @@ def build_bitstream(machine: FpgaMachine, options: FpgaOptions = FpgaOptions()) 
     build_dir = FPGA_ROOT / backend.name / key
     export    = build_dir / EXPORT_DIR
 
+    # 3. a finished build for this key: reuse its files
     if (build_dir / OK_MARKER).is_file():
         summary = export / SUMMARY_FILE
         return Bitstream(bit_path      = str(export / f"{request.name}.bit"),
@@ -72,6 +75,7 @@ def build_bitstream(machine: FpgaMachine, options: FpgaOptions = FpgaOptions()) 
                          reused        = True,
                          report        = parse_build_summary(summary) if summary.is_file() else {})
 
+    # 4. else build, and write the marker only after the build returns
     started   = time.perf_counter()
     bitstream = backend.build(request, build_dir, log_path=build_dir / "vivado_stdout.log")
     (build_dir / OK_MARKER).write_text(f"{request.name} {time.perf_counter() - started:.0f}s\n",
@@ -99,6 +103,7 @@ def run_many_on_board(machine   : FpgaMachine,
     - the result of each lands in <run_dir>/board, apart from its sim run
     - refuses a bitstream that missed timing unless the options allow it
     """
+    # 1. refuse a bitstream that missed timing or does not exist
     if bitstream.timing_met is False and not options.allow_timing_failure:
         raise RuntimeError(
             f"the bitstream in {bitstream.build_dir} missed timing — pass --allow-timing-failure "
@@ -106,16 +111,19 @@ def run_many_on_board(machine   : FpgaMachine,
     if not os.path.isfile(bitstream.bit_path):
         raise RuntimeError(f"no bitstream at {bitstream.bit_path} (a --synth-only build has none)")
 
+    # 2. upload the bitstream once, then every program's images and spec
     transport = SshTransport(link)
     remote    = deploy_machine(transport, link.remote_dir, bitstream)
     deploy_programs(transport, remote, programs)
 
+    # 3. run every spec in one board session; the timeout is the sum of theirs plus slack
     specs   = " ".join(shlex.quote(remote_spec_path(remote, p)) for p in programs)
     inner   = (f"{link.shell_prelude} && cd {shlex.quote(remote)} && "
                f"{link.python} {RUN_SCRIPT} {os.path.basename(bitstream.bit_path)} {specs}")
     timeout = sum(read_bridge_run_spec(p.spec_path).timeout_s for p in programs) + BOARD_SESSION_SLACK_S
     done    = transport.run(f"bash -c {shlex.quote(inner)}", timeout_s=timeout)
 
+    # 4. per program: keep the session log, then fetch the outcome and convert it to a RunResult
     results = {}
     for program in programs:
         out_dir = os.path.join(program.run_dir, "board")
@@ -133,6 +141,7 @@ def run_many_on_board(machine   : FpgaMachine,
         write_result(os.path.join(out_dir, RESULT_FILE), result)
         results[program.name] = result
 
+    # 5. a failed session raises after every log is written
     if done.returncode:
         raise RuntimeError(
             f"run_on_board.py exited {done.returncode} on {link.target}; the log ends:\n"
@@ -154,11 +163,13 @@ def run_plain_simulation(program: FpgaProgram, target: str, dmem_bytes: int, lan
                          opt: str, cycle_limit: int, name: str = "") -> RunResult:
     """The same program through `python -m examples.sim run` in ITS OWN process —
     Kathryn emits once per process, and this one already emitted the bridged machine."""
+    # 1. run the sim CLI in a subprocess, no log, no oracle
     name = name or f"{program.name}{SIM_REFERENCE_SUFFIX}"
     argv = [sys.executable, "-m", "examples.sim", "run", *program.c_sources,
             "--target", target, "--dmem", str(dmem_bytes), "--lanes", str(lanes), f"--opt={opt}",
             "--max-cycles", str(cycle_limit or 8_000_000), "--no-log", "--expect", "none", "--name", name]
     done = subprocess.run(argv, cwd=REPO, env=_sim_env(), capture_output=True, text=True)
+    # 2. read back the result.json it wrote
     path = SIM_ROOT / "run" / name / RESULT_FILE
     if not path.is_file():
         raise RuntimeError(f"the reference simulation wrote no result (rc {done.returncode}):\n{done.stdout[-2000:]}")
@@ -173,15 +184,18 @@ def run_plain_simulations(programs: Sequence[FpgaProgram], target: str, dmem_byt
     - one-file programs only, the batch command's rule; results by the FPGA
       program's name
     """
+    # 1. refuse a program with more than one source file
     for program in programs:
         if len(program.c_sources) != 1:
             raise ValueError(f"run_plain_simulations: '{program.name}' has {len(program.c_sources)} "
                              f"sources — the sim batch takes one file per program")
-    argv = [sys.executable, "-m", "examples.sim", "batch", *(p.c_sources[0] for p in programs),
+    # 2. run every program in one sim batch subprocess
+    argv =[sys.executable, "-m", "examples.sim", "batch", *(p.c_sources[0] for p in programs),
             "--target", target, "--dmem", str(dmem_bytes), "--lanes", str(lanes), f"--opt={opt}",
             "--max-cycles", str(cycle_limit or 8_000_000), "--no-log", "--expect", "none",
             "--suffix", SIM_REFERENCE_SUFFIX]
     done = subprocess.run(argv, cwd=REPO, env=_sim_env(), capture_output=True, text=True)
+    # 3. read each result back; the batch names its run dir <stem><suffix>
     results = {}
     for program in programs:
         stem = pathlib.Path(program.c_sources[0]).stem
@@ -208,13 +222,16 @@ def run_in_simulation(system: FpgaSystem, options: SimOptions = SimOptions()) ->
       every other under generated/sim/sim_build, keyed by the emitted RTL
     - the result lands in <run_dir>/sim, apart from a board run of the same program
     """
+    # 1. results go to <run_dir>/sim
     out_dir = os.path.join(system.program.run_dir, "sim")
     os.makedirs(out_dir, exist_ok=True)
-    sim_system = SimSystem(name        = system.program.name,
+    # 2. a one-program SimSystem whose cocotb test is the bridge test, given the spec by env
+    sim_system =SimSystem(name        = system.program.name,
                            run_dir     = out_dir,
                            rtl_dir     = system.machine.rtl_dir,
                            test_module = BRIDGE_TEST_MODULE,
                            test_case   = BRIDGE_TEST_CASE,
                            env         = {SPEC_ENV: system.program.spec_path, OUT_DIR_ENV: out_dir},
                            c_sources   = system.program.c_sources)
+    # 3. the sim runner compiles (or reuses) the simulator and runs it
     return run_sim_system(sim_system, options)
