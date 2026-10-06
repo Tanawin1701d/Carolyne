@@ -1,4 +1,4 @@
-# THE EXPERIMENT — every test program on RV32IM and on MIPS32, in the simulator
+# THE EXPERIMENT: every test program on RV32IM and on MIPS32, in the simulator
 # AND on the board, compared and saved. Each step is the Python call the CLIs
 # make, written out in order so a reader can copy any one of them.
 #
