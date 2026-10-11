@@ -1,31 +1,35 @@
-# ExecUnitO3 — the function-unit complex behind ONE reservation station: it
-# takes the station's issued entry and runs the ISA units' exec_stage bodies
-# over it (the natural-Kathryn semantics, isa/exec_unit.py).
+# ExecUnitO3: the execution complex behind one reservation station. It takes
+# the station's issued entry and runs one ISA unit's exec_stage bodies on it.
 #
-# ONE COMPLEX PER UNIT OF A STATION. `unit_idx` picks all three at once: the
-# unit this complex runs, the issue slot it reads (rsv.exec_src[unit_idx]) and
-# the arbiter it hands back to rsv.connect.
+#   station ─ exec_src ─> stage 0 ─ zync ─> stage 1 ─ zync ─> ... ─> last stage
+#                         pip(exec_meta)    pip(s1)                  wb_reg, declare_fin
 #
-# THE STAGE CHAIN (`transfer`): one pip per stage, and stage 0's arbiter IS
-# `exec_meta` — the arb the station's build_issue zyncs against, so a busy
-# complex stalls the station. A body runs INSIDE its stage's pip and writes
-# its own record; the api (exec_unit_api.py) carries the next stage's arbiter
-# and proxies declare_*/wb_reg back onto this complex.
+# - one complex per unit of a station: `unit_idx` picks the unit, the issue
+#   slot it reads (rsv.exec_src[unit_idx]) and the arb it gives rsv.connect
+# - stage 0's arb IS exec_meta, the one the station zyncs on: a busy complex
+#   stalls the station
+# - a body gets an api per stage (exec_unit_api.py); its declare_* and wb_reg
+#   calls land on this complex
+#
+# | part              | file                  |
+# | ----------------- | --------------------- |
+# | stored resolution | exec_unit_resolve.py  |
+# | the body's api    | exec_unit_api.py      |
 
-from kathryn import *
-from carolyne.debug.sim import BranchResolveProbe, KarrayProbe, PipStatusProbe
+from kathryn        import *
 from kathryn.signal import to_ref
 
-from carolyne.uarch.o3.bp.bp_base import BpOutcome
-from carolyne.uarch.o3.bp.bp_helper import bp_field_names
-from carolyne.uarch.o3.common_field import (IS_SPEC, NPC, PC, ROB_DES_IDX, SPEC_TAG,
-                                            SpecLane)
-from carolyne.uarch.o3.config import CPUO3_Config, RsvSpec, rsv_type_fields
-from carolyne.uarch.o3.exec_unit_api import ExecUnitApiO3
-from carolyne.uarch.o3.operand_field import PR_IDX, field_name
-from carolyne.uarch.o3.rsv_helper import station_atm_operands
-from carolyne.uarch.o3.priority import PRI_SUC_PRED
-from carolyne.uarch.o3.rsv import RsvBase, RsvBypass
+from carolyne.debug.sim                  import BranchResolveProbe, KarrayProbe, PipStatusProbe
+from carolyne.uarch.o3.bp.bp_base        import BpOutcome
+from carolyne.uarch.o3.bp.bp_helper      import bp_field_names
+from carolyne.uarch.o3.common_field      import IS_SPEC, NPC, PC, ROB_DES_IDX, SPEC_TAG, SpecLane
+from carolyne.uarch.o3.config            import CPUO3_Config, RsvSpec, rsv_type_fields
+from carolyne.uarch.o3.exec_unit_api     import ExecUnitApiO3
+from carolyne.uarch.o3.exec_unit_resolve import BranchResolve
+from carolyne.uarch.o3.operand_field     import PR_IDX, field_name
+from carolyne.uarch.o3.priority          import PRI_SUC_PRED
+from carolyne.uarch.o3.rsv               import RsvBase, RsvBypass
+from carolyne.uarch.o3.rsv_helper        import station_atm_operands
 
 
 class ExecUnitO3(Module):
@@ -45,77 +49,48 @@ class ExecUnitO3(Module):
         if rsv.rsv_spec is not rsv_spec:
             raise ValueError(
                 f"ExecUnitO3 '{rsv_spec.label}': the station was built from a "
-                f"DIFFERENT spec ('{rsv.rsv_spec.label}') — the complex and its "
+                f"different spec ('{rsv.rsv_spec.label}'); the complex and its "
                 f"station must read one spec, or their unit sets disagree")
         if not 0 <= unit_idx < len(rsv_spec.exec_unit):
             raise ValueError(
                 f"ExecUnitO3 '{rsv_spec.label}': unit_idx {unit_idx} names no "
-                f"unit of a station feeding {len(rsv_spec.exec_unit)} — one "
-                f"complex per unit, by position")
+                f"unit of a station feeding {len(rsv_spec.exec_unit)}")
 
         self.config    = config
         self.rsv       = rsv
         self.rsv_spec  = rsv_spec
-        # Which unit of the station this complex is: it runs that unit, reads
-        # that unit's issue slot, and gives back that unit's arbiter.
         self.unit_idx  = unit_idx
         self.exec_unit = rsv_spec.exec_unit[unit_idx]
-        self.label     = name or (f"exu_{rsv_spec.label.replace('/', '_')}"
-                                  f"_{unit_idx}")
-        # The dest slots a squash rolls back: rename booked a physical register
-        # for each, so each has a pointer to restore. The STATION's set, not
-        # the core's — a slot the entry has no field for cannot be read.
+        self.label     = name or f"exu_{rsv_spec.label.replace('/', '_')}_{unit_idx}"
+        # the dest slots a squash rolls back; the station's set, since only
+        # those have a field in the record
         self.arch_dest_atm_oprs = tuple(
             atm_opr for atm_opr in station_atm_operands(config.isa, rsv_spec)
             if atm_opr.is_dest and atm_opr.has_arch)
-        # The top core module, from connect(). Underscored: it is a BACK
-        # reference, and the sim manifest walks public module attributes —
-        # a public ancestor ref would read as an attribute cycle.
-        self._core     = None
-        # Set by declare_mis_pred / declare_suc_pred: this complex is the
-        # fan-out's caller, so on_mis_pred / on_suc_pred exclude it (the
-        # declaring branch itself must finish untouched).
-        self._declared_mis_pred = False
-        self._dbg_mis_pred = None        # what dbg_probes publishes, when declared
-        self._dbg_redirect = None
-        self._dbg_suc_pred = None
-        self._declared_suc_pred = False
+        self._core    = None   # from connect(); underscored: the manifest walks public attributes
+        self._resolve = None   # BranchResolve, built by the first declare
 
-        # A unit's `needs` may name record fields its body reads (pc/npc) —
-        # the station KIND is what carries them, so a kind without them
-        # would give the body a field that does not exist.
-        kind_fields = {field for field, _ in
-                       rsv_type_fields(rsv_spec.rsv_type, config.pc_width)}
+        # a unit needing pc/npc must sit on a station kind whose entries carry them
+        kind_fields = {field for field, _ in rsv_type_fields(rsv_spec.rsv_type, config.pc_width)}
         for facility in (PC, NPC):
             if facility in self.exec_unit.needs and facility not in kind_fields:
                 raise ValueError(
-                    f"ExecUnitO3 '{rsv_spec.label}': unit "
-                    f"'{self.exec_unit.name}' needs '{facility}', but station "
-                    f"kind {rsv_spec.rsv_type.name} carries "
-                    f"{sorted(kind_fields) or 'no pc fields'} — pick a kind "
-                    f"whose entries have it")
+                    f"ExecUnitO3 '{rsv_spec.label}': unit '{self.exec_unit.name}' "
+                    f"needs '{facility}', but station kind {rsv_spec.rsv_type.name} "
+                    f"carries {sorted(kind_fields) or 'no pc fields'}")
 
         super().__init__()
 
     @init
     def com_declare(self):
-        # The issue handshake: the arbiter the station's build_issue zyncs
-        # against, so a complex that does not take the entry stalls the
-        # station rather than dropping it. Who calls build_issue with it,
-        # and when, is still open.
-        self.exec_meta = PipCon(name=f"{self.label}_exec")
-
-        # One arbiter per stage, stage 0's BEING the issue arb — the station
-        # passes the entry straight into the first stage's pip.
+        # one arb per stage; stage 0's is the issue arb the station zyncs on
+        self.exec_meta   = PipCon(name=f"{self.label}_exec")
         self.stage_metas = [self.exec_meta] + [
             PipCon(name=f"{self.label}_s{stage_idx}")
             for stage_idx in range(1, self.exec_unit.stage_cnt)]
 
-        # One per stage TRANSITION: the speculation pair as it will land in
-        # the next stage, and the place on_suc_pred OVERRIDES it. The api
-        # drives it from `src`; a tag resolving in that cycle is masked here,
-        # BEFORE the clocked copy — src's own register only clears at the
-        # edge, so a copy straight off it would carry a resolved tag.
+        # one per stage hop: the speculation pair on its way into the next
+        # stage, where on_suc_pred can still clear it before the edge
         self.spec_overriders = [
             SpecLane(HwComponentType.WIRE, (1,), f"{self.label}_spec_ovr{stage_idx}",
                      spec_tag=self.config.sptag_len)
@@ -124,145 +99,93 @@ class ExecUnitO3(Module):
         self._declare_stage_chain()
 
     def _declare_stage_chain(self):
-        """Every stage's record and its api, before any flow block exists.
+        """Every stage's record and api, built before any flow block.
 
-        - stage 0's record is the station's issued entry, which the station
-          already declared; each later one comes from the UNIT, since only the
-          body knows what data it carries (ExecUnitBase.declare_stage_src)
-        - a unit is a frozen description object and one instance may back two
-          complexes (two ALUs on a station), so the records are held HERE
-        - one api per stage, built here and reused by transfer: it carries the
-          stage's arbiter, its src and its des, and `next_stage_fields` widens
-          the set zync_with_next_stage transfers — which only holds if the
-          declaring api and the running api are the SAME object
+            stage_srcs  [exec_src,  s1 record,  s2 record]     s1.. come from the unit
+            stage_apis  [api0,      api1,       api2     ]     api k: next arb k+1, src k, des k+1
+
+        - the records live here, not on the unit: one unit may back two complexes
+        - transfer reuses these apis: next_stage_fields widens what the same
+          api later carries
         """
         last = self.exec_unit.stage_cnt - 1
         self.stage_srcs = [self.rsv.exec_src[self.unit_idx]]
         self.stage_apis = []
         for stage_idx in range(self.exec_unit.stage_cnt):
-            # the api carries the NEXT stage's arb itself; None on the last
             next_meta = self.stage_metas[stage_idx + 1] if stage_idx != last else None
-            api       = ExecUnitApiO3(self, stage_idx, next_meta,
-                                      self.stage_srcs[stage_idx])
+            api       = ExecUnitApiO3(self, stage_idx, next_meta, self.stage_srcs[stage_idx])
             self.stage_apis.append(api)
             if stage_idx == last:
                 break
-            des = self.exec_unit.declare_stage_src(stage_idx + 1,
-                                                   self.stage_srcs[stage_idx], api)
+            des = self.exec_unit.declare_stage_src(stage_idx + 1, self.stage_srcs[stage_idx], api)
             if not isinstance(des, Karray):
                 raise ValueError(
-                    f"ExecUnitO3 '{self.label}': declare_stage_src({stage_idx + 1}) "
-                    f"of unit '{self.exec_unit.name}' returned "
-                    f"{type(des).__name__} — a stage record is a register Karray")
+                    f"ExecUnitO3 '{self.label}': declare_stage_src({stage_idx + 1}) of unit "
+                    f"'{self.exec_unit.name}' returned {type(des).__name__}; a stage "
+                    f"record is a register Karray")
             if des is self.stage_srcs[stage_idx]:
                 raise ValueError(
-                    f"ExecUnitO3 '{self.label}': declare_stage_src({stage_idx + 1}) "
-                    f"of unit '{self.exec_unit.name}' returned the PREVIOUS stage's "
-                    f"record — each stage holds its own")
+                    f"ExecUnitO3 '{self.label}': declare_stage_src({stage_idx + 1}) of unit "
+                    f"'{self.exec_unit.name}' returned the previous stage's record; "
+                    f"each stage holds its own")
             api.des = des
             self.stage_srcs.append(des)
 
-
     def connect(self, core):
-        """The top core module — where the declare fan-outs land."""
+        """The top core module, where the declare fan-outs land."""
         self._core = core
 
-    # --- what the api's declare_*/wb_reg land on ----------------------------------
-    # Loud stubs: a body reaching one today fails at elaboration rather than
-    # silently building no hardware; each lands with its machinery.
+    # ---- what the api's declare_* and wb_reg land on ------------------------------
 
     def declare_mis_pred(self, src, stage_idx: int, dyn_cond=None, next_pc=None):
-        """A stage resolved a prediction WRONG under `dyn_cond`: the whole core
-        rolls back, keyed by the record this stage carries, and the front end
-        restarts at `next_pc`.
-
-        - the zif scopes the squash: every flush takes `dyn_cond` as its gate
-        - `next_pc` is where execution really continues. Only the ISA body
-          knows it, so it is required here: clearing the pipeline without it
-          leaves fetch's pc wherever it had run to and the core executes the
-          wrong instructions
-        - this complex EXCLUDES ITSELF from the per-stage kill: the branch is
-          older than everything it kills and still has to report
-        - every ARCH dest the station carries is named: decode forces a
-          branch's dest slots active, so rename allocated for all of them and
-          a branch that writes nothing still rolls its class's PRF back
-        """
+        """A branch resolved wrong under `dyn_cond`: the core rolls back one
+        cycle later and fetch restarts at `next_pc` (BranchResolve)."""
         if dyn_cond is None:
-            raise ValueError(
-                f"ExecUnitO3 '{self.label}'.declare_mis_pred: needs the "
-                f"mispredict condition — an unconditional squash is nonsense")
+            raise ValueError(f"ExecUnitO3 '{self.label}'.declare_mis_pred: needs the "
+                             f"mispredict condition")
         if next_pc is None:
-            raise ValueError(
-                f"ExecUnitO3 '{self.label}'.declare_mis_pred: needs the pc "
-                f"execution continues at — a squash with no redirect leaves "
-                f"fetch wherever it had run to")
-        self._declared_mis_pred = True
-        self._dbg_mis_pred = dyn_cond          # published by dbg_probes
-        self._dbg_redirect = next_pc
-        dest_renames = []
-        for atm_opr in self.arch_dest_atm_oprs:
-            phy_idx = to_ref(getattr(src[0], field_name(PR_IDX, atm_opr)))
-            dest_renames.append((atm_opr, phy_idx))
-        # only a LIVE µop may roll the machine back: a stale record's rollback
-        # rebooks every pointer from state the machine has abandoned
-        with zif(dyn_cond):
-            self._core.on_mis_pred(to_ref(getattr(src[0], SPEC_TAG)),
-                                   to_ref(getattr(src[0], ROB_DES_IDX)),
-                                   to_ref(next_pc),
-                                   dest_renames)
+            raise ValueError(f"ExecUnitO3 '{self.label}'.declare_mis_pred: needs the pc "
+                             f"execution continues at, or fetch stays on the wrong path")
+        self._branch_resolve(src).store_mis_pred(dyn_cond, next_pc)
 
     def declare_suc_pred(self, src, dyn_cond=None):
-        """A stage resolved a prediction CORRECTLY under `dyn_cond`: the tag
-        stops covering anything, core-wide (CoreO3.on_suc_pred).
-
-        - `src`'s SPEC_TAG is the branch's own tag, ROB_DES_IDX its entry —
-          the api passes its stage's record in, exactly the declare_mis_pred
-          shape
-        - this complex EXCLUDES ITSELF from the stage mask (see
-          on_suc_pred), the declare_mis_pred symmetry
-        """
+        """A branch resolved right under `dyn_cond`: one cycle later its tag
+        stops covering anything (CoreO3.on_suc_pred)."""
         if dyn_cond is None:
-            raise ValueError(
-                f"ExecUnitO3 '{self.label}'.declare_suc_pred: needs the "
-                f"resolve condition — an unconditional resolve is nonsense")
-        self._declared_suc_pred = True
-        self._dbg_suc_pred = dyn_cond          # published by dbg_probes
-        # a stale resolve frees a tag that is no longer (or is newly) booked
-        with zif(dyn_cond):
-            self._core.on_suc_pred(to_ref(getattr(src[0], SPEC_TAG)),
-                                   to_ref(getattr(src[0], ROB_DES_IDX)))
+            raise ValueError(f"ExecUnitO3 '{self.label}'.declare_suc_pred: needs the "
+                             f"resolve condition")
+        self._branch_resolve(src).store_suc_pred(dyn_cond)
+
+    def _branch_resolve(self, src) -> BranchResolve:
+        if self._resolve is None:
+            self._resolve = BranchResolve(self.config, self.label, src, self.arch_dest_atm_oprs)
+        return self._resolve
 
     def declare_br_outcome(self, src, taken, target):
-        """A branch resolved: the predictor learns (pc, taken, target) with the
+        """A branch resolved: the predictor learns (pc, taken, target) and the
         bp record the branch station carried.
 
-        - built in the caller's scope, so it fires on the stage's grant
-        - LIMIT: pc and the record are read off `src`, which only stage 0
-          (a branch station's entry) carries; a later stage's record would
-          need them in next_stage_fields
+        - LIMIT: pc and the record are read off `src`, so this works on
+          stage 0 of an RSV_BRANCH station only
         """
         missing = [name for name in (PC, *bp_field_names(self.config))
                    if not hasattr(src[0], name)]
         if missing:
             raise ValueError(
                 f"ExecUnitO3 '{self.label}'.declare_br_outcome: the stage record "
-                f"has no {', '.join(missing)} — declare the outcome where the "
-                f"branch station's entry is (stage 0 of an RSV_BRANCH station)")
-        meta = {name: to_ref(getattr(src[0], name))
-                for name in bp_field_names(self.config)}
+                f"has no {', '.join(missing)}; declare the outcome on stage 0 of "
+                f"an RSV_BRANCH station")
+        meta = {name: to_ref(getattr(src[0], name)) for name in bp_field_names(self.config)}
         self._core.bp.on_resolve(BpOutcome(to_ref(getattr(src[0], PC)),
                                            to_ref(taken), to_ref(target), meta))
 
     def declare_fin(self, src, stage_idx: int):
-        """A µop finished: report it against the `rob_des_idx` in `src`."""
+        """A µop finished: report it to its ROB entry."""
         self._core.rob.on_write_back(to_ref(getattr(src[0], ROB_DES_IDX)))
 
     def wb_reg(self, src, stage_idx: int, atm_opr, value):
-        """Write `value` back to the dest's promised register: the class's PRF
-        entry plus the bypass broadcast to every station.
-
-        - it respects the enclosing scope, so a gated-out cycle writes nothing
-        """
+        """Write `value` to the dest's promised register and bypass it to every
+        station; the enclosing scope gates both."""
         pr_idx = to_ref(getattr(src[0], field_name(PR_IDX, atm_opr)))
         self._core.reg_arch_mng.prf(atm_opr.reg_file).on_wb(pr_idx, value)
 
@@ -270,57 +193,49 @@ class ExecUnitO3(Module):
         for rsv in self._core.rsvs:
             rsv.on_bypass(bypass)
 
+    # ---- the load/store queue and the data memory ----------------------------------
 
-    # --- the load/store queue (api forwards, the declare pattern) ------------------
     def lsq_is_full(self):
         return self._core.store_buf.is_full()
 
-    def lsq_push_meta(self):
-        """The store buffer's push arb — SHUT for a squash cycle."""
-        return self._core.store_buf.push_meta
+    def lsq_push_open(self):
+        """1 when the store buffer takes a push this cycle; 0 in a squash cycle."""
+        return self._core.store_buf.push_open
 
     def mem_index(self, mem_addr_wo_static_bit):
-        """A body's WORD address, cut to the index the data memory has.
-
-        - a body computes in the ISA's width and cannot know the machine's
-          memory size, so the engine takes the low bits — a slice, not a mask
-        """
+        """A body's word address cut to the data memory's index width (a slice)."""
         width = self._core.data_read_port.addr_meta.total_var_width
         return to_ref(mem_addr_wo_static_bit)[width - 1, 0]
 
     def lsq_push_store(self, src, mem_addr_wo_static_bit, data):
-        # The speculation pair is in the stage record; the engine reads it,
-        # so a body cannot push a store that forgets its tags.
-        self._push_store(src, mem_addr_wo_static_bit, data)
-
-    def _push_store(self, src, mem_addr_wo_static_bit, data):
+        # the speculation pair comes from the record, so a body cannot forget it
         self._core.store_buf.on_new_entry(to_ref(getattr(src[0], IS_SPEC)),
                                           to_ref(getattr(src[0], SPEC_TAG)),
                                           self.mem_index(mem_addr_wo_static_bit),
                                           data)
 
     def lsq_search(self, mem_addr_wo_static_bit):
-        return self._core.store_buf.search_newest(
-            self.mem_index(mem_addr_wo_static_bit))
+        return self._core.store_buf.search_newest(self.mem_index(mem_addr_wo_static_bit))
 
-    def mem_read(self, mem_addr_wo_static_bit):
-        # The core's one load path: drive its index here, in the body's own
-        # scope, and read the word back in the same cycle (PortTiming.LEVEL).
+    def mem_read_request(self, mem_addr_wo_static_bit):
+        # the ask fires in the body's scope, so a stalled stage keeps its address
         port = self._core.data_read_port
         port.bind_addr(self.mem_index(mem_addr_wo_static_bit))
-        return port.read()
+        port.ask()
 
-    # --- the stage chain ----------------------------------------------------------
+    def mem_read_data(self):
+        # the word the last ask named, one cycle later
+        return self._core.data_read_port.read()
+
+    # ---- the stage chain -------------------------------------------------------------
+
     @flow
     def transfer(self):
-        """The unit's pipeline: one pip per stage, the body called inside it.
+        """One pip per stage with the unit's body inside, then the stored
+        branch resolution, outside every stage.
 
-        - the records and the apis already exist (_declare_stage_chain), so
-          this only RUNS the chain: stage k gets stage_srcs[k] and the api
-          built for it
-        - the body places its own transfer (api.zync_with_next_stage), which
-          yields the next record; a stage RETURNS NOTHING, and that is
-          enforced here
+        - a stage writes the next record through api.zync_with_next_stage and
+          returns None; anything else is refused
         """
         for stage_idx in range(self.exec_unit.stage_cnt):
             with pip(self.stage_metas[stage_idx], auto_restart=True):
@@ -330,24 +245,21 @@ class ExecUnitO3(Module):
             if returned is not None:
                 raise ValueError(
                     f"ExecUnitO3 '{self.label}': stage {stage_idx} of unit "
-                    f"'{self.exec_unit.name}' returned a record — every stage "
-                    f"record is declared up front, so a stage WRITES the next "
-                    f"one (api.zync_with_next_stage) and returns None")
+                    f"'{self.exec_unit.name}' returned a record; a stage writes the "
+                    f"next one (api.zync_with_next_stage) and returns None")
+        if self._resolve is not None:
+            self._resolve.fire(self._core)
 
-    # --- mispredict ---------------------------------------------------------------
+    # ---- speculation -------------------------------------------------------------------
+
     def on_mis_pred(self, fix_tag):
-        """Kill every in-flight µop speculating under a killed tag, per stage.
+        """Kill every in-flight µop under a killed tag, stage by stage.
 
-        - selective: each stage's arb is flushed under a zif on THAT stage's
-          own tag, so an older µop the branch never covered keeps running
-        - clearing the grant is the whole kill: the pip's state IS the valid bit
-        - call AFTER transfer on a multi-stage unit; the records exist only
-          once the chain is built
-        - the complex that DECLARED the squash returns at once — that branch is
-          older than everything the kill covers and must still report its fin
+            stage k:  zif(record k is_spec & (spec_tag & fix_tag) != 0)  ─>  flush arb k
+
+        - an older µop the branch never covered keeps running
+        - flushing the arb is the whole kill: the pip's state is the valid bit
         """
-        if self._declared_mis_pred:
-            return
         for stage_idx, stage_meta in enumerate(self.stage_metas):
             if stage_idx == 0:
                 src      = self.rsv.exec_src[self.unit_idx][0]
@@ -355,59 +267,38 @@ class ExecUnitO3(Module):
             else:
                 src      = self.stage_srcs[stage_idx][0]
                 squashed = (to_ref(getattr(src, IS_SPEC))
-                            & ((to_ref(getattr(src, SPEC_TAG)) & fix_tag)
-                               != 0))
+                            & ((to_ref(getattr(src, SPEC_TAG)) & fix_tag) != 0))
             with zif(squashed):
                 stage_meta.flush()
 
     def on_suc_pred(self, suc_tag):
-        """A prediction resolved correctly: every stage record stops
-        speculating under the resolved tag.
+        """A branch resolved right: clear its tag from every stage record.
 
-        - `suc_tag` is ONE-HOT (tag_gen), so an entry is under it or
-          it does not: the test is `is_spec & spec_tag == suc_tag` and
-          the write is a flat 0. NOT on_mis_pred's shape, where
-          `fix_tag` is a multi-tag kill MASK needing the overlap test
-        - stage 0 is the station's exec_src; later stages carry
-          IS_SPEC/SPEC_TAG on the body's records (the api's transfer)
-        - the complex that DECLARED the resolve returns immediately,
-          the on_mis_pred symmetry
-        - LIMIT: a record hopping stages in the resolve cycle copies
-          its tag BEFORE the mask lands — the race on_issue solves
-          with substitution; the api's transfer learns the same
-        - REFUSES if a later stage's record is not built yet: stage 0 is
-          always safe (the station drives exec_src), but the rest need this
-          complex's transfer to have run first, and skipping them would
-          leave those stages with no tag-clearing hardware at all
+            stage hop k:  spec_ovr k   = 0   (the pair moving this cycle)
+            stage k:      record k     = 0   (the pair already there)
+
+        - `suc_tag` is one-hot, so the test is `spec_tag == suc_tag`
+        - LIMIT: a record hopping stages in this cycle copies its tag before
+          the clear lands
         """
-        if self._declared_suc_pred:
-            return
-        # The pair moving to the next stage this cycle: masked on the
-        # overrider, since the record it lands in is written at the edge.
-        # The guard reads the STAGE SOURCE, never the overrider itself —
-        # overrider k carries stage k's pair, and a guard built from the wire
-        # being driven is a combinational loop.
+        # the guard reads the stage record, never the overrider it drives
         for stage_idx, spec_ovr in enumerate(self.spec_overriders):
             src_row = self.stage_srcs[stage_idx][0]
             with priority(PRI_SUC_PRED):
-                with zif(getattr(src_row, IS_SPEC)
-                         & (getattr(src_row, SPEC_TAG) == suc_tag)):
+                with zif(getattr(src_row, IS_SPEC) & (getattr(src_row, SPEC_TAG) == suc_tag)):
                     spec_ovr[0] *= {IS_SPEC: 0, SPEC_TAG: 0}
-
-        # iterately modify the src, incase it multicycle execution
 
         for stage_idx in range(self.exec_unit.stage_cnt):
             src = self.stage_srcs[stage_idx][0]
-            with zif(getattr(src, IS_SPEC)
-                     & (getattr(src, SPEC_TAG) == suc_tag)):
+            with zif(getattr(src, IS_SPEC) & (getattr(src, SPEC_TAG) == suc_tag)):
                 src |= {SPEC_TAG: 0, IS_SPEC: 0}
 
     @dbg
     def dbg_probes(self):
         self.dbg_stage_metas = [PipStatusProbe(meta) for meta in self.stage_metas]   # [0] is the issue arb
-        # stage 0's record is the station's exec_src, which the station exposes
-        self.dbg_stage_srcs  = [KarrayProbe(src) for src in self.stage_srcs[1:]]
-        # The resolution this complex declared, if it declares one: the branch
-        # complex is where a squash starts, so this is where it can be watched.
-        self.dbg_resolve = BranchResolveProbe(self._dbg_mis_pred, self._dbg_redirect,
-                                              self._dbg_suc_pred)
+        self.dbg_stage_srcs  = [KarrayProbe(src) for src in self.stage_srcs[1:]]    # stage 0 is the station's
+        resolve = self._resolve
+        self.dbg_resolve = BranchResolveProbe(
+            resolve.mis_pend    if resolve and resolve.has_mis else None,
+            resolve.redirect_pc if resolve and resolve.has_mis else None,
+            resolve.suc_pend    if resolve and resolve.has_suc else None)

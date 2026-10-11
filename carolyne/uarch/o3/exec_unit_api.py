@@ -56,7 +56,7 @@ class ExecUnitApiO3(ExecUnitApi):
         self.exu.declare_br_outcome(self.src, taken, target)
 
     @contextmanager
-    def zync_with_next_stage(self, src, cond=None, with_lsq=False):
+    def zync_with_next_stage(self, src, cond=None, with_lsq=None):
         """The handshake into the next stage, held in a `with` block.
 
         - `src` is the record this stage received; `des` is YIELDED, the
@@ -67,11 +67,15 @@ class ExecUnitApiO3(ExecUnitApi):
           declared, so `des` must carry each of them
         - `cond` gates the handshake: the (PipCon, cond) bind the station
           issue already uses, so the µop STALLS here while it is low
-        - `with_lsq` binds the store buffer's push arb TOO, under mode="all":
-          both must grant, so a stage that pushes a store cannot move in a
-          cycle the buffer refuses. The bind carries NO condition of its own —
-          mode="all" ANDs every bind's `ack & cond`, so a conditional bind
-          would hang the µops it excludes (a load, here)
+        - `with_lsq` is the 1-bit "this µop pushes a store" condition: only
+          then does the hop also wait for the buffer's push gate, so a load
+          is not held in a squash cycle
+
+              go = cond & (~with_lsq | push_open)
+
+          ONE arb, not a second bind under mode="all": an all-mode zync may
+          enter the next stage when only some binds grant, which re-runs that
+          stage with its OLD record
         - the LAST stage has no next: completion is declare_fin/wb_reg's
           business
         """
@@ -81,10 +85,15 @@ class ExecUnitApiO3(ExecUnitApi):
                 f"unit — there is no next stage to sync with; completion is "
                 f"declare_fin/wb_reg's business")
         des  = self.des
+        if isinstance(with_lsq, bool):
+            raise TypeError(
+                f"ExecUnitApiO3: with_lsq is the µop's push condition (a 1-bit "
+                f"signal, e.g. the store guard), not {with_lsq}")
+        if with_lsq is not None:
+            push_ok = ~with_lsq | self.exu.lsq_push_open()   # only a pushing µop waits on the gate
+            cond    = push_ok if cond is None else (cond & push_ok)
         bind = self.pip_con if cond is None else (self.pip_con, cond)
-        if with_lsq:
-            bind = [bind, self.exu.lsq_push_meta()]
-        with zync(bind, mode="all" if with_lsq else "any"):
+        with zync(bind):
             # At PRI_ISSUE, and the body's writes with it: a record LANDING in
             # a stage must beat on_suc_pred's mask, which is computed from
             # that stage record's PREVIOUS contents. Same rung, same reason,
@@ -148,5 +157,8 @@ class ExecUnitApiO3(ExecUnitApi):
     def lsq_search(self, mem_addr_wo_static_bit):
         return self.exu.lsq_search(mem_addr_wo_static_bit)
 
-    def mem_read(self, mem_addr_wo_static_bit):
-        return self.exu.mem_read(mem_addr_wo_static_bit)
+    def mem_read_request(self, mem_addr_wo_static_bit):
+        self.exu.mem_read_request(mem_addr_wo_static_bit)
+
+    def mem_read_data(self):
+        return self.exu.mem_read_data()
